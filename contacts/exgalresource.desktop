@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=Exchange Global Address List
+Comment=Akonadi resource that allows to access an Exchange Global Address List
+Type=AkonadiResource
+Exec=akonadi_exgal_resource
+Icon=text-directory
+
+X-Akonadi-MimeTypes=text/directory,application/x-vnd.kde.contactgroup
+X-Akonadi-Capabilities=Resource
+X-Akonadi-Identifier=akonadi_exgal_resource

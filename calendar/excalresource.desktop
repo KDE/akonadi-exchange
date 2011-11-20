@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=Exchange Calendar
+Comment=Akonadi resource that allows to access an Exchange calendar
+Type=AkonadiResource
+Exec=akonadi_excal_resource
+Icon=text-calendar
+
+X-Akonadi-MimeTypes=text/calendar,application/x-vnd.akonadi.calendar.event
+X-Akonadi-Capabilities=Resource
+X-Akonadi-Identifier=akonadi_excal_resource
