@@ -1,0 +1,16 @@
+Install
+--------
+For building the source the following development packaged are needed:
+*) libmapi-dev
+   for native access to MS Exchange
+*) kdepim-dev
+   for access to akonadi and KDE's PIM suite
+
+Usage
+-----
+Adding an Exchange calendar:
+Open "kontact", switch to the calendar view. Right-click in the lower left list and select "Add Calendar..."
+
+Adding contacts from the Exchange Global Address List:
+Open "kontact", switch to the contacts view. Right-click in the left list and select "Add Address Book..."
+
