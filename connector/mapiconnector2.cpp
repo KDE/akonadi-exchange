@@ -405,14 +405,19 @@ bool MapiConnector2::fetchCalendarData(mapi_id_t folderID, mapi_id_t messageID, 
 		Binary_r* binDataRecurrency = (Binary_r*)find_mapi_SPropValue_data(&properties_array, PidLidAppointmentRecur);
 
 		if (recurrenceType && (*recurrenceType) > 0x0) {
-			TALLOC_CTX *mem_ctx;
-			mem_ctx = talloc_named(NULL, 0, "for recurrency");
-			RecurrencePattern* pattern = get_RecurrencePattern(mem_ctx, binDataRecurrency);
-			debugRecurrencyPattern(pattern);
+			if (binDataRecurrency != 0x0) {
+				TALLOC_CTX *mem_ctx;
+				mem_ctx = talloc_named(NULL, 0, "for recurrency");
+				RecurrencePattern* pattern = get_RecurrencePattern(mem_ctx, binDataRecurrency);
+				debugRecurrencyPattern(pattern);
 
-			data.recurrency.setData(pattern);
+				data.recurrency.setData(pattern);
 
-			talloc_free(mem_ctx);
+				talloc_free(mem_ctx);
+			} else {
+				// TODO This should not happen. PidLidRecurrenceType says this is a recurring event, so why is there no PidLidAppointmentRecur???
+				qDebug() << "missing recurrencePattern in message"<<messageID<<"in folder"<<folderID;
+			}
 		}
 
 		data.fid = QString::number(folderID);
