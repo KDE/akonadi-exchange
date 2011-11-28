@@ -1,11 +1,13 @@
 [Desktop Entry]
 Name=Exchange Calendar
+Name[es]=Calendario de Exchange
 Name[pt]=Calendário do Exchange
 Name[pt_BR]=Calendário do Exchange
 Name[sv]=Exchange-kalender
 Name[uk]=Календар Exchange
 Name[x-test]=xxExchange Calendarxx
 Comment=Akonadi resource that allows to access an Exchange calendar
+Comment[es]=Recurso de Akonadi que permite tener acceso a un calendario de Exchange
 Comment[pt]=Recurso do Akonadi que permite aceder a um calendário no Exchange
 Comment[pt_BR]=Recurso do Akonadi que permite acessar um calendário do Exchange
 Comment[sv]=Akonadi-resurs som gör det möjligt att komma åt en Exchange-kalender

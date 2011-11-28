@@ -1,11 +1,13 @@
 [Desktop Entry]
 Name=Exchange Global Address List
+Name[es]=Lista global de direcciones de Exchange
 Name[pt]=Lista de Endereços Global do Exchange
 Name[pt_BR]=Lista de endereço global do Exchange
 Name[sv]=Global Exchange-adresslista
 Name[uk]=Загальний список адрес Exchange
 Name[x-test]=xxExchange Global Address Listxx
 Comment=Akonadi resource that allows to access an Exchange Global Address List
+Comment[es]=Recurso de Akonadi que permite tener acceso a una lista global de direcciones de Exchange
 Comment[pt]=Recurso do Akonadi que permite aceder a uma lista de endereços global no Exchange
 Comment[pt_BR]=Recurso do Akonadi que permite acessar uma lista de endereço global do Exchange
 Comment[sv]=Akonadi-resurs som gör det möjligt att komma åt en global Exchange-adresslista
