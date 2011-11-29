@@ -38,30 +38,24 @@
 using namespace Akonadi;
 
 ExCalResource::ExCalResource( const QString &id )
-  : ResourceBase( id )
+  : ResourceBase( id ),
+  connector( 0 )
 {
 	new SettingsAdaptor( Settings::self() );
 	QDBusConnection::sessionBus().registerObject( QLatin1String( "/Settings" ),
 							Settings::self(), QDBusConnection::ExportAdaptors );
-
-	// initialize the mapi connector
-	connector = new MapiConnector2;
 }
 
 ExCalResource::~ExCalResource()
 {
-	if (connector)
-		delete connector;
+	logoff();
 }
 
 void ExCalResource::retrieveCollections()
 {
 	kDebug() << "retrieveCollections() called";
 
-	emit status(Running, i18n("Logging in to Exchange"));
-	bool ok = connector->login(Settings::self()->profileName());
-	if (!ok) {
-		emit status(Broken, i18n("Unable to login") );
+	if (!logon()) {
 		return;
 	}
 
@@ -95,11 +89,7 @@ void ExCalResource::retrieveItems( const Akonadi::Collection &collection )
 {
 	kDebug() << "retrieveItems() called for collection "<< collection.id();
 
-	// logon to exchange (if needed)
-	emit status(Running, i18n("Logging in to Exchange"));
-	bool ok = connector->login(Settings::self()->profileName());
-	if (!ok) {
-		emit status(Broken, i18n("Unable to login") );
+	if (!logon()) {
 		return;
 	}
 
@@ -185,6 +175,10 @@ void ExCalResource::retrieveItems( const Akonadi::Collection &collection )
 	foreach(Item item, items) {
 		kDebug() << "[Item-Dump] ID:"<<item.id()<<"RemoteId:"<<item.remoteId()<<"Revision:"<<item.revision()<<"ModTime:"<<item.modificationTime();
 	}
+
+	// This seems like a good place to force any subsequent activity
+	// to attempt the login.
+	logoff();
 }
 
 bool ExCalResource::retrieveItem( const Akonadi::Item &itemOrig, const QSet<QByteArray> &parts )
@@ -193,9 +187,9 @@ bool ExCalResource::retrieveItem( const Akonadi::Item &itemOrig, const QSet<QByt
 
 	kDebug() << "retrieveItem() called for item "<< itemOrig.id() << "remoteId:" << itemOrig.remoteId();
 
-	// logon to exchange (if needed)
-	emit status(Running, i18n("Logging in to Exchange"));
-	connector->login(Settings::self()->profileName());
+	if (!logon()) {
+		return false;
+	}
 
 	// find the remoteId of the item and the collection and try to fetch the needed data from the server
 	CalendarData data;
@@ -352,6 +346,25 @@ void ExCalResource::createKCalRecurrency(KCal::Recurrence* rec, const MapiRecurr
 	} 
 }
 
+bool ExCalResource::logon(void)
+{
+	if (!connector) {
+		// logon to exchange (if needed)
+		emit status(Running, i18n("Logging in to Exchange"));
+		connector = new MapiConnector2;
+	}
+	bool ok = connector->login(Settings::self()->profileName());
+	if (!ok) {
+		emit status(Broken, i18n("Unable to login") );
+	}
+	return ok;
+}
+
+void ExCalResource::logoff(void)
+{
+	delete connector;
+	connector = 0;
+}
 
 AKONADI_RESOURCE_MAIN( ExCalResource )
 

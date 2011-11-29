@@ -51,7 +51,20 @@ protected:
 
 private:
 	void createKCalRecurrency(KCal::Recurrence* rec, const MapiRecurrencyPattern& pattern);
-	
+
+	/**
+	 * Logon to Exchange. A successful login is cached and subsequent calls
+	 * short-circuited.
+	 *
+	 * @return True if the login attempt succeeded.
+	 */
+	bool logon(void);
+
+	/**
+	 * Logout from Exchange.
+	 */
+	void logoff(void);
+
 	MapiConnector2* connector;
 };
 

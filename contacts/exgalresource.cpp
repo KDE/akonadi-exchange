@@ -34,20 +34,17 @@
 using namespace Akonadi;
 
 exgalResource::exgalResource( const QString &id )
-  : ResourceBase( id )
+  : ResourceBase( id ),
+  connector( 0 )
 {
 	new SettingsAdaptor( Settings::self() );
 	QDBusConnection::sessionBus().registerObject( QLatin1String( "/Settings" ),
 							Settings::self(), QDBusConnection::ExportAdaptors );
-
-	// initialize the mapi connector
-	connector = new MapiConnector2;
 }
 
 exgalResource::~exgalResource()
 {
-	if (connector)
-		delete connector;
+	logoff();
 }
 
 void exgalResource::retrieveCollections()
@@ -77,8 +74,9 @@ void exgalResource::retrieveItems( const Akonadi::Collection &collection )
 {
 	Q_UNUSED( collection );
 
-	emit status(Running, i18n("Logging in to Exchange"));
-	connector->login(Settings::self()->profileName());
+	if (!logon()) {
+		return;
+	}
 
 	Item::List items;
 
@@ -109,6 +107,10 @@ void exgalResource::retrieveItems( const Akonadi::Collection &collection )
 	}
 
 	itemsRetrieved(items);
+
+	// This seems like a good place to force any subsequent activity
+	// to attempt the login.
+	logoff();
 }
 
 bool exgalResource::retrieveItem( const Akonadi::Item &item, const QSet<QByteArray> &parts )
@@ -181,6 +183,26 @@ void exgalResource::itemRemoved( const Akonadi::Item &item )
 
   // NOTE: There is an equivalent method for collections, but it isn't part
   // of this template code to keep it simple
+}
+
+bool exgalResource::logon(void)
+{
+	if (!connector) {
+		// logon to exchange (if needed)
+		emit status(Running, i18n("Logging in to Exchange"));
+		connector = new MapiConnector2;
+	}
+	bool ok = connector->login(Settings::self()->profileName());
+	if (!ok) {
+		emit status(Broken, i18n("Unable to login") );
+	}
+	return ok;
+}
+
+void exgalResource::logoff(void)
+{
+	delete connector;
+	connector = 0;
 }
 
 AKONADI_RESOURCE_MAIN( exgalResource )
