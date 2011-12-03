@@ -291,16 +291,114 @@ void ExCalResource::itemAdded( const Akonadi::Item &item, const Akonadi::Collect
   // of this template code to keep it simple
 }
 
-void ExCalResource::itemChanged( const Akonadi::Item &item, const QSet<QByteArray> &parts )
+/**
+ * Called when somebody else, e.g. a client application, has changed an item 
+ * managed this resource.
+ */
+void ExCalResource::itemChanged(const Akonadi::Item &item, const QSet<QByteArray> &parts)
 {
-  Q_UNUSED( item );
-  Q_UNUSED( parts );
+        Q_UNUSED(parts);
+	return;
+        // Get the payload for the item.
+        kWarning() << "fetch cached data for {" 
+                << currentCollection().id() << "," << item.id() << "} = {"
+		<< currentCollection().remoteId() << "," << item.remoteId() << "}";
+        Akonadi::ItemFetchJob *job = new Akonadi::ItemFetchJob(item);
+        connect(job, SIGNAL(result(KJob*)), SLOT(itemChangedContinue(KJob*)));
+        job->fetchScope().fetchFullPayload();
+}
 
-  // TODO: this method is called when somebody else, e.g. a client application,
-  // has changed an item managed by your resource.
+/**
+ * Finish changing an item, now that we (hopefully!) have its payload in hand.
+ */
+void ExCalResource::itemChangedContinue(KJob* job)
+{
+        if (job->error()) {
+            emit status(Broken, i18n("Failed to get cached data"));
+            return;
+        }
+        Akonadi::ItemFetchJob *fetchJob = qobject_cast<Akonadi::ItemFetchJob*>(job);
+        const Akonadi::Item item = fetchJob->items().first();
 
-  // NOTE: There is an equivalent method for collections, but it isn't part
-  // of this template code to keep it simple
+	if (!logon()) {
+		return;
+	}
+
+        // find the remoteId of the item and the collection and try to fetch the needed data from the server
+        CalendarData data;
+        kWarning() << "read Exchange data for {" 
+                << currentCollection().id() << "," << item.id() << "} = {"
+		<< currentCollection().remoteId() << "," << item.remoteId() << "}";
+        emit status(Running, i18n("Reading appointment %1", item.remoteId()));
+        if (!connector->fetchCalendarData(currentCollection().remoteId().toULongLong(), item.remoteId().toULongLong(), data)) {
+		emit status(Broken, i18n("Failed to read Exchange data"));
+                return;
+        }
+        kWarning() << "got item data:" << data.id << ":" << data.title;
+
+        // Extract the event from the item.
+        KCal::Event::Ptr event = item.payload<KCal::Event::Ptr>();
+        Q_ASSERT(event->setUid == item.remoteId());
+        data.title = event->summary();
+        data.begin.setTime_t(event->dtStart().toTime_t());
+        data.end.setTime_t(event->dtEnd().toTime_t());
+        Q_ASSERT(data.created == event->created());
+
+	// Check that between the item being modified, and this update attempt
+	// that no conflicting update happened on the server.
+        if (event->lastModified() < KDateTime(data.modified)) {
+                kWarning() << "Exchange data modified more recently" << event->lastModified()
+			<< "than cached data" << KDateTime(data.modified);
+		// TBD: Update cache with data from Exchange.
+                return;
+        }
+        data.modified = item.modificationTime();
+        data.text = event->description();
+        data.sender = event->organizer().name();
+        data.location = event->location();
+        if (event->alarms().count()) {
+                KCal::Alarm* alarm = event->alarms().first();
+                data.reminderActive = true;
+                // TODO Maybe we should check which one is set and then use either the time or the delte
+                // KDateTime reminder(data.reminderTime);
+                // reminder.setTimeSpec( KDateTime::Spec(KDateTime::UTC) );
+                // alarm->setTime( reminder );
+                data.reminderDelta = alarm->startOffset() / -60;
+        } else {
+                data.reminderActive = false;
+        }
+
+        data.anttendees.clear();
+        Attendee att;
+        att.name = event->organizer().name();
+        att.email = event->organizer().email();
+        att.isOranizer = true;
+        data.anttendees.append(att);
+        att.isOranizer = false;
+        foreach (KCal::Attendee *person, event->attendees()) {
+            att.name = person->name();
+            att.email = person->email();
+            data.anttendees.append(att);
+        }
+
+        if (data.recurrency.isRecurring()) {
+                // if this event is a recurring event create the recurrency
+//                createKCalRecurrency(event->recurrence(), data.recurrency);
+        }
+
+        // TODO add further data
+
+
+        // Update exchange with the new data.
+        kWarning() << "update Exchange data for {" 
+                << currentCollection().id() << "," << item.id() << "} = {"
+		<< currentCollection().remoteId() << "," << item.remoteId() << "}";
+        emit status(Running, i18n("Updating appointment %1", item.remoteId()));
+        if (!connector->calendarDataUpdate(currentCollection().remoteId().toULongLong(), item.remoteId().toULongLong(), data)) {
+		emit status(Broken, i18n("Failed to update Exchange data"));
+                return;
+        }
+        changeCommitted(item);
 }
 
 void ExCalResource::itemRemoved( const Akonadi::Item &item )

@@ -157,6 +157,7 @@ public:
 	bool fetchAllData(mapi_id_t folderID, mapi_id_t messageID, QMap<QString,QString>& data);
 	void resolveNames(const QStringList& names, QMap<QString, RecipientData>& outputMap);
 
+	bool calendarDataUpdate(mapi_id_t folderID, mapi_id_t messageID, CalendarData& data);
 
 	bool fetchGAL(QList<GalMember>& list);
 

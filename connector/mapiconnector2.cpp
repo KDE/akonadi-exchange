@@ -23,6 +23,7 @@
 #include <QStringList>
 #include <QDir>
 #include <QMessageBox>
+#include <QVariant>
 
 static QDateTime convertSysTime(const FILETIME& filetime)
 {
@@ -35,9 +36,6 @@ static QDateTime convertSysTime(const FILETIME& filetime)
   //kDebug() << "unix:"<<unixTime << "time:"<<kdeTime.toString() << "local:"<<kdeTime.toLocalZone();
   return kdeTime;
 }
-
-
-
 
 MapiConnector2::MapiConnector2()
 :m_context(NULL), m_session(NULL)
@@ -446,6 +444,552 @@ bool MapiConnector2::fetchCalendarData(mapi_id_t folderID, mapi_id_t messageID, 
 	mapi_object_release(&obj_message);
 
 	return false;
+}
+
+class TallocContext
+{
+public:
+	TallocContext(const char *name)
+	{
+                m_ctx = talloc_named(NULL, 0, "%s", name);
+	}
+
+	~TallocContext()
+	{
+		talloc_free(m_ctx);
+	}
+
+	TALLOC_CTX *d()
+	{
+		return m_ctx;
+	}
+
+private:
+	TALLOC_CTX *m_ctx;
+};
+
+static QString mapiError()
+{
+	int code = GetLastError();
+#define STR(e_code) \
+if (e_code == code) { return QString::fromLatin1(#e_code); }
+	STR(MAPI_E_SUCCESS);
+	STR(MAPI_E_INTERFACE_NO_SUPPORT);
+	STR(MAPI_E_CALL_FAILED);
+	STR(MAPI_E_NO_SUPPORT);
+	STR(MAPI_E_BAD_CHARWIDTH);
+	STR(MAPI_E_STRING_TOO_LONG);
+	STR(MAPI_E_UNKNOWN_FLAGS);
+	STR(MAPI_E_INVALID_ENTRYID);
+	STR(MAPI_E_INVALID_OBJECT);
+	STR(MAPI_E_OBJECT_CHANGED);
+	STR(MAPI_E_OBJECT_DELETED);
+	STR(MAPI_E_BUSY);
+	STR(MAPI_E_NOT_ENOUGH_DISK);
+	STR(MAPI_E_NOT_ENOUGH_RESOURCES);
+	STR(MAPI_E_NOT_FOUND);
+	STR(MAPI_E_VERSION);
+	STR(MAPI_E_LOGON_FAILED);
+	STR(MAPI_E_SESSION_LIMIT);
+	STR(MAPI_E_USER_CANCEL);
+	STR(MAPI_E_UNABLE_TO_ABORT);
+	STR(MAPI_E_NETWORK_ERROR);
+	STR(MAPI_E_DISK_ERROR);
+	STR(MAPI_E_TOO_COMPLEX);
+	STR(MAPI_E_BAD_COLUMN);
+	STR(MAPI_E_EXTENDED_ERROR);
+	STR(MAPI_E_COMPUTED);
+	STR(MAPI_E_CORRUPT_DATA);
+	STR(MAPI_E_UNCONFIGURED);
+	STR(MAPI_E_FAILONEPROVIDER);
+	STR(MAPI_E_UNKNOWN_CPID);
+	STR(MAPI_E_UNKNOWN_LCID);
+	STR(MAPI_E_PASSWORD_CHANGE_REQUIRED);
+	STR(MAPI_E_PASSWORD_EXPIRED);
+	STR(MAPI_E_INVALID_WORKSTATION_ACCOUNT);
+	STR(MAPI_E_INVALID_ACCESS_TIME);
+	STR(MAPI_E_ACCOUNT_DISABLED);
+	STR(MAPI_E_END_OF_SESSION);
+	STR(MAPI_E_UNKNOWN_ENTRYID);
+	STR(MAPI_E_MISSING_REQUIRED_COLUMN);
+	STR(MAPI_E_BAD_VALUE);
+	STR(MAPI_E_INVALID_TYPE);
+	STR(MAPI_E_TYPE_NO_SUPPORT);
+	STR(MAPI_E_UNEXPECTED_TYPE);
+	STR(MAPI_E_TOO_BIG);
+	STR(MAPI_E_DECLINE_COPY);
+	STR(MAPI_E_UNEXPECTED_ID);
+	STR(MAPI_E_UNABLE_TO_COMPLETE);
+	STR(MAPI_E_TIMEOUT);
+	STR(MAPI_E_TABLE_EMPTY);
+	STR(MAPI_E_TABLE_TOO_BIG);
+	STR(MAPI_E_INVALID_BOOKMARK);
+	STR(MAPI_E_WAIT);
+	STR(MAPI_E_CANCEL);
+	STR(MAPI_E_NOT_ME);
+	STR(MAPI_E_CORRUPT_STORE);
+	STR(MAPI_E_NOT_IN_QUEUE);
+	STR(MAPI_E_NO_SUPPRESS);
+	STR(MAPI_E_COLLISION);
+	STR(MAPI_E_NOT_INITIALIZED);
+	STR(MAPI_E_NON_STANDARD);
+	STR(MAPI_E_NO_RECIPIENTS);
+	STR(MAPI_E_SUBMITTED);
+	STR(MAPI_E_HAS_FOLDERS);
+	STR(MAPI_E_HAS_MESAGES);
+	STR(MAPI_E_FOLDER_CYCLE);
+	STR(MAPI_E_LOCKID_LIMIT);
+	STR(MAPI_E_AMBIGUOUS_RECIP);
+	STR(MAPI_E_NAMED_PROP_QUOTA_EXCEEDED);
+	STR(MAPI_E_NOT_IMPLEMENTED);
+	STR(MAPI_E_NO_ACCESS);
+	STR(MAPI_E_NOT_ENOUGH_MEMORY);
+	STR(MAPI_E_INVALID_PARAMETER);
+	STR(MAPI_E_RESERVED);
+	return QString::fromLatin1("MAPI_E_0x%1").arg(code, 0, 16);
+}
+
+static QString mapiTag(int tag)
+{
+	const char *str = get_proptag_name(tag);
+
+	if (str) {
+		return QString::fromLatin1(str);
+	} else {
+		return QString::fromLatin1("Pid0x%1").arg(tag, 0, 16);
+	}
+}
+
+static QVariant mapiValue(SPropValue &property)
+{
+	switch (property.ulPropTag & 0xFFFF) {
+	case PT_SHORT:
+		return property.value.i;
+	case PT_LONG:
+		return property.value.l;
+	case PT_FLOAT:
+		return (float)property.value.l;
+	case PT_DOUBLE:
+		return (double)property.value.dbl;
+	case PT_BOOLEAN:
+		return property.value.b;
+	case PT_I8:
+		return (qlonglong)property.value.d;
+	case PT_STRING8:
+		return QString::fromLocal8Bit(property.value.lpszA);
+	case PT_BINARY:
+	case PT_SVREID:
+		return QByteArray((char *)property.value.bin.lpb, property.value.bin.cb);
+	case PT_UNICODE:
+		return QString::fromUtf8(property.value.lpszW);
+	case PT_CLSID:
+		return QByteArray((char *)&property.value.lpguid->ab[0], sizeof(property.value.lpguid->ab));
+	case PT_SYSTIME:
+		return convertSysTime(property.value.ft);
+	case PT_ERROR:
+		return property.value.err;
+	case PT_MV_SHORT:
+	{
+		QList<QVariant> ret;
+
+		for (unsigned i = 0; i < property.value.MVi.cValues; i++) {
+			ret.append(property.value.MVi.lpi[i]);
+		}
+		return ret;
+	}
+	case PT_MV_LONG:
+	{
+		QList<QVariant> ret;
+
+		for (unsigned i = 0; i < property.value.MVl.cValues; i++) {
+			ret.append(property.value.MVl.lpl[i]);
+		}
+		return ret;
+	}
+	case PT_MV_FLOAT:
+	{
+		QList<QVariant> ret;
+
+		for (unsigned i = 0; i < property.value.MVl.cValues; i++) {
+			ret.append((float)property.value.MVl.lpl[i]);
+		}
+		return ret;
+	}
+	case PT_MV_STRING8:
+	{
+		QStringList ret;
+
+		for (unsigned i = 0; i < property.value.MVszA.cValues; i++) {
+			ret.append(QString::fromLocal8Bit(property.value.MVszA.lppszA[i]));
+		}
+		return ret;
+	}
+	case PT_MV_BINARY:
+	{
+		QList<QVariant> ret;
+
+		for (unsigned i = 0; i < property.value.MVszW.cValues; i++) {
+			ret.append(QByteArray((char *)property.value.MVbin.lpbin[i].lpb, property.value.MVbin.lpbin[i].cb));
+		}
+		return ret;
+	}
+	case PT_MV_CLSID:
+	{
+		QList<QVariant> ret;
+
+		for (unsigned i = 0; i < property.value.MVguid.cValues; i++) {
+			ret.append(QByteArray((char *)&property.value.MVguid.lpguid[i]->ab[0], sizeof(property.value.MVguid.lpguid[i]->ab)));
+		}
+		return ret;
+	}
+	case PT_MV_UNICODE:
+	{
+		QStringList ret;
+
+		for (unsigned i = 0; i < property.value.MVszW.cValues; i++) {
+			ret.append(QString::fromUtf8(property.value.MVszW.lppszW[i]));
+		}
+		return ret;
+	}
+	case PT_MV_SYSTIME:
+	{
+		QList<QVariant> ret;
+
+		for (unsigned i = 0; i < property.value.MVft.cValues; i++) {
+			ret.append(convertSysTime(property.value.MVft.lpft[i]));
+		}
+		return ret;
+	}
+	case PT_NULL:
+		return property.value.null;
+	case PT_OBJECT:
+		return property.value.object;
+	default:
+		return QString::fromLatin1("PT_0x%1").arg(property.ulPropTag & 0xFFFF, 0, 16);
+	}
+}
+
+class MapiObject
+{
+	
+	/**
+	 * Add a property with the given value, using an immediate assignment.
+	 */
+	bool propertyWrite(int tag, void *data, bool idempotent = true)
+	{
+		// If the assignment is idempotent, if an instance of the 
+		// property exists, it will be overwritten.
+		if (idempotent) {
+			for (unsigned i = 0; i < m_propertyCount; i++) {
+				if (m_properties[i].ulPropTag == tag) {
+					bool ok = set_SPropValue_proptag(&m_properties[i], (MAPITAGS)tag, data);
+					if (!ok) {
+						qCritical() << "cannot overwrite tag:" << mapiTag(tag) << "value:" << data;
+					}
+					return ok;
+				}
+			}
+		}
+
+		// Add a new entry to the array.
+		m_properties = add_SPropValue(m_ctx.d(), m_properties, &m_propertyCount, (MAPITAGS)tag, data);
+		if (!m_properties) {
+			qCritical() << "cannot write tag:" << mapiTag(tag) << "value:" << data;
+			return false;
+		}
+		return true;
+	}
+
+public:
+	MapiObject(TallocContext &ctx, mapi_id_t id) :
+		m_ctx(ctx),
+		m_id(id),
+		m_properties(0),
+		m_propertyCount(0)
+	{
+                mapi_object_init(&m_object);
+	}
+
+	~MapiObject()
+	{
+		mapi_object_release(&m_object);
+	}
+
+	mapi_object_t *d()
+	{
+		return &m_object;
+	}
+
+	mapi_id_t id()
+	{
+		return m_id;
+	}
+
+	/**
+	 * Add a property with the given int.
+	 */
+	bool propertyWrite(int tag, int data, bool idempotent = true)
+	{
+		return propertyWrite(tag, &data, idempotent);
+	}
+
+	/**
+	 * Add a property with the given string.
+	 */
+	bool propertyWrite(int tag, QString &data, bool idempotent = true)
+	{
+		char *copy = talloc_strdup(m_ctx.d(), data.toUtf8().data());
+
+		if (!copy) {
+			qCritical() << "cannot talloc:" << data;
+			return false;
+		}
+
+		return propertyWrite(tag, copy, idempotent);
+	}
+
+	/**
+	 * Add a property with the given datetime.
+	 */
+	bool propertyWrite(int tag, QDateTime &data, bool idempotent = true)
+	{
+		FILETIME *copy = talloc(m_ctx.d(), FILETIME);
+
+		if (!copy) {
+			qCritical() << "cannot talloc:" << data;
+			return false;
+		}
+
+		// As per http://support.citrix.com/article/CTX109645.
+		time_t unixTime = data.toTime_t();
+		NTTIME ntTime = (unixTime + 11644473600L) * 10000000;
+		copy->dwHighDateTime = ntTime >> 32;
+		copy->dwLowDateTime = ntTime;
+		return propertyWrite(tag, copy, idempotent);
+	}
+
+	/**
+	 * Set the written properties onto the object, and prepare to go again.
+	 */
+	bool propertiesPush()
+	{
+		if (MAPI_E_SUCCESS != SetProps(&m_object, MAPI_PROPS_SKIP_NAMEDID_CHECK, m_properties, m_propertyCount)) {
+			qCritical() << "cannot push:" << m_propertyCount << "properties:" << mapiError();
+			return false;
+		}
+		m_properties = 0;
+		m_propertyCount = 0;
+		return true;
+	}
+
+	/**
+	 * Fetch a set of properties.
+	 */
+	bool propertiesPull(QVector<int> &tags)
+	{
+		struct SPropTagArray *tagArray = NULL;
+
+		m_properties = 0;
+		m_propertyCount = 0;
+		foreach (int tag, tags) {
+			if (!tagArray) {
+				tagArray = set_SPropTagArray(m_ctx.d(), 1, (MAPITAGS)tag);
+				if (!tagArray) {
+					qCritical() << "cannot allocate tags:" << mapiError();
+					return false;
+				}
+			} else {
+				if (MAPI_E_SUCCESS != SPropTagArray_add(m_ctx.d(), tagArray, (MAPITAGS)tag)) {
+					qCritical() << "cannot extend tags:" << mapiError();
+					MAPIFreeBuffer(tagArray);
+					return false;
+				}
+			}
+		}
+		if (MAPI_E_SUCCESS != GetProps(&m_object, MAPI_UNICODE, tagArray, &m_properties, &m_propertyCount)) {
+			qCritical() << "cannot pull properties:" << mapiError();
+			MAPIFreeBuffer(tagArray);
+			return false;
+		}
+		MAPIFreeBuffer(tagArray);
+		return true;
+	}
+
+	/**
+	 * Fetch all properties.
+	 */
+	bool propertiesPull()
+	{
+		struct mapi_SPropValue_array mapiProperties;
+
+		m_properties = 0;
+		m_propertyCount = 0;
+		if (MAPI_E_SUCCESS != GetPropsAll(&m_object, MAPI_UNICODE, &mapiProperties)) {
+			qCritical() << "cannot pull all properties:" << mapiError();
+			return false;
+		}
+
+		// Copy results from MAPI array to our array.
+		m_properties = talloc_array(m_ctx.d(), SPropValue, mapiProperties.cValues);
+		if (m_properties) {
+			for (m_propertyCount = 0; m_propertyCount < mapiProperties.cValues; m_propertyCount++) {
+				cast_SPropValue(m_ctx.d(), &mapiProperties.lpProps[m_propertyCount], &m_properties[m_propertyCount]);
+			}
+		} else {
+			qCritical() << "cannot copy properties:" << mapiError();
+		}
+		return true;
+	}
+
+	QVariant property(int tag) const
+	{
+		for (unsigned i = 0; i < m_propertyCount; i++) {
+			if (m_properties[i].ulPropTag == tag) {
+				return mapiValue(m_properties[i]);
+			}
+		}
+		return QVariant();
+	}
+
+	QVariant propertyAt(unsigned i) const
+	{
+		if (!m_propertyCount || ((m_propertyCount - 1) < i)) {
+			return QVariant();
+		}
+		return mapiValue(m_properties[i]);
+	}
+
+	MAPITAGS tagAt(unsigned i) const
+	{
+		if (!m_propertyCount || ((m_propertyCount - 1) < i)) {
+			return MAPI_PROP_RESERVED;
+		}
+		return m_properties[i].ulPropTag;
+	}
+
+	unsigned propertyCount() const
+	{
+		return m_propertyCount;
+	}
+	
+private:
+	TallocContext &m_ctx;
+	mapi_id_t m_id;
+	struct SPropValue *m_properties;
+	uint32_t m_propertyCount;
+	mapi_object_t m_object;
+};
+
+bool MapiConnector2::calendarDataUpdate(mapi_id_t folderID, mapi_id_t messageID, CalendarData& data)
+{
+	TallocContext ctx("MapiConnector2::calendarDataUpdate");
+	MapiObject folder(ctx, folderID);
+	MapiObject message(ctx, messageID);
+      
+	if (MAPI_E_SUCCESS != OpenMessage(&m_store, folder.id(), message.id(), message.d(), 0x0)) {
+		qCritical() << "cannot open message:" << messageID << "in folder:" << folderID
+			<< ", error:" << mapiError();
+		return false;
+	}
+
+	// Sanity check the message class.
+	QVector<int> readTags;
+	readTags.append(PidTagMessageClass);
+        if (!message.propertiesPull(readTags)) {
+		return false;
+	}
+	QString messageClass = message.property(PidTagMessageClass).toString();
+	if (QString::fromLatin1("IPM.Appointment").compare(messageClass)) {
+		// this one is not an appointment
+		return false;
+	}
+
+	// Overwrite all the fields we know about.
+	if (!message.propertyWrite(PidTagConversationTopic, data.title)) {
+		return false;
+	}
+	if (!message.propertyWrite(PidTagBody, data.text)) {
+		return false;
+	}
+	if (!message.propertyWrite(PidTagLastModificationTime, data.modified)) {
+		return false;
+	}
+	if (!message.propertyWrite(PidTagCreationTime, data.created)) {
+		return false;
+	}
+	if (!message.propertyWrite(PidTagStartDate, data.begin)) {
+		return false;
+	}
+	if (!message.propertyWrite(PidTagEndDate, data.end)) {
+		return false;
+	}
+	if (!message.propertyWrite(PidTagSentRepresentingName, data.sender)) {
+		return false;
+	}
+	if (!message.propertyWrite(PidLidLocation, data.location)) {
+		return false;
+	}
+	if (!message.propertyWrite(PidLidReminderSet, data.reminderActive)) {
+		return false;
+	}
+	if (data.reminderActive) {
+		if (!message.propertyWrite(PidLidReminderSignalTime, data.reminderTime)) {
+			return false;
+		}
+		if (!message.propertyWrite(PidLidReminderDelta, data.reminderDelta)) {
+			return false;
+		}
+	}
+#if 0
+	const char* toAttendeesString = (const char *)find_mapi_SPropValue_data(&properties_array, PR_DISPLAY_TO_UNICODE);
+	uint32_t* recurrenceType = (uint32_t*)find_mapi_SPropValue_data(&properties_array, PidLidRecurrenceType);
+	Binary_r* binDataRecurrency = (Binary_r*)find_mapi_SPropValue_data(&properties_array, PidLidAppointmentRecur);
+
+	if (recurrenceType && (*recurrenceType) > 0x0) {
+		if (binDataRecurrency != 0x0) {
+			RecurrencePattern* pattern = get_RecurrencePattern(mem_ctx, binDataRecurrency);
+			debugRecurrencyPattern(pattern);
+
+			data.recurrency.setData(pattern);
+		} else {
+			// TODO This should not happen. PidLidRecurrenceType says this is a recurring event, so why is there no PidLidAppointmentRecur???
+			qDebug() << "missing recurrencePattern in message"<<messageID<<"in folder"<<folderID;
+			}
+	}
+
+	getAttendees(obj_message, QString::fromLocal8Bit(toAttendeesString), data);
+#endif
+	if (!message.propertiesPush()) {
+		return false;
+	}
+#if 0
+	qCritical() << "************  OpenFolder";
+	if (MAPI_E_SUCCESS != OpenFolder(&m_store, folder.id(), folder.d())) {
+		qCritical() << "cannot open folder" << folderID
+			<< ", error:" << mapiError();
+		return false;
+        }
+	qCritical() << "************  SaveChangesMessage";
+	if (MAPI_E_SUCCESS != SaveChangesMessage(folder.d(), message.d(), KeepOpenReadWrite)) {
+		qCritical() << "cannot save message" << messageID << "in folder" << folderID
+			<< ", error:" << mapiError();
+		return false;
+	}
+#endif
+	qCritical() << "************  SubmitMessage";
+	if (MAPI_E_SUCCESS != SubmitMessage(message.d())) {
+		qCritical() << "cannot submit message" << messageID << "in folder" << folderID
+			<< ", error:" << mapiError();
+		return false;
+	}
+	struct mapi_SPropValue_array replyProperties;
+	qCritical() << "************  TransportSend";
+	if (MAPI_E_SUCCESS != TransportSend(message.d(), &replyProperties)) {
+		qDebug() << "cannot send message" << messageID << "in folder" << folderID
+			<< ", error:" << mapiError();
+		return false;
+	}
+	return true;
 }
 
 bool MapiConnector2::fetchAllData(mapi_id_t folderID, mapi_id_t messageID, QMap< QString, QString >& outputMap)

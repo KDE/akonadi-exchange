@@ -66,6 +66,12 @@ private:
 	void logoff(void);
 
 	MapiConnector2* connector;
+
+private Q_SLOTS:
+	/**
+	 * Completion handler for itemChanged().
+	 */
+	void itemChangedContinue(KJob* job);
 };
 
 #endif
