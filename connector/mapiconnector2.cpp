@@ -446,6 +446,10 @@ bool MapiConnector2::fetchCalendarData(mapi_id_t folderID, mapi_id_t messageID, 
 	return false;
 }
 
+/**
+ * A class which wraps a talloc memory allocator such that objects of this type
+ * automatically free the used memory on destruction.
+ */
 class TallocContext
 {
 public:
@@ -546,18 +550,7 @@ if (e_code == code) { return QString::fromLatin1(#e_code); }
 	STR(MAPI_E_NOT_ENOUGH_MEMORY);
 	STR(MAPI_E_INVALID_PARAMETER);
 	STR(MAPI_E_RESERVED);
-	return QString::fromLatin1("MAPI_E_0x%1").arg(code, 0, 16);
-}
-
-static QString mapiTag(int tag)
-{
-	const char *str = get_proptag_name(tag);
-
-	if (str) {
-		return QString::fromLatin1(str);
-	} else {
-		return QString::fromLatin1("Pid0x%1").arg(tag, 0, 16);
-	}
+	return QString::fromLatin1("MAPI_E_0x%1").arg((unsigned)code, 0, 16);
 }
 
 static QVariant mapiValue(SPropValue &property)
@@ -587,7 +580,7 @@ static QVariant mapiValue(SPropValue &property)
 	case PT_SYSTIME:
 		return convertSysTime(property.value.ft);
 	case PT_ERROR:
-		return property.value.err;
+		return (unsigned)property.value.err;
 	case PT_MV_SHORT:
 	{
 		QList<QVariant> ret;
@@ -669,9 +662,12 @@ static QVariant mapiValue(SPropValue &property)
 	}
 }
 
+/**
+ * A class which wraps a MAPI object such that objects of this type 
+ * automatically free the used memory on destruction.
+ */
 class MapiObject
 {
-	
 	/**
 	 * Add a property with the given value, using an immediate assignment.
 	 */
@@ -684,7 +680,7 @@ class MapiObject
 				if (m_properties[i].ulPropTag == tag) {
 					bool ok = set_SPropValue_proptag(&m_properties[i], (MAPITAGS)tag, data);
 					if (!ok) {
-						qCritical() << "cannot overwrite tag:" << mapiTag(tag) << "value:" << data;
+						qCritical() << "cannot overwrite tag:" << tagName(tag) << "value:" << data;
 					}
 					return ok;
 				}
@@ -694,7 +690,7 @@ class MapiObject
 		// Add a new entry to the array.
 		m_properties = add_SPropValue(m_ctx.d(), m_properties, &m_propertyCount, (MAPITAGS)tag, data);
 		if (!m_properties) {
-			qCritical() << "cannot write tag:" << mapiTag(tag) << "value:" << data;
+			qCritical() << "cannot write tag:" << tagName(tag) << "value:" << data;
 			return false;
 		}
 		return true;
@@ -859,6 +855,52 @@ public:
 		return mapiValue(m_properties[i]);
 	}
 
+	/**
+	 * For display purposes, convert a property into a string, taking
+	 * care to hex-ify GUIDs and other byte arrays, and lists of the
+	 * same.
+	 */
+	QString propertyToString(unsigned i) const
+	{
+		if (!m_propertyCount || ((m_propertyCount - 1) < i)) {
+			return QString();
+		}
+
+		// Use the default stringification whenever we can.
+		QVariant tmp(propertyAt(i));
+		switch (tmp.type()) {
+		case QVariant::ByteArray:
+			// Convert to a hex string.
+			return QString::fromLatin1(tmp.toByteArray().toHex());
+		case QVariant::List:
+		{
+			QList<QVariant> list(tmp.toList());
+			QList<QVariant>::iterator i;
+			QStringList result;
+
+			for (i = list.begin(); i != list.end(); ++i) {
+				switch ((*i).type()) {
+				case QVariant::ByteArray:
+					// Convert to a hex string.
+					result.append(QString::fromLatin1((*i).toByteArray().toHex()));
+					break;
+				default:
+					result.append((*i).toString());
+					break;
+				}
+			}
+			return result.join(QString::fromLatin1(","));
+		}
+		default:
+			return tmp.toString();
+		}
+	}
+
+	unsigned propertyCount() const
+	{
+		return m_propertyCount;
+	}
+
 	MAPITAGS tagAt(unsigned i) const
 	{
 		if (!m_propertyCount || ((m_propertyCount - 1) < i)) {
@@ -867,11 +909,50 @@ public:
 		return m_properties[i].ulPropTag;
 	}
 
-	unsigned propertyCount() const
+	/**
+	 * Find the name for a tag. If it not a well known one, try a lookup.
+	 * Technically, this should only be needed if bit 31 is set, but
+	 * still...
+	 */
+	QString tagName(int tag)
 	{
-		return m_propertyCount;
+		const char *str = get_proptag_name(tag);
+
+		if (str) {
+			return QString::fromLatin1(str);
+		} else {
+			struct MAPINAMEID *names;
+			uint16_t count;
+			int safeTag = (tag & 0xFFFF0000) | PT_NULL;
+
+			/*
+			 * Try a lookup.
+			 */
+			if (MAPI_E_SUCCESS != GetNamesFromIDs(&m_object, (MAPITAGS)safeTag, &count, &names)) {
+				return QString::fromLatin1("Pid0x%1").arg(tag, 0, 16);
+			} else {
+				QByteArray strs;
+
+				/*
+				 * Oh dear, a lookup can return multiple 
+				 * names...
+				 */
+				for (unsigned i = 0; i < count; i++) {
+					if (i) {
+						strs.append(',');
+					}
+					if (MNID_STRING == names[i].ulKind) {
+						strs.append(&names[i].kind.lpwstr.Name[0], names[i].kind.lpwstr.NameSize);
+					} else {
+						strs.append(QString::fromLatin1("Id0x%1:%2").arg((unsigned)tag, 0, 16).
+								arg((unsigned)names[i].kind.lid, 0, 16).toLatin1());
+					}
+				}
+				return QString::fromLatin1(strs);
+			}
+		}
 	}
-	
+
 private:
 	TallocContext &m_ctx;
 	mapi_id_t m_id;
@@ -895,13 +976,19 @@ bool MapiConnector2::calendarDataUpdate(mapi_id_t folderID, mapi_id_t messageID,
 	// Sanity check the message class.
 	QVector<int> readTags;
 	readTags.append(PidTagMessageClass);
-        if (!message.propertiesPull(readTags)) {
+	if (!message.propertiesPull(readTags)) {
 		return false;
 	}
 	QString messageClass = message.property(PidTagMessageClass).toString();
 	if (QString::fromLatin1("IPM.Appointment").compare(messageClass)) {
 		// this one is not an appointment
 		return false;
+	}
+        if (!message.propertiesPull()) {
+		return false;
+	}
+	for (unsigned i = 0; i < message.propertyCount(); i++) {
+		qCritical() << "pulled:" << message.tagName(message.tagAt(i)) << "value:" << message.propertyToString(i); 
 	}
 
 	// Overwrite all the fields we know about.
