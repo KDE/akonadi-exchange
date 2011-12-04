@@ -367,110 +367,58 @@ bool MapiConnector2::fetchFolderContent(mapi_id_t folderID, QList<CalendarDataSh
 
 bool MapiConnector2::fetchCalendarData(mapi_id_t folderID, mapi_id_t messageID, CalendarData& data)
 {
-	mapi_object_t obj_message;
-	mapi_object_init(&obj_message);
-	if (OpenMessage(&m_store, folderID, messageID, &obj_message, 0x0) != MAPI_E_NOT_FOUND) {
+	TallocContext ctx("MapiConnector2::fetchCalendarData");
+	MapiObject folder(ctx, folderID);
+	MapiAppointment message(ctx, messageID);
 
-		struct mapi_SPropValue_array properties_array;
-		MAPISTATUS retval = GetPropsAll(&obj_message, MAPI_UNICODE, &properties_array);
-		if (retval != MAPI_E_SUCCESS) {
-			mapi_object_release(&obj_message);
-			return false;
-		}
-		mapi_SPropValue_array_named(&obj_message, &properties_array);
-
-		const char * messageClass = (const char *)find_mapi_SPropValue_data(&properties_array, PR_MESSAGE_CLASS_UNICODE);
-		if (!messageClass || QString::fromLatin1("IPM.Appointment").compare(QString::fromUtf8(messageClass)) != 0) {
-			// this one is not an appointment
-			return false;
-		}
-
-		const char* topic = (const char *)find_mapi_SPropValue_data(&properties_array, PR_CONVERSATION_TOPIC_UNICODE);
-		const char* body = (const char *)find_mapi_SPropValue_data(&properties_array, PR_BODY_UNICODE);
-		const FILETIME* modTime = (const FILETIME*)find_mapi_SPropValue_data(&properties_array, PR_LAST_MODIFICATION_TIME);
-		const FILETIME* createTime = (const FILETIME*)find_mapi_SPropValue_data(&properties_array, PR_CREATION_TIME);
-		const FILETIME* startTime = (const FILETIME*)find_mapi_SPropValue_data(&properties_array, PR_START_DATE);
-		const FILETIME* endTime = (const FILETIME*)find_mapi_SPropValue_data(&properties_array, PR_END_DATE);
-		const char* sender = (const char *)find_mapi_SPropValue_data(&properties_array, PR_SENT_REPRESENTING_NAME_UNICODE);
-		const char* location = (const char *)find_mapi_SPropValue_data(&properties_array, PidLidLocation);
-		bool* reminderSet = (bool*)find_mapi_SPropValue_data(&properties_array, PidLidReminderSet);
-		const FILETIME* reminderTime = (const FILETIME*)find_mapi_SPropValue_data(&properties_array, PidLidReminderSignalTime);
-		uint32_t* reminderDelta = (uint32_t*)find_mapi_SPropValue_data(&properties_array, PidLidReminderDelta);
-		const char* toAttendeesString = (const char *)find_mapi_SPropValue_data(&properties_array, PR_DISPLAY_TO_UNICODE);
-		uint32_t* recurrenceType = (uint32_t*)find_mapi_SPropValue_data(&properties_array, PidLidRecurrenceType);
-// 		const char* recurrencePattern = (const char* )find_mapi_SPropValue_data(&properties_array, PidLidRecurrencePattern);
-// 		const SBinary_short *binData = (const SBinary_short*)find_mapi_SPropValue_data(&properties_array, PidLidAppointmentRecur);
-		Binary_r* binDataRecurrency = (Binary_r*)find_mapi_SPropValue_data(&properties_array, PidLidAppointmentRecur);
-
-		if (recurrenceType && (*recurrenceType) > 0x0) {
-			if (binDataRecurrency != 0x0) {
-				TALLOC_CTX *mem_ctx;
-				mem_ctx = talloc_named(NULL, 0, "for recurrency");
-				RecurrencePattern* pattern = get_RecurrencePattern(mem_ctx, binDataRecurrency);
-				debugRecurrencyPattern(pattern);
-
-				data.recurrency.setData(pattern);
-
-				talloc_free(mem_ctx);
-			} else {
-				// TODO This should not happen. PidLidRecurrenceType says this is a recurring event, so why is there no PidLidAppointmentRecur???
-				qDebug() << "missing recurrencePattern in message"<<messageID<<"in folder"<<folderID;
-			}
-		}
-
-		data.fid = QString::number(folderID);
-		data.id = QString::number(messageID);
-		data.title = QString::fromUtf8(topic);
-		data.text = QString::fromUtf8(body);
-		data.modified = convertSysTime(*modTime);
-		data.begin = convertSysTime(*startTime);
-		data.end = convertSysTime(*endTime);
-		data.created = convertSysTime(*createTime);
-		data.sender = QString::fromUtf8(sender);
-		data.location = QString::fromUtf8(location);
-		if (reminderSet && *reminderSet == true) {
-			data.reminderActive = *reminderSet;
-			data.reminderTime = convertSysTime(*reminderTime);
-			data.reminderDelta = *reminderDelta;
-		} else {
-			data.reminderActive = false;
-		}
-
-		getAttendees(obj_message, QString::fromLocal8Bit(toAttendeesString), data);
-
-		mapi_object_release(&obj_message);
-		return true;
+	if (!message.open(&m_store, folderID)) {
+		return false;
 	}
-	mapi_object_release(&obj_message);
 
-	return false;
+	if (!message.propertiesPull()) {
+		return false;
+	}
+
+	data.fid = QString::number(folderID);
+	data.id = QString::number(messageID);
+	data.title = message.property(PidTagConversationTopic).toString();
+	data.text = message.property(PidTagBody).toString();
+	data.modified = message.property(PidTagLastModificationTime).toDateTime();
+	data.created = message.property(PidTagCreationTime).toDateTime();
+	data.begin = message.property(PidTagStartDate).toDateTime();
+	data.end = message.property(PidTagEndDate).toDateTime();
+	data.sender = message.property(PidTagSentRepresentingName).toString();
+	data.location = message.property(PidLidLocation).toString();
+//	const char* recurrencePattern = (const char* )find_mapi_SPropValue_data(&properties_array, PidLidRecurrencePattern);
+//	const SBinary_short *binData = (const SBinary_short*)find_mapi_SPropValue_data(&properties_array, PidLidAppointmentRecur);
+	RecurrencePattern *pattern = message.recurrance();
+	if (pattern) {
+		data.recurrency.setData(pattern);
+	}
+	data.reminderActive = message.property(PidLidReminderSet).toInt();
+	if (data.reminderActive) {
+		data.reminderTime = message.property(PidLidReminderSignalTime).toDateTime();
+		data.reminderDelta = message.property(PidLidReminderDelta).toInt();
+	}
+	QString toAttendeesString = message.property(PidTagDisplayTo).toString();
+	getAttendees(*message.d(), toAttendeesString, data);
+	return true;
 }
 
-/**
- * A class which wraps a talloc memory allocator such that objects of this type
- * automatically free the used memory on destruction.
- */
-class TallocContext
+TallocContext::TallocContext(const char *name)
 {
-public:
-	TallocContext(const char *name)
-	{
-                m_ctx = talloc_named(NULL, 0, "%s", name);
-	}
+	m_ctx = talloc_named(NULL, 0, "%s", name);
+}
 
-	~TallocContext()
-	{
-		talloc_free(m_ctx);
-	}
+TallocContext::~TallocContext()
+{
+	talloc_free(m_ctx);
+}
 
-	TALLOC_CTX *d()
-	{
-		return m_ctx;
-	}
-
-private:
-	TALLOC_CTX *m_ctx;
-};
+TALLOC_CTX *TallocContext::d()
+{
+	return m_ctx;
+}
 
 static QString mapiError()
 {
@@ -553,321 +501,138 @@ if (e_code == code) { return QString::fromLatin1(#e_code); }
 	return QString::fromLatin1("MAPI_E_0x%1").arg((unsigned)code, 0, 16);
 }
 
-static QVariant mapiValue(SPropValue &property)
+class MapiProperty: private SPropValue
 {
-	switch (property.ulPropTag & 0xFFFF) {
-	case PT_SHORT:
-		return property.value.i;
-	case PT_LONG:
-		return property.value.l;
-	case PT_FLOAT:
-		return (float)property.value.l;
-	case PT_DOUBLE:
-		return (double)property.value.dbl;
-	case PT_BOOLEAN:
-		return property.value.b;
-	case PT_I8:
-		return (qlonglong)property.value.d;
-	case PT_STRING8:
-		return QString::fromLocal8Bit(property.value.lpszA);
-	case PT_BINARY:
-	case PT_SVREID:
-		return QByteArray((char *)property.value.bin.lpb, property.value.bin.cb);
-	case PT_UNICODE:
-		return QString::fromUtf8(property.value.lpszW);
-	case PT_CLSID:
-		return QByteArray((char *)&property.value.lpguid->ab[0], sizeof(property.value.lpguid->ab));
-	case PT_SYSTIME:
-		return convertSysTime(property.value.ft);
-	case PT_ERROR:
-		return (unsigned)property.value.err;
-	case PT_MV_SHORT:
-	{
-		QList<QVariant> ret;
-
-		for (unsigned i = 0; i < property.value.MVi.cValues; i++) {
-			ret.append(property.value.MVi.lpi[i]);
-		}
-		return ret;
-	}
-	case PT_MV_LONG:
-	{
-		QList<QVariant> ret;
-
-		for (unsigned i = 0; i < property.value.MVl.cValues; i++) {
-			ret.append(property.value.MVl.lpl[i]);
-		}
-		return ret;
-	}
-	case PT_MV_FLOAT:
-	{
-		QList<QVariant> ret;
-
-		for (unsigned i = 0; i < property.value.MVl.cValues; i++) {
-			ret.append((float)property.value.MVl.lpl[i]);
-		}
-		return ret;
-	}
-	case PT_MV_STRING8:
-	{
-		QStringList ret;
-
-		for (unsigned i = 0; i < property.value.MVszA.cValues; i++) {
-			ret.append(QString::fromLocal8Bit(property.value.MVszA.lppszA[i]));
-		}
-		return ret;
-	}
-	case PT_MV_BINARY:
-	{
-		QList<QVariant> ret;
-
-		for (unsigned i = 0; i < property.value.MVszW.cValues; i++) {
-			ret.append(QByteArray((char *)property.value.MVbin.lpbin[i].lpb, property.value.MVbin.lpbin[i].cb));
-		}
-		return ret;
-	}
-	case PT_MV_CLSID:
-	{
-		QList<QVariant> ret;
-
-		for (unsigned i = 0; i < property.value.MVguid.cValues; i++) {
-			ret.append(QByteArray((char *)&property.value.MVguid.lpguid[i]->ab[0], sizeof(property.value.MVguid.lpguid[i]->ab)));
-		}
-		return ret;
-	}
-	case PT_MV_UNICODE:
-	{
-		QStringList ret;
-
-		for (unsigned i = 0; i < property.value.MVszW.cValues; i++) {
-			ret.append(QString::fromUtf8(property.value.MVszW.lppszW[i]));
-		}
-		return ret;
-	}
-	case PT_MV_SYSTIME:
-	{
-		QList<QVariant> ret;
-
-		for (unsigned i = 0; i < property.value.MVft.cValues; i++) {
-			ret.append(convertSysTime(property.value.MVft.lpft[i]));
-		}
-		return ret;
-	}
-	case PT_NULL:
-		return property.value.null;
-	case PT_OBJECT:
-		return property.value.object;
-	default:
-		return QString::fromLatin1("PT_0x%1").arg(property.ulPropTag & 0xFFFF, 0, 16);
-	}
-}
-
-/**
- * A class which wraps a MAPI object such that objects of this type 
- * automatically free the used memory on destruction.
- */
-class MapiObject
-{
-	/**
-	 * Add a property with the given value, using an immediate assignment.
-	 */
-	bool propertyWrite(int tag, void *data, bool idempotent = true)
-	{
-		// If the assignment is idempotent, if an instance of the 
-		// property exists, it will be overwritten.
-		if (idempotent) {
-			for (unsigned i = 0; i < m_propertyCount; i++) {
-				if (m_properties[i].ulPropTag == tag) {
-					bool ok = set_SPropValue_proptag(&m_properties[i], (MAPITAGS)tag, data);
-					if (!ok) {
-						qCritical() << "cannot overwrite tag:" << tagName(tag) << "value:" << data;
-					}
-					return ok;
-				}
-			}
-		}
-
-		// Add a new entry to the array.
-		m_properties = add_SPropValue(m_ctx.d(), m_properties, &m_propertyCount, (MAPITAGS)tag, data);
-		if (!m_properties) {
-			qCritical() << "cannot write tag:" << tagName(tag) << "value:" << data;
-			return false;
-		}
-		return true;
-	}
-
 public:
-	MapiObject(TallocContext &ctx, mapi_id_t id) :
-		m_ctx(ctx),
-		m_id(id),
-		m_properties(0),
-		m_propertyCount(0)
+	MapiProperty(SPropValue &property) :
+		m_property(property)
 	{
-                mapi_object_init(&m_object);
-	}
-
-	~MapiObject()
-	{
-		mapi_object_release(&m_object);
-	}
-
-	mapi_object_t *d()
-	{
-		return &m_object;
-	}
-
-	mapi_id_t id()
-	{
-		return m_id;
 	}
 
 	/**
-	 * Add a property with the given int.
+	 * Get the value of the property in a nice typesafe wrapper.
 	 */
-	bool propertyWrite(int tag, int data, bool idempotent = true)
+	QVariant value() const
 	{
-		return propertyWrite(tag, &data, idempotent);
-	}
+		switch (m_property.ulPropTag & 0xFFFF) {
+		case PT_SHORT:
+			return m_property.value.i;
+		case PT_LONG:
+			return m_property.value.l;
+		case PT_FLOAT:
+			return (float)m_property.value.l;
+		case PT_DOUBLE:
+			return (double)m_property.value.dbl;
+		case PT_BOOLEAN:
+			return m_property.value.b;
+		case PT_I8:
+			return (qlonglong)m_property.value.d;
+		case PT_STRING8:
+			return QString::fromLocal8Bit(m_property.value.lpszA);
+		case PT_BINARY:
+		case PT_SVREID:
+			return QByteArray((char *)m_property.value.bin.lpb, m_property.value.bin.cb);
+		case PT_UNICODE:
+			return QString::fromUtf8(m_property.value.lpszW);
+		case PT_CLSID:
+			return QByteArray((char *)&m_property.value.lpguid->ab[0], 
+					  sizeof(m_property.value.lpguid->ab));
+		case PT_SYSTIME:
+			return convertSysTime(m_property.value.ft);
+		case PT_ERROR:
+			return (unsigned)m_property.value.err;
+		case PT_MV_SHORT:
+		{
+			QList<QVariant> ret;
 
-	/**
-	 * Add a property with the given string.
-	 */
-	bool propertyWrite(int tag, QString &data, bool idempotent = true)
-	{
-		char *copy = talloc_strdup(m_ctx.d(), data.toUtf8().data());
-
-		if (!copy) {
-			qCritical() << "cannot talloc:" << data;
-			return false;
-		}
-
-		return propertyWrite(tag, copy, idempotent);
-	}
-
-	/**
-	 * Add a property with the given datetime.
-	 */
-	bool propertyWrite(int tag, QDateTime &data, bool idempotent = true)
-	{
-		FILETIME *copy = talloc(m_ctx.d(), FILETIME);
-
-		if (!copy) {
-			qCritical() << "cannot talloc:" << data;
-			return false;
-		}
-
-		// As per http://support.citrix.com/article/CTX109645.
-		time_t unixTime = data.toTime_t();
-		NTTIME ntTime = (unixTime + 11644473600L) * 10000000;
-		copy->dwHighDateTime = ntTime >> 32;
-		copy->dwLowDateTime = ntTime;
-		return propertyWrite(tag, copy, idempotent);
-	}
-
-	/**
-	 * Set the written properties onto the object, and prepare to go again.
-	 */
-	bool propertiesPush()
-	{
-		if (MAPI_E_SUCCESS != SetProps(&m_object, MAPI_PROPS_SKIP_NAMEDID_CHECK, m_properties, m_propertyCount)) {
-			qCritical() << "cannot push:" << m_propertyCount << "properties:" << mapiError();
-			return false;
-		}
-		m_properties = 0;
-		m_propertyCount = 0;
-		return true;
-	}
-
-	/**
-	 * Fetch a set of properties.
-	 */
-	bool propertiesPull(QVector<int> &tags)
-	{
-		struct SPropTagArray *tagArray = NULL;
-
-		m_properties = 0;
-		m_propertyCount = 0;
-		foreach (int tag, tags) {
-			if (!tagArray) {
-				tagArray = set_SPropTagArray(m_ctx.d(), 1, (MAPITAGS)tag);
-				if (!tagArray) {
-					qCritical() << "cannot allocate tags:" << mapiError();
-					return false;
-				}
-			} else {
-				if (MAPI_E_SUCCESS != SPropTagArray_add(m_ctx.d(), tagArray, (MAPITAGS)tag)) {
-					qCritical() << "cannot extend tags:" << mapiError();
-					MAPIFreeBuffer(tagArray);
-					return false;
-				}
+			for (unsigned i = 0; i < m_property.value.MVi.cValues; i++) {
+				ret.append(m_property.value.MVi.lpi[i]);
 			}
+			return ret;
 		}
-		if (MAPI_E_SUCCESS != GetProps(&m_object, MAPI_UNICODE, tagArray, &m_properties, &m_propertyCount)) {
-			qCritical() << "cannot pull properties:" << mapiError();
-			MAPIFreeBuffer(tagArray);
-			return false;
+		case PT_MV_LONG:
+		{
+			QList<QVariant> ret;
+
+			for (unsigned i = 0; i < m_property.value.MVl.cValues; i++) {
+				ret.append(m_property.value.MVl.lpl[i]);
+			}
+			return ret;
 		}
-		MAPIFreeBuffer(tagArray);
-		return true;
+		case PT_MV_FLOAT:
+		{
+			QList<QVariant> ret;
+
+			for (unsigned i = 0; i < m_property.value.MVl.cValues; i++) {
+				ret.append((float)m_property.value.MVl.lpl[i]);
+			}
+			return ret;
+		}
+		case PT_MV_STRING8:
+		{
+			QStringList ret;
+
+			for (unsigned i = 0; i < m_property.value.MVszA.cValues; i++) {
+				ret.append(QString::fromLocal8Bit(m_property.value.MVszA.lppszA[i]));
+			}
+			return ret;
+		}
+		case PT_MV_BINARY:
+		{
+			QList<QVariant> ret;
+
+			for (unsigned i = 0; i < m_property.value.MVszW.cValues; i++) {
+				ret.append(QByteArray((char *)m_property.value.MVbin.lpbin[i].lpb, 
+						      m_property.value.MVbin.lpbin[i].cb));
+			}
+			return ret;
+		}
+		case PT_MV_CLSID:
+		{
+			QList<QVariant> ret;
+
+			for (unsigned i = 0; i < m_property.value.MVguid.cValues; i++) {
+				ret.append(QByteArray((char *)&m_property.value.MVguid.lpguid[i]->ab[0], 
+						      sizeof(m_property.value.MVguid.lpguid[i]->ab)));
+			}
+			return ret;
+		}
+		case PT_MV_UNICODE:
+		{
+			QStringList ret;
+
+			for (unsigned i = 0; i < m_property.value.MVszW.cValues; i++) {
+				ret.append(QString::fromUtf8(m_property.value.MVszW.lppszW[i]));
+			}
+			return ret;
+		}
+		case PT_MV_SYSTIME:
+		{
+			QList<QVariant> ret;
+
+			for (unsigned i = 0; i < m_property.value.MVft.cValues; i++) {
+				ret.append(convertSysTime(m_property.value.MVft.lpft[i]));
+			}
+			return ret;
+		}
+		case PT_NULL:
+			return m_property.value.null;
+		case PT_OBJECT:
+			return m_property.value.object;
+		default:
+			return QString::fromLatin1("PT_0x%1").arg(m_property.ulPropTag & 0xFFFF, 0, 16);
+		}
 	}
 
 	/**
-	 * Fetch all properties.
+	 * Get the string equivalent of a property, e.g. for display purposes.
+	 * We take care to hex-ify GUIDs and other byte arrays, and lists of
+	 * the same.
 	 */
-	bool propertiesPull()
+	QString toString() const
 	{
-		struct mapi_SPropValue_array mapiProperties;
-
-		m_properties = 0;
-		m_propertyCount = 0;
-		if (MAPI_E_SUCCESS != GetPropsAll(&m_object, MAPI_UNICODE, &mapiProperties)) {
-			qCritical() << "cannot pull all properties:" << mapiError();
-			return false;
-		}
-
-		// Copy results from MAPI array to our array.
-		m_properties = talloc_array(m_ctx.d(), SPropValue, mapiProperties.cValues);
-		if (m_properties) {
-			for (m_propertyCount = 0; m_propertyCount < mapiProperties.cValues; m_propertyCount++) {
-				cast_SPropValue(m_ctx.d(), &mapiProperties.lpProps[m_propertyCount], &m_properties[m_propertyCount]);
-			}
-		} else {
-			qCritical() << "cannot copy properties:" << mapiError();
-		}
-		return true;
-	}
-
-	QVariant property(int tag) const
-	{
-		for (unsigned i = 0; i < m_propertyCount; i++) {
-			if (m_properties[i].ulPropTag == tag) {
-				return mapiValue(m_properties[i]);
-			}
-		}
-		return QVariant();
-	}
-
-	QVariant propertyAt(unsigned i) const
-	{
-		if (!m_propertyCount || ((m_propertyCount - 1) < i)) {
-			return QVariant();
-		}
-		return mapiValue(m_properties[i]);
-	}
-
-	/**
-	 * For display purposes, convert a property into a string, taking
-	 * care to hex-ify GUIDs and other byte arrays, and lists of the
-	 * same.
-	 */
-	QString propertyToString(unsigned i) const
-	{
-		if (!m_propertyCount || ((m_propertyCount - 1) < i)) {
-			return QString();
-		}
-
 		// Use the default stringification whenever we can.
-		QVariant tmp(propertyAt(i));
+		QVariant tmp(value());
 		switch (tmp.type()) {
 		case QVariant::ByteArray:
 			// Convert to a hex string.
@@ -896,99 +661,385 @@ public:
 		}
 	}
 
-	unsigned propertyCount() const
-	{
-		return m_propertyCount;
+private:
+	SPropValue &m_property;
+};
+
+RecurrencePattern *MapiAppointment::recurrance()
+{
+	unsigned recurrenceType = propertyFind(PidLidRecurrenceType);
+
+	// Is there a recurrance type set?
+	if (recurrenceType == UINT_MAX) {
+		return 0;
+	}
+	recurrenceType = propertyAt(recurrenceType).toInt();
+	if (recurrenceType == 0x0) {
+		return 0;
 	}
 
-	MAPITAGS tagAt(unsigned i) const
-	{
-		if (!m_propertyCount || ((m_propertyCount - 1) < i)) {
-			return MAPI_PROP_RESERVED;
-		}
-		return m_properties[i].ulPropTag;
+	// Can we find the recurrance data? 
+	unsigned recurrenceData = propertyFind(PidLidAppointmentRecur);
+	if (recurrenceData == UINT_MAX) {
+		// TODO This should not happen. PidLidRecurrenceType says this is a recurring event, so why is there no PidLidAppointmentRecur???
+		qDebug() << "missing recurrencePattern in message" << m_id;
+		return 0;
+	}
+	RecurrencePattern *pattern = get_RecurrencePattern(m_ctx.d(), &m_properties[recurrenceData].value.bin);
+	debugRecurrencyPattern(pattern);
+	return pattern;
+}
+
+bool MapiAppointment::debugRecurrencyPattern(RecurrencePattern *pattern)
+{
+	// do the actual work
+	qDebug() << "-- Recurrency debug output [BEGIN] --";
+	switch (pattern->RecurFrequency) {
+	case RecurFrequency_Daily:
+		qDebug() << "Fequency: daily";
+		break;
+	case RecurFrequency_Weekly:
+		qDebug() << "Fequency: weekly";
+		break;
+	case RecurFrequency_Monthly:
+		qDebug() << "Fequency: monthly";
+		break;
+	case RecurFrequency_Yearly:
+		qDebug() << "Fequency: yearly";
+		break;
+	default:
+		qDebug() << "unsupported frequency:"<<pattern->RecurFrequency;
+		return false;
 	}
 
-	/**
-	 * Find the name for a tag. If it not a well known one, try a lookup.
-	 * Technically, this should only be needed if bit 31 is set, but
-	 * still...
-	 */
-	QString tagName(int tag)
-	{
-		const char *str = get_proptag_name(tag);
+	switch (pattern->PatternType) {
+	case PatternType_Day:
+		qDebug() << "PatternType: day";
+		break;
+	case PatternType_Week:
+		qDebug() << "PatternType: week";
+		break;
+	case PatternType_Month:
+		qDebug() << "PatternType: month";
+		break;
+	default:
+		qDebug() << "unsupported patterntype:"<<pattern->PatternType;
+		return false;
+	}
 
-		if (str) {
-			return QString::fromLatin1(str);
-		} else {
-			struct MAPINAMEID *names;
-			uint16_t count;
-			int safeTag = (tag & 0xFFFF0000) | PT_NULL;
+	qDebug() << "Calendar:" << pattern->CalendarType;
+	qDebug() << "FirstDateTime:" << pattern->FirstDateTime;
+	qDebug() << "Period:" << pattern->Period;
+	if (pattern->PatternType == PatternType_Month) {
+		qDebug() << "PatternTypeSpecific:" << pattern->PatternTypeSpecific.Day;
+	} else if (pattern->PatternType == PatternType_Week) {
+		qDebug() << "PatternTypeSpecific:" << QString::number(pattern->PatternTypeSpecific.WeekRecurrencePattern, 2);
+	}
 
-			/*
-			 * Try a lookup.
-			 */
-			if (MAPI_E_SUCCESS != GetNamesFromIDs(&m_object, (MAPITAGS)safeTag, &count, &names)) {
-				return QString::fromLatin1("Pid0x%1").arg(tag, 0, 16);
-			} else {
-				QByteArray strs;
+	switch (pattern->EndType) {
+		case END_AFTER_DATE:
+			qDebug() << "EndType: after date";
+			break;
+		case END_AFTER_N_OCCURRENCES:
+			qDebug() << "EndType: after occurenc count";
+			break;
+		case END_NEVER_END:
+			qDebug() << "EndType: never";
+			break;
+		default:
+			qDebug() << "unsupported endtype:"<<pattern->EndType;
+			return false;
+	}
+	qDebug() << "OccurencCount:" << pattern->OccurrenceCount;
+	qDebug() << "FirstDOW:" << pattern->FirstDOW;
+	qDebug() << "Start:" << pattern->StartDate;
+	qDebug() << "End:" << pattern->EndDate;
+	qDebug() << "-- Recurrency debug output [END] --";
 
-				/*
-				 * Oh dear, a lookup can return multiple 
-				 * names...
-				 */
-				for (unsigned i = 0; i < count; i++) {
-					if (i) {
-						strs.append(',');
-					}
-					if (MNID_STRING == names[i].ulKind) {
-						strs.append(&names[i].kind.lpwstr.Name[0], names[i].kind.lpwstr.NameSize);
-					} else {
-						strs.append(QString::fromLatin1("Id0x%1:%2").arg((unsigned)tag, 0, 16).
-								arg((unsigned)names[i].kind.lid, 0, 16).toLatin1());
-					}
+	return true;
+}
+
+MapiObject::MapiObject(TallocContext &ctx, mapi_id_t id) :
+	m_ctx(ctx),
+	m_id(id),
+	m_properties(0),
+	m_propertyCount(0)
+{
+	mapi_object_init(&m_object);
+}
+
+MapiObject::~MapiObject()
+{
+	mapi_object_release(&m_object);
+}
+
+mapi_object_t *MapiObject::d()
+{
+	return &m_object;
+}
+
+mapi_id_t MapiObject::id()
+{
+	return m_id;
+}
+
+bool MapiObject::open(mapi_object_t *store, mapi_id_t folderId)
+{
+	if (MAPI_E_SUCCESS != OpenMessage(store, folderId, m_id, &m_object, 0x0)) {
+		qCritical() << "cannot open message:" << m_id << "in folder:" << folderId
+		<< ", error:" << mapiError();
+		return false;
+	}
+	return true;
+}
+
+bool MapiObject::propertyWrite(int tag, void *data, bool idempotent)
+{
+	// If the assignment is idempotent, if an instance of the 
+	// property exists, it will be overwritten.
+	if (idempotent) {
+		for (unsigned i = 0; i < m_propertyCount; i++) {
+			if (m_properties[i].ulPropTag == tag) {
+				bool ok = set_SPropValue_proptag(&m_properties[i], (MAPITAGS)tag, data);
+				if (!ok) {
+					qCritical() << "cannot overwrite tag:" << tagName(tag) << "value:" << data;
 				}
-				return QString::fromLatin1(strs);
+				return ok;
 			}
 		}
 	}
 
-private:
-	TallocContext &m_ctx;
-	mapi_id_t m_id;
-	struct SPropValue *m_properties;
-	uint32_t m_propertyCount;
-	mapi_object_t m_object;
-};
+	// Add a new entry to the array.
+	m_properties = add_SPropValue(m_ctx.d(), m_properties, &m_propertyCount, (MAPITAGS)tag, data);
+	if (!m_properties) {
+		qCritical() << "cannot write tag:" << tagName(tag) << "value:" << data;
+		return false;
+	}
+	return true;
+}
 
-bool MapiConnector2::calendarDataUpdate(mapi_id_t folderID, mapi_id_t messageID, CalendarData& data)
+bool MapiObject::propertyWrite(int tag, int data, bool idempotent)
 {
-	TallocContext ctx("MapiConnector2::calendarDataUpdate");
-	MapiObject folder(ctx, folderID);
-	MapiObject message(ctx, messageID);
-      
-	if (MAPI_E_SUCCESS != OpenMessage(&m_store, folder.id(), message.id(), message.d(), 0x0)) {
-		qCritical() << "cannot open message:" << messageID << "in folder:" << folderID
-			<< ", error:" << mapiError();
+	return propertyWrite(tag, &data, idempotent);
+}
+
+bool MapiObject::propertyWrite(int tag, QString &data, bool idempotent)
+{
+	char *copy = talloc_strdup(m_ctx.d(), data.toUtf8().data());
+
+	if (!copy) {
+		qCritical() << "cannot talloc:" << data;
+		return false;
+	}
+
+	return propertyWrite(tag, copy, idempotent);
+}
+
+bool MapiObject::propertyWrite(int tag, QDateTime &data, bool idempotent)
+{
+	FILETIME *copy = talloc(m_ctx.d(), FILETIME);
+
+	if (!copy) {
+		qCritical() << "cannot talloc:" << data;
+		return false;
+	}
+
+	// As per http://support.citrix.com/article/CTX109645.
+	time_t unixTime = data.toTime_t();
+	NTTIME ntTime = (unixTime + 11644473600L) * 10000000;
+	copy->dwHighDateTime = ntTime >> 32;
+	copy->dwLowDateTime = ntTime;
+	return propertyWrite(tag, copy, idempotent);
+}
+
+bool MapiObject::propertiesPush()
+{
+	if (MAPI_E_SUCCESS != SetProps(&m_object, MAPI_PROPS_SKIP_NAMEDID_CHECK, m_properties, m_propertyCount)) {
+		qCritical() << "cannot push:" << m_propertyCount << "properties:" << mapiError();
+		return false;
+	}
+	m_properties = 0;
+	m_propertyCount = 0;
+	return true;
+}
+
+bool MapiObject::propertiesPull(QVector<int> &tags)
+{
+	struct SPropTagArray *tagArray = NULL;
+
+	m_properties = 0;
+	m_propertyCount = 0;
+	foreach (int tag, tags) {
+		if (!tagArray) {
+			tagArray = set_SPropTagArray(m_ctx.d(), 1, (MAPITAGS)tag);
+			if (!tagArray) {
+				qCritical() << "cannot allocate tags:" << mapiError();
+				return false;
+			}
+		} else {
+			if (MAPI_E_SUCCESS != SPropTagArray_add(m_ctx.d(), tagArray, (MAPITAGS)tag)) {
+				qCritical() << "cannot extend tags:" << mapiError();
+				MAPIFreeBuffer(tagArray);
+				return false;
+			}
+		}
+	}
+	if (MAPI_E_SUCCESS != GetProps(&m_object, MAPI_UNICODE, tagArray, &m_properties, &m_propertyCount)) {
+		qCritical() << "cannot pull properties:" << mapiError();
+		MAPIFreeBuffer(tagArray);
+		return false;
+	}
+	MAPIFreeBuffer(tagArray);
+	return true;
+}
+
+bool MapiObject::propertiesPull()
+{
+	struct mapi_SPropValue_array mapiProperties;
+
+	m_properties = 0;
+	m_propertyCount = 0;
+	if (MAPI_E_SUCCESS != GetPropsAll(&m_object, MAPI_UNICODE, &mapiProperties)) {
+		qCritical() << "cannot pull all properties:" << mapiError();
+		return false;
+	}
+
+	// Copy results from MAPI array to our array.
+	m_properties = talloc_array(m_ctx.d(), SPropValue, mapiProperties.cValues);
+	if (m_properties) {
+		for (m_propertyCount = 0; m_propertyCount < mapiProperties.cValues; m_propertyCount++) {
+			cast_SPropValue(m_ctx.d(), &mapiProperties.lpProps[m_propertyCount], 
+					&m_properties[m_propertyCount]);
+		}
+	} else {
+		qCritical() << "cannot copy properties:" << mapiError();
+	}
+	return true;
+}
+
+unsigned MapiObject::propertyFind(int tag) const
+{
+	for (unsigned i = 0; i < m_propertyCount; i++) {
+		if (m_properties[i].ulPropTag == tag) {
+			return i;
+		}
+	}
+	return UINT_MAX;
+}
+
+QVariant MapiObject::property(int tag) const
+{
+	return propertyAt(propertyFind(tag));
+}
+
+QVariant MapiObject::propertyAt(unsigned i) const
+{
+	if (!m_propertyCount || ((m_propertyCount - 1) < i)) {
+		return QVariant();
+	}
+	return MapiProperty(m_properties[i]).value();
+}
+
+unsigned MapiObject::propertyCount() const
+{
+	return m_propertyCount;
+}
+
+QString MapiObject::tagAt(unsigned i)
+{
+	if (!m_propertyCount || ((m_propertyCount - 1) < i)) {
+		return QString();
+	}
+	return tagName(m_properties[i].ulPropTag);
+}
+
+QString MapiObject::propertyString(unsigned i) const
+{
+	if (!m_propertyCount || ((m_propertyCount - 1) < i)) {
+		return QString();
+	}
+	return MapiProperty(m_properties[i]).toString();
+}
+
+QString MapiObject::tagName(int tag)
+{
+	const char *str = get_proptag_name(tag);
+
+	if (str) {
+		return QString::fromLatin1(str);
+	} else {
+		struct MAPINAMEID *names;
+		uint16_t count;
+		int safeTag = (tag & 0xFFFF0000) | PT_NULL;
+
+		/*
+			* Try a lookup.
+			*/
+		if (MAPI_E_SUCCESS != GetNamesFromIDs(&m_object, (MAPITAGS)safeTag, &count, &names)) {
+			return QString::fromLatin1("Pid0x%1").arg(tag, 0, 16);
+		} else {
+			QByteArray strs;
+
+			/*
+				* Oh dear, a lookup can return multiple 
+				* names...
+				*/
+			for (unsigned i = 0; i < count; i++) {
+				if (i) {
+					strs.append(',');
+				}
+				if (MNID_STRING == names[i].ulKind) {
+					strs.append(&names[i].kind.lpwstr.Name[0], names[i].kind.lpwstr.NameSize);
+				} else {
+					strs.append(QString::fromLatin1("Id0x%1:%2").arg((unsigned)tag, 0, 16).
+							arg((unsigned)names[i].kind.lid, 0, 16).toLatin1());
+				}
+			}
+			return QString::fromLatin1(strs);
+		}
+	}
+}
+
+MapiAppointment::MapiAppointment(TallocContext &ctx, mapi_id_t id) :
+	MapiObject(ctx, id)
+{
+}
+
+bool MapiAppointment::open(mapi_object_t *store, mapi_id_t folderId)
+{
+	if (!MapiObject::open(store, folderId)) {
 		return false;
 	}
 
 	// Sanity check the message class.
 	QVector<int> readTags;
 	readTags.append(PidTagMessageClass);
-	if (!message.propertiesPull(readTags)) {
+	if (!propertiesPull(readTags)) {
 		return false;
 	}
-	QString messageClass = message.property(PidTagMessageClass).toString();
+	QString messageClass = property(PidTagMessageClass).toString();
 	if (QString::fromLatin1("IPM.Appointment").compare(messageClass)) {
 		// this one is not an appointment
 		return false;
 	}
+	return true;
+}
+
+bool MapiConnector2::calendarDataUpdate(mapi_id_t folderID, mapi_id_t messageID, CalendarData& data)
+{
+	TallocContext ctx("MapiConnector2::calendarDataUpdate");
+	MapiObject folder(ctx, folderID);
+	MapiAppointment message(ctx, messageID);
+
+	if (!message.open(&m_store, folderID)) {
+		return false;
+	}
+
         if (!message.propertiesPull()) {
 		return false;
 	}
 	for (unsigned i = 0; i < message.propertyCount(); i++) {
-		qCritical() << "pulled:" << message.tagName(message.tagAt(i)) << "value:" << message.propertyToString(i); 
+		qCritical() << "pulled:" << message.tagAt(i) << "value:" << message.propertyString(i); 
 	}
 
 	// Overwrite all the fields we know about.
@@ -1077,42 +1128,6 @@ bool MapiConnector2::calendarDataUpdate(mapi_id_t folderID, mapi_id_t messageID,
 		return false;
 	}
 	return true;
-}
-
-bool MapiConnector2::fetchAllData(mapi_id_t folderID, mapi_id_t messageID, QMap< QString, QString >& outputMap)
-{
-	enum MAPISTATUS retval;
-
-	mapi_object_t obj_message;
-	mapi_object_init(&obj_message);
-	if (OpenMessage(&m_store, folderID, messageID, &obj_message, 0x0) != MAPI_E_NOT_FOUND) {
-
-		struct mapi_SPropValue_array properties_array;
-		retval = GetPropsAll(&obj_message, MAPI_UNICODE, &properties_array);
-		if (retval != MAPI_E_SUCCESS) {
-			mapi_object_release(&obj_message);
-			return false;
-		}
-		mapi_SPropValue_array_named(&obj_message, &properties_array);
-
-		for (uint32_t i=0; i<properties_array.cValues; ++i) {
-			mapi_SPropValue *lpProps = properties_array.lpProps + i;
-
-			QString tagStr;
-			tagStr.sprintf("0x%X", lpProps->ulPropTag);
-
-			QString dataStr = mapiValueToQString(lpProps);
-
-			outputMap.insert(tagStr, dataStr);
-		}
-
-		mapi_object_release(&obj_message);
-		return true;
-	}
-
-	mapi_object_release(&obj_message);
-
-	return false;
 }
 
 mapi_object_t MapiConnector2::openFolder(mapi_id_t folderID)
@@ -1327,76 +1342,6 @@ void MapiConnector2::resolveNames(const QStringList& names, QMap<QString, Recipi
 		}
 	}
 }
-
-bool MapiConnector2::debugRecurrencyPattern(RecurrencePattern* pattern)
-{
-	// do the actual work
-	qDebug() << "-- Recurrency debug output [BEGIN] --";
-	switch (pattern->RecurFrequency) {
-	case RecurFrequency_Daily:
-		qDebug() << "Fequency: daily";
-		break;
-	case RecurFrequency_Weekly:
-		qDebug() << "Fequency: weekly";
-		break;
-	case RecurFrequency_Monthly:
-		qDebug() << "Fequency: monthly";
-		break;
-	case RecurFrequency_Yearly:
-		qDebug() << "Fequency: yearly";
-		break;
-	default:
-		qDebug() << "unsupported frequency:"<<pattern->RecurFrequency;
-		return false;
-	}
-
-	switch (pattern->PatternType) {
-	case PatternType_Day:
-		qDebug() << "PatternType: day";
-		break;
-	case PatternType_Week:
-		qDebug() << "PatternType: week";
-		break;
-	case PatternType_Month:
-		qDebug() << "PatternType: month";
-		break;
-	default:
-		qDebug() << "unsupported patterntype:"<<pattern->PatternType;
-		return false;
-	}
-
-	qDebug() << "Calendar:" << pattern->CalendarType;
-	qDebug() << "FirstDateTime:" << pattern->FirstDateTime;
-	qDebug() << "Period:" << pattern->Period;
-	if (pattern->PatternType == PatternType_Month) {
-		qDebug() << "PatternTypeSpecific:" << pattern->PatternTypeSpecific.Day;
-	} else if (pattern->PatternType == PatternType_Week) {
-		qDebug() << "PatternTypeSpecific:" << QString::number(pattern->PatternTypeSpecific.WeekRecurrencePattern, 2);
-	}
-
-	switch (pattern->EndType) {
-		case END_AFTER_DATE:
-			qDebug() << "EndType: after date";
-			break;
-		case END_AFTER_N_OCCURRENCES:
-			qDebug() << "EndType: after occurenc count";
-			break;
-		case END_NEVER_END:
-			qDebug() << "EndType: never";
-			break;
-		default:
-			qDebug() << "unsupported endtype:"<<pattern->EndType;
-			return false;
-	}
-	qDebug() << "OccurencCount:" << pattern->OccurrenceCount;
-	qDebug() << "FirstDOW:" << pattern->FirstDOW;
-	qDebug() << "Start:" << pattern->StartDate;
-	qDebug() << "End:" << pattern->EndDate;
-	qDebug() << "-- Recurrency debug output [END] --";
-
-	return true;
-}
-
 
 bool MapiConnector2::fetchGAL(QList< GalMember >& list)
 {

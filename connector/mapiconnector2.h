@@ -133,7 +133,132 @@ public:
 
 
 
+/**
+ * A class which wraps a talloc memory allocator such that objects of this type
+ * automatically free the used memory on destruction.
+ */
+class TallocContext
+{
+public:
+	TallocContext(const char *name);
 
+	~TallocContext();
+
+	TALLOC_CTX *d();
+
+private:
+	TALLOC_CTX *m_ctx;
+};
+
+/**
+ * A class which wraps a MAPI object such that objects of this type 
+ * automatically free the used memory on destruction.
+ */
+class MapiObject
+{
+	/**
+	 * Add a property with the given value, using an immediate assignment.
+	 */
+	bool propertyWrite(int tag, void *data, bool idempotent = true);
+
+public:
+	MapiObject(TallocContext &ctx, mapi_id_t id);
+
+	~MapiObject();
+
+	mapi_object_t *d();
+
+	mapi_id_t id();
+
+	bool open(mapi_object_t *store, mapi_id_t folderId);
+
+	/**
+	 * Add a property with the given int.
+	 */
+	bool propertyWrite(int tag, int data, bool idempotent = true);
+
+	/**
+	 * Add a property with the given string.
+	 */
+	bool propertyWrite(int tag, QString &data, bool idempotent = true);
+
+	/**
+	 * Add a property with the given datetime.
+	 */
+	bool propertyWrite(int tag, QDateTime &data, bool idempotent = true);
+
+	/**
+	 * Set the written properties onto the object, and prepare to go again.
+	 */
+	bool propertiesPush();
+
+	/**
+	 * Fetch a set of properties.
+	 */
+	bool propertiesPull(QVector<int> &tags);
+
+	/**
+	 * Fetch all properties.
+	 */
+	bool propertiesPull();
+
+	/**
+	 * Find a property by tag.
+	 * 
+	 * @return The index, or UINT_MAX if not found.
+	 */
+	unsigned propertyFind(int tag) const;
+
+	/**
+	 * Fetch a property by tag.
+	 */
+	QVariant property(int tag) const;
+
+	/**
+	 * Fetch a property by index.
+	 */
+	QVariant propertyAt(unsigned i) const;
+
+	/**
+	 * Fetch a tag by index.
+	 */
+	QString tagAt(unsigned i);
+
+	/**
+	 * For display purposes, convert a property into a string, taking
+	 * care to hex-ify GUIDs and other byte arrays, and lists of the
+	 * same.
+	 */
+	QString propertyString(unsigned i) const;
+
+	unsigned propertyCount() const;
+
+	/**
+	 * Find the name for a tag. If it not a well known one, try a lookup.
+	 * Technically, this should only be needed if bit 31 is set, but
+	 * still...
+	 */
+	QString tagName(int tag);
+
+protected:
+	TallocContext &m_ctx;
+	mapi_id_t m_id;
+	struct SPropValue *m_properties;
+	uint32_t m_propertyCount;
+	mapi_object_t m_object;
+};
+
+class MapiAppointment : public MapiObject
+{
+public:
+	MapiAppointment(TallocContext &ctx, mapi_id_t id);
+
+	bool open(mapi_object_t *store, mapi_id_t folderId);
+
+	RecurrencePattern *recurrance();
+private:
+	bool debugRecurrencyPattern(RecurrencePattern *pattern);
+};
 
 class MapiConnector2
 {
@@ -154,19 +279,21 @@ public:
 	bool fetchFolderList(QList<FolderData>& list, mapi_id_t parentFolderID=0x0, const QString filter=QString());
 	bool fetchFolderContent(mapi_id_t folderID, QList<CalendarDataShort>& list);
 	bool fetchCalendarData(mapi_id_t folderID, mapi_id_t messageID, CalendarData& data);
-	bool fetchAllData(mapi_id_t folderID, mapi_id_t messageID, QMap<QString,QString>& data);
 	void resolveNames(const QStringList& names, QMap<QString, RecipientData>& outputMap);
 
 	bool calendarDataUpdate(mapi_id_t folderID, mapi_id_t messageID, CalendarData& data);
 
 	bool fetchGAL(QList<GalMember>& list);
 
+	mapi_object_t *d()
+	{
+		return &m_store;
+	}
+
 private:
 	mapi_object_t openFolder(mapi_id_t folderID);
 	QString mapiValueToQString(mapi_SPropValue *lpProps);
 	bool getAttendees(mapi_object_t& obj_message, const QString& toAttendeesStr, CalendarData& data);
-
-	bool debugRecurrencyPattern(RecurrencePattern* pattern);
 
 	struct mapi_context *m_context;
 	mapi_session *m_session;

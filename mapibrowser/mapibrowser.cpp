@@ -162,33 +162,27 @@ void mapibrowser::itemDoubleClicked(QTableWidgetItem* clickedItem)
 	// JUST FOR DEBUG --END--
 #endif
 
-	QMap<QString,QString> map;
-	if (!con.fetchAllData(folderId.toULongLong(), messageId.toULongLong(), map)) {
-		QMessageBox::warning(this, QString::fromLocal8Bit("Error"), QString::fromLocal8Bit("fetchData failed!\n")+folderId+QString::fromLocal8Bit(":")+messageId);
+	TallocContext ctx("mapibrowser::itemDoubleClicked");
+	MapiObject message(ctx, messageId.toULongLong());
+	if (!message.open(con.d(), folderId.toULongLong())) {
+		QMessageBox::warning(this, QString::fromLocal8Bit("Error"), QString::fromLocal8Bit("open failed!\n")+folderId+QString::fromLocal8Bit(":")+messageId);
+		return;
+	}
+	if (!message.propertiesPull()) {
+		QMessageBox::warning(this, QString::fromLocal8Bit("Error"), QString::fromLocal8Bit("pull failed!\n")+folderId+QString::fromLocal8Bit(":")+messageId);
 		return;
 	}
 
 	main->tableWidgetDetail->clearContents();
 	main->tableWidgetDetail->setSelectionBehavior(QAbstractItemView::SelectRows);
-	main->tableWidgetDetail->setRowCount(map.size());
-	int row=0;
-	foreach (QString key, map.keys()) {
-		QString value = map.value(key);
-
+	main->tableWidgetDetail->setRowCount(message.propertyCount());
+	for (unsigned row = 0; row < message.propertyCount(); row++) {
 		QTableWidgetItem *newItem;
-/* TODO check if there is a way to convert the hex mapi key back into something human readable
-		uint32_t xxx = key.toULongLong();
-		if (mapi_nameid_property_lookup(0x123) == MAPI_E_SUCCESS) {
-			QString newKey;
-			// TODO
-		}
-*/
-		newItem = new QTableWidgetItem(key);
-		main->tableWidgetDetail->setItem(row, 0, newItem);
-		newItem = new QTableWidgetItem(value);
-		main->tableWidgetDetail->setItem(row, 1, newItem);
 
-		row++;
+		newItem = new QTableWidgetItem(message.tagAt(row));
+		main->tableWidgetDetail->setItem(row, 0, newItem);
+		newItem = new QTableWidgetItem(message.propertyString(row));
+		main->tableWidgetDetail->setItem(row, 1, newItem);
 	}
 }
 
