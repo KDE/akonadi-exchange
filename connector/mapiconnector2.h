@@ -49,17 +49,55 @@ public:
 	QDateTime modified;
 };
 
-class Attendee {
+class Recipient
+{
 public:
-	uint32_t idx;
+	Recipient()
+	{
+		trackStatus = 0;
+		flags = 0;
+		type = 0;
+		order = 0;
+	}
+
 	QString name;
 	QString email;
-	bool isOranizer;
-	uint32_t status;
-	uint32_t type;
+	unsigned trackStatus;
+	unsigned flags;
+	unsigned type;
+	unsigned order;
 };
 
-class MapiRecurrencyPattern {
+class Attendee : public Recipient
+{
+public:
+	Attendee() :
+		Recipient()
+	{
+	}
+
+	Attendee(const Recipient &recipient) :
+		Recipient(recipient)
+	{
+	}
+
+	bool isOrganizer()
+	{
+		return ((flags & 0x0000002) != 0);
+	}
+
+	void setOrganizer(bool organizer)
+	{
+		if (organizer) {
+			flags |= 0x0000002;
+		} else {
+			flags &= ~0x0000002;
+		}
+	}
+};
+
+class MapiRecurrencyPattern 
+{
 public:
 	enum RecurrencyType {
 		Daily, Weekly, Every_Weekday, Monthly, Yearly,
@@ -110,16 +148,9 @@ public:
 	bool reminderActive;
 	QDateTime reminderTime;
 	uint32_t reminderDelta; // stored in minutes
-	QList<Attendee> anttendees;
+	QList<Attendee> attendees;
 	MapiRecurrencyPattern recurrency;
 };
-
-class RecipientData {
-public:
-	QString name;
-	QString email;
-};
-
 
 class GalMember {
 public:
@@ -130,8 +161,6 @@ public:
 	QString title;
 	QString organization;
 };
-
-
 
 /**
  * A class which wraps a talloc memory allocator such that objects of this type
@@ -166,9 +195,9 @@ public:
 
 	~MapiObject();
 
-	mapi_object_t *d();
+	mapi_object_t *d() const;
 
-	mapi_id_t id();
+	mapi_id_t id() const;
 
 	bool open(mapi_object_t *store, mapi_id_t folderId);
 
@@ -193,7 +222,15 @@ public:
 	bool propertiesPush();
 
 	/**
+	 * How many properties do we have?
+	 */
+	unsigned propertyCount() const;
+
+	/**
 	 * Fetch a set of properties.
+	 * 
+	 * @return Whether the pull succeeds, irrespective of whether the tags
+	 * were matched.
 	 */
 	bool propertiesPull(QVector<int> &tags);
 
@@ -222,7 +259,7 @@ public:
 	/**
 	 * Fetch a tag by index.
 	 */
-	QString tagAt(unsigned i);
+	QString tagAt(unsigned i) const;
 
 	/**
 	 * For display purposes, convert a property into a string, taking
@@ -231,24 +268,52 @@ public:
 	 */
 	QString propertyString(unsigned i) const;
 
-	unsigned propertyCount() const;
-
 	/**
 	 * Find the name for a tag. If it not a well known one, try a lookup.
 	 * Technically, this should only be needed if bit 31 is set, but
 	 * still...
 	 */
-	QString tagName(int tag);
+	QString tagName(int tag) const;
 
 protected:
 	TallocContext &m_ctx;
-	mapi_id_t m_id;
+	const mapi_id_t m_id;
 	struct SPropValue *m_properties;
 	uint32_t m_propertyCount;
-	mapi_object_t m_object;
+	mutable mapi_object_t m_object;
 };
 
-class MapiAppointment : public MapiObject
+/**
+ * A Message, with recipients.
+ */
+class MapiMessage : public MapiObject
+{
+public:
+	MapiMessage(TallocContext &ctx, mapi_id_t id);
+
+	/**
+	 * How many recipients do we have?
+	 */
+	unsigned recipientCount() const;
+
+	/**
+	 * Fetch all recipients.
+	 */
+	bool recipientsPull();
+
+	/**
+	 * Fetch a property by index.
+	 */
+	Recipient recipientAt(unsigned i) const;
+
+protected:
+	SRowSet m_recipients;
+};
+
+/**
+ * An Appointment, with attendee recipients.
+ */
+class MapiAppointment : public MapiMessage
 {
 public:
 	MapiAppointment(TallocContext &ctx, mapi_id_t id);
@@ -256,6 +321,14 @@ public:
 	bool open(mapi_object_t *store, mapi_id_t folderId);
 
 	RecurrencePattern *recurrance();
+
+	/**
+	 * Fetch a property by index.
+	 */
+	Attendee recipientAt(unsigned i) const;
+
+	bool getAttendees(QList<Attendee> &attendees, QList<unsigned> &needingResolution);
+
 private:
 	bool debugRecurrencyPattern(RecurrencePattern *pattern);
 };
@@ -279,7 +352,11 @@ public:
 	bool fetchFolderList(QList<FolderData>& list, mapi_id_t parentFolderID=0x0, const QString filter=QString());
 	bool fetchFolderContent(mapi_id_t folderID, QList<CalendarDataShort>& list);
 	bool fetchCalendarData(mapi_id_t folderID, mapi_id_t messageID, CalendarData& data);
-	void resolveNames(const QStringList& names, QMap<QString, RecipientData>& outputMap);
+
+	/**
+	 * Attempt to resolve a listed subset of the given recipients.
+	 */
+	bool resolveNames(QList<Attendee> &recipients, const QList<unsigned> &needingResolution);
 
 	bool calendarDataUpdate(mapi_id_t folderID, mapi_id_t messageID, CalendarData& data);
 
@@ -292,8 +369,6 @@ public:
 
 private:
 	mapi_object_t openFolder(mapi_id_t folderID);
-	QString mapiValueToQString(mapi_SPropValue *lpProps);
-	bool getAttendees(mapi_object_t& obj_message, const QString& toAttendeesStr, CalendarData& data);
 
 	struct mapi_context *m_context;
 	mapi_session *m_session;

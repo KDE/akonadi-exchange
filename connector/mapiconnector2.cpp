@@ -400,8 +400,15 @@ bool MapiConnector2::fetchCalendarData(mapi_id_t folderID, mapi_id_t messageID, 
 		data.reminderTime = message.property(PidLidReminderSignalTime).toDateTime();
 		data.reminderDelta = message.property(PidLidReminderDelta).toInt();
 	}
-	QString toAttendeesString = message.property(PidTagDisplayTo).toString();
-	getAttendees(*message.d(), toAttendeesString, data);
+
+	// Get the attendees, and find any that need resolution.
+	QList<unsigned> needingResolution;
+	if (!message.getAttendees(data.attendees, needingResolution)) {
+		return false;
+	}
+	if (!resolveNames(data.attendees, needingResolution)) {
+		return false;
+	}
 	return true;
 }
 
@@ -661,9 +668,37 @@ public:
 		}
 	}
 
+	int tag() const
+	{
+		return m_property.ulPropTag;
+	}
+
 private:
 	SPropValue &m_property;
 };
+
+bool MapiAppointment::getAttendees(QList<Attendee> &attendees, QList<unsigned> &needingResolution)
+{
+	if (!recipientsPull()) {
+		return false;
+	}
+
+	needingResolution.clear();
+	for (unsigned i = 0; i < recipientCount(); i++) {
+// TODO for debugging
+//		QString tagStr;
+//		tagStr.sprintf("0x%X", recipients.aRow[i].lpProps[j].ulPropTag);
+//		qDebug() << tagStr << mapiValueToQString(&recipients.aRow[i].lpProps[j]);
+		Attendee attendee = recipientAt(i);
+		if (attendee.email.isEmpty() ||
+			!attendee.email.contains(QString::fromAscii("@"))) {
+			needingResolution << i;
+			qCritical() << "needingResolution:" << attendee.name << attendee.email;
+		}
+		attendees << attendee;
+	}
+	return true;
+}
 
 RecurrencePattern *MapiAppointment::recurrance()
 {
@@ -759,6 +794,93 @@ bool MapiAppointment::debugRecurrencyPattern(RecurrencePattern *pattern)
 	return true;
 }
 
+Attendee MapiAppointment::recipientAt(unsigned i) const
+{
+	Attendee result(MapiMessage::recipientAt(i));
+
+	return result;
+}
+
+MapiMessage::MapiMessage(TallocContext &ctx, mapi_id_t id) :
+	MapiObject(ctx, id)
+{
+	m_recipients.cRows = 0;
+}
+
+unsigned MapiMessage::recipientCount() const
+{
+	return m_recipients.cRows;
+}
+
+bool MapiMessage::recipientsPull()
+{
+	SPropTagArray propertyTagArray;
+
+	if (MAPI_E_SUCCESS != GetRecipientTable(&m_object, &m_recipients, &propertyTagArray)) {
+		qCritical() << "cannot GetRecipientTable:" << mapiError();
+		return false;
+	}
+	return true;
+}
+
+Recipient MapiMessage::recipientAt(unsigned i) const
+{
+	Recipient result;
+
+	if (i > m_recipients.cRows) {
+		return Recipient();
+	}
+
+	struct SRow &recipient = m_recipients.aRow[i];
+	for (unsigned j = 0; j < recipient.cValues; j++) {
+		MapiProperty property(recipient.lpProps[j]);
+
+		// Note that the set of properties fetched here must be aligned
+		// with those fetched in MapiConnector::resolveNames().
+		switch (property.tag()) {
+		case PR_7BIT_DISPLAY_NAME:
+		case PR_DISPLAY_NAME:
+		case PR_RECIPIENT_DISPLAY_NAME:
+			// We'd prefer a Unicode answer if there is one!
+			if (result.name.isEmpty()) {
+				result.name = property.value().toString(); 
+			}
+			break;
+		case PR_7BIT_DISPLAY_NAME_UNICODE:
+		case PR_DISPLAY_NAME_UNICODE:
+		case PR_RECIPIENT_DISPLAY_NAME_UNICODE:
+			result.name = property.value().toString(); 
+			break;
+		case PR_SMTP_ADDRESS:
+			// We'd prefer a Unicode answer if there is one!
+			if (result.email.isEmpty()) {
+				result.email = property.value().toString(); 
+			}
+			break;
+		case PR_SMTP_ADDRESS_UNICODE:
+		case 0x6001001f:
+			result.email = property.value().toString(); 
+			break;
+		case PR_RECIPIENT_TRACKSTATUS:
+			result.trackStatus = property.value().toInt();
+			break;
+		case PR_RECIPIENT_FLAGS:
+			result.flags = property.value().toInt();
+			break;
+		case PR_RECIPIENT_TYPE:
+			result.type = property.value().toInt();
+			break;
+		case PR_RECIPIENT_ORDER:
+			result.order = property.value().toInt();
+			break;
+		default:
+			//qCritical() << "ignoring recipient property name:" << tagName(property.tag()) << property.value();
+			break;
+		}
+	}
+	return result;
+}
+
 MapiObject::MapiObject(TallocContext &ctx, mapi_id_t id) :
 	m_ctx(ctx),
 	m_id(id),
@@ -773,12 +895,12 @@ MapiObject::~MapiObject()
 	mapi_object_release(&m_object);
 }
 
-mapi_object_t *MapiObject::d()
+mapi_object_t *MapiObject::d() const
 {
 	return &m_object;
 }
 
-mapi_id_t MapiObject::id()
+mapi_id_t MapiObject::id() const
 {
 	return m_id;
 }
@@ -945,7 +1067,7 @@ unsigned MapiObject::propertyCount() const
 	return m_propertyCount;
 }
 
-QString MapiObject::tagAt(unsigned i)
+QString MapiObject::tagAt(unsigned i) const
 {
 	if (!m_propertyCount || ((m_propertyCount - 1) < i)) {
 		return QString();
@@ -961,7 +1083,7 @@ QString MapiObject::propertyString(unsigned i) const
 	return MapiProperty(m_properties[i]).toString();
 }
 
-QString MapiObject::tagName(int tag)
+QString MapiObject::tagName(int tag) const
 {
 	const char *str = get_proptag_name(tag);
 
@@ -1001,13 +1123,13 @@ QString MapiObject::tagName(int tag)
 }
 
 MapiAppointment::MapiAppointment(TallocContext &ctx, mapi_id_t id) :
-	MapiObject(ctx, id)
+	MapiMessage(ctx, id)
 {
 }
 
 bool MapiAppointment::open(mapi_object_t *store, mapi_id_t folderId)
 {
-	if (!MapiObject::open(store, folderId)) {
+	if (!MapiMessage::open(store, folderId)) {
 		return false;
 	}
 
@@ -1145,202 +1267,103 @@ mapi_object_t MapiConnector2::openFolder(mapi_id_t folderID)
 	return obj_folder;
 }
 
-QString MapiConnector2::mapiValueToQString(mapi_SPropValue *lpProps)
+bool MapiConnector2::resolveNames(QList<Attendee> &attendees, const QList<unsigned> &needingResolution)
 {
-	QString dataStr;
-	switch(lpProps->ulPropTag & 0xFFFF) {
-		case PT_SHORT:
-			dataStr = QString::number(lpProps->value.i); break;
-		case PT_BOOLEAN:
-			dataStr = QString::number(lpProps->value.b); break;
-		case PT_I8:
-			dataStr = QString::number(lpProps->value.d); break;
-		case PT_STRING8:
-			dataStr = QString::fromLocal8Bit(lpProps->value.lpszA).append(QString::fromAscii(" (PT_STRING8)")); break;
-		case PT_UNICODE:
-			dataStr = QString::fromUtf8(lpProps->value.lpszW).append(QString::fromAscii(" (PT_UNICODE)")); break;
-		case PT_SYSTIME:
-			dataStr = convertSysTime(lpProps->value.ft).toString(); break;
-		case PT_ERROR:
-			dataStr = QString::number(lpProps->value.err); break;
-		case PT_LONG:
-			dataStr = QString::number(lpProps->value.l); break;
-		case PT_DOUBLE:
-			dataStr = QString::number(lpProps->value.dbl); break;
-		case PT_CLSID:
-			dataStr = QString::fromAscii("UNSUPPORTED(PT_CLSID)"); break;
-// 					return (const void *)lpProps->value.lpguid;
-		case PT_BINARY:
-			dataStr = QString::fromAscii("UNSUPPORTED(PT_BINARY)"); break;
-// 					return (const void *)&lpProps->value.bin;
-		case PT_OBJECT:
-			dataStr = QString::fromAscii("UNSUPPORTED(PT_OBJECT)"); break;
-// 					return (const void *)&lpProps->value.object;
-		default:
-			dataStr = QString::fromAscii("UNKNOWN TYPE"); break;
+	if (needingResolution.size() == 0) {
+		return true;
 	}
-	return dataStr;
-}
 
+	// Fill an array with the names we need to resolve.
+	const char *names[needingResolution.size() + 1];
+	TallocContext ctx("MapiConnector2::resolveNames");
 
-bool MapiConnector2::getAttendees(mapi_object_t& obj_message, const QString& toAttendeesStr, CalendarData& data)
-{
-	QStringList attendeesNames = toAttendeesStr.split(QString::fromAscii("; "));
+	unsigned j = 0;
+	foreach (unsigned i, needingResolution) {
+		Attendee &attendee = attendees[i];
+		names[j] = talloc_strdup(ctx.d(), attendee.name.toStdString().c_str());
+		j++;
+	}
+	names[j] = 0;
 
-	SPropTagArray propertyTagArray;
-	SRowSet rowSet;
-	if ( GetRecipientTable( &obj_message, &rowSet, &propertyTagArray ) != MAPI_E_SUCCESS ) {
-		qDebug() << "Error opening GetRecipientTable()";
+	// Resolve the lot.
+	struct PropertyTagArray_r *statuses = NULL;
+	struct SPropTagArray *tags = NULL;
+	struct SRowSet *results = NULL;
+
+	tags = set_SPropTagArray(ctx.d(), 0x9, 
+				 PR_7BIT_DISPLAY_NAME,         PR_DISPLAY_NAME,         PR_RECIPIENT_DISPLAY_NAME, 
+				 PR_7BIT_DISPLAY_NAME_UNICODE, PR_DISPLAY_NAME_UNICODE, PR_RECIPIENT_DISPLAY_NAME_UNICODE, 
+				 PR_SMTP_ADDRESS,
+				 PR_SMTP_ADDRESS_UNICODE,
+				 0x6001001f);
+	if (MAPI_E_SUCCESS != ResolveNames(m_session, names, tags, &results, &statuses, 0x0)) {
 		return false;
 	}
-
-	for (uint32_t i = 0; i < rowSet.cRows; ++i) {
-		QString name, email;
-		uint32_t *trackStatus = NULL, *flags = NULL, *type = NULL, *number=NULL;
-
-// 		qDebug() << "Data for attendee number"<<i<<"valuecount:"<<rowSet.aRow[i].cValues;
-
-		for (unsigned int j = 0; j < rowSet.aRow[i].cValues; ++j) {
-			switch ( rowSet.aRow[i].lpProps[j].ulPropTag ) {
-			case 0x5ff6001f: // Should be PR_DISPLAY_NAME
-			case PR_7BIT_DISPLAY_NAME:
-				if (name.isEmpty())
-					name = QString::fromLocal8Bit( rowSet.aRow[i].lpProps[j].value.lpszA );
-				break;
-			case 0x39fe001f: // Should be PR_SMTP_ADDRESS
-				email = QString::fromLocal8Bit( rowSet.aRow[i].lpProps[j].value.lpszA );
-			break;
-			case PR_RECIPIENT_TRACKSTATUS:
-				trackStatus = &rowSet.aRow[i].lpProps[j].value.l;
-				break;
-			case PR_RECIPIENT_FLAGS:
-				flags = &rowSet.aRow[i].lpProps[j].value.l;
-				break;
-			case PR_RECIPIENT_TYPE:
-				type = &rowSet.aRow[i].lpProps[j].value.l;
-				break;
-			case PR_RECIPIENT_ORDER:
-				number = &rowSet.aRow[i].lpProps[j].value.l;
-				break;
-			default:
-				break;
-			}
-
-// TODO for debugging
-// 			QString tagStr;
-// 			tagStr.sprintf("0x%X", rowSet.aRow[i].lpProps[j].ulPropTag);
-// 			qDebug() << tagStr << mapiValueToQString(&rowSet.aRow[i].lpProps[j]);
-		}
-
-		uint32_t idx = (number)?*number:0;
-
-		Attendee attendee;
-		attendee.name = (!name.isEmpty())?name:QString();
-		attendee.email = (!email.isEmpty())?email:name;
-		if (flags && (*flags & 0x0000002)) {
-			attendee.isOranizer=true;
-		} else {
-			attendee.isOranizer=false;
-		}
-		attendee.status = (trackStatus)?*trackStatus:0;
-		attendee.type = (type)?*type:0;
-		attendee.idx = idx;
-		data.anttendees << attendee;
-	}
-
-	// check if we need the lookup the real e-mail adresses
-	QStringList namesNeedResolve;
-	foreach (const Attendee& att, data.anttendees) {
-		if (!att.email.isEmpty() && !att.email.contains(QString::fromAscii("@"))) {
-			namesNeedResolve << att.email;
-		}
-	}
-	QMap<QString, RecipientData> recipientData;
-	if (namesNeedResolve.size() > 0) {
-		resolveNames(namesNeedResolve, recipientData);
-	}
-
-	for (int i=0; i<data.anttendees.size(); ++i) {
-		// update name and email with the values gained from resolve name
-		QMap<QString, RecipientData>::const_iterator it;
-		it =recipientData.find(data.anttendees[i].email); 
-		if (it!=recipientData.end()) {
-			data.anttendees[i].name = it->name;
-			data.anttendees[i].email = it->email;
-			continue; // update done -> move on to next one
-		}
-
-		// if the e-mail adress is still not present take if from the to-attendees list
-		if (data.anttendees[i].email.isEmpty()) {
-			if (data.anttendees[i].type == MAPI_TO) {
-				if (data.anttendees[i].idx != 0) {
-					data.anttendees[i].email = attendeesNames.at(data.anttendees[i].idx-1);
-				} else {
-					data.anttendees[i].email = attendeesNames.at(i);
-				}
-			}
-		}
-	}
-
-	foreach (const Attendee& attendee, data.anttendees) {
-		qDebug()<<"Attendee"<<attendee.name<<attendee.email<<attendee.status<<attendee.type;
-	}
-
-	return true;
-}
-
-void MapiConnector2::resolveNames(const QStringList& names, QMap<QString, RecipientData>& outputMap) 
-{
-// 	qDebug()<<"resolving names"<<names;
-
-	const char* nameArray[names.size()+1];
-	int i=0;
-	foreach (const QString name, names) {
-		nameArray[i] = strdup( name.toStdString().c_str() );
-		++i;
-	}
-	nameArray[i] = NULL;
-
-	struct PropertyTagArray_r* flaglist = NULL;
-	struct SPropTagArray *SPropTagArray = NULL;
-	struct SRowSet *SRowSet = NULL;
-
-	TALLOC_CTX *mem_ctx;
-	mem_ctx = talloc_named(NULL, 0, "MapiConnector2::resolveNames");
-
-	// TODO why no UNICODE here?
-	SPropTagArray = set_SPropTagArray (mem_ctx, 0x2,
-					PR_DISPLAY_NAME,
-					PR_SMTP_ADDRESS);
-
- 	if (ResolveNames (this->m_session, nameArray, SPropTagArray, &SRowSet, &flaglist, 0x0) == MAPI_E_SUCCESS) {
-		if (SRowSet) {
-			for (uint32_t i = 0; i < SRowSet->cRows; ++i) {
+	if (results) {
+		for (unsigned i = 0; i < results->cRows; i++) {
+			if (MAPI_UNRESOLVED != statuses->aulPropTag[i]) {
+				struct SRow &recipient = results->aRow[i];
 				QString name, email;
-				for (unsigned int j = 0; j < SRowSet->aRow[i].cValues; ++j) {
-					switch ( SRowSet->aRow[i].lpProps[j].ulPropTag ) {
-						case PR_DISPLAY_NAME:
-							if (name.isEmpty())
-								name = QString::fromLocal8Bit( SRowSet->aRow[i].lpProps[j].value.lpszA );
-							break;
-						case PR_SMTP_ADDRESS:
-							email = QString::fromLocal8Bit( SRowSet->aRow[i].lpProps[j].value.lpszA );
-							break;
-						default:
-							break;
+				for (unsigned j = 0; j < recipient.cValues; j++) {
+					MapiProperty property(recipient.lpProps[j]);
+
+					// Note that the set of properties fetched here must be aligned
+					// with those fetched in MapiMessage::recipientAt(), as well
+					// as the array above.
+					switch (property.tag()) {
+					case PR_7BIT_DISPLAY_NAME:
+					case PR_DISPLAY_NAME:
+					case PR_RECIPIENT_DISPLAY_NAME:
+						// We'd prefer a Unicode answer if there is one!
+						if (name.isEmpty()) {
+							name = property.value().toString(); 
+						}
+						break;
+					case PR_7BIT_DISPLAY_NAME_UNICODE:
+					case PR_DISPLAY_NAME_UNICODE:
+					case PR_RECIPIENT_DISPLAY_NAME_UNICODE:
+						name = property.value().toString(); 
+						break;
+					case PR_SMTP_ADDRESS:
+						// We'd prefer a Unicode answer if there is one!
+						if (email.isEmpty()) {
+							email = property.value().toString(); 
+						}
+						break;
+					case PR_SMTP_ADDRESS_UNICODE:
+					case 0x6001001f:
+						email = property.value().toString(); 
+						break;
+					default:
+						break;
 					}
-// 					TODO just for debugging
-// 					QString tagStr;
-// 					tagStr.sprintf("0x%X", SRowSet->aRow[i].lpProps[j].ulPropTag);
-// 					qDebug() << tagStr << mapiValueToQString(&SRowSet->aRow[i].lpProps[j]);
 				}
-				RecipientData data;
-				data.name = name;
-				data.email = email;
-				outputMap.insert(QString::fromAscii(nameArray[i]), data);
+
+				// A resolved value is better than an unresolved one.
+				Attendee &attendee = attendees[needingResolution.at(i)];
+				if (!name.isEmpty()) {
+					attendee.name = name;
+				}
+				if (!email.isEmpty()) {
+					attendee.email = email;
+				}
 			}
 		}
 	}
+	MAPIFreeBuffer(results);
+	MAPIFreeBuffer(statuses);
+
+	// Time for one final fallback, based on the use of the name.
+	foreach (unsigned i, needingResolution) {
+		Attendee &attendee = attendees[i];
+		if (attendee.email.isEmpty()) {
+			attendee.email = attendee.name;
+		}
+	}
+	foreach (const Attendee &attendee, attendees) {
+		qCritical () << "Attendee" << attendee.name << attendee.email;
+	}
+	return true;
 }
 
 bool MapiConnector2::fetchGAL(QList< GalMember >& list)

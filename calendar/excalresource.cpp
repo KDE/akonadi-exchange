@@ -223,8 +223,8 @@ bool ExCalResource::retrieveItem( const Akonadi::Item &itemOrig, const QSet<QByt
 			event->addAlarm( alarm );
 		}
 
-		foreach (Attendee att, data.anttendees) {
-			if (att.isOranizer) {
+		foreach (Attendee att, data.attendees) {
+			if (att.isOrganizer()) {
 				KCal::Person person(att.name, att.email);
 				event->setOrganizer(person);
 			} else {
@@ -299,6 +299,7 @@ void ExCalResource::itemChanged(const Akonadi::Item &item, const QSet<QByteArray
 {
         Q_UNUSED(parts);
 	return;
+
         // Get the payload for the item.
         kWarning() << "fetch cached data for {" 
                 << currentCollection().id() << "," << item.id() << "} = {"
@@ -368,17 +369,17 @@ void ExCalResource::itemChangedContinue(KJob* job)
                 data.reminderActive = false;
         }
 
-        data.anttendees.clear();
+        data.attendees.clear();
         Attendee att;
         att.name = event->organizer().name();
         att.email = event->organizer().email();
-        att.isOranizer = true;
-        data.anttendees.append(att);
-        att.isOranizer = false;
+        att.setOrganizer(true);
+        data.attendees.append(att);
+        att.setOrganizer(false);
         foreach (KCal::Attendee *person, event->attendees()) {
             att.name = person->name();
             att.email = person->email();
-            data.anttendees.append(att);
+            data.attendees.append(att);
         }
 
         if (data.recurrency.isRecurring()) {
