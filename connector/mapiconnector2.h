@@ -33,13 +33,6 @@ extern "C" {
 #include <libmapi/libmapi.h>
 }
 
-class FolderData
-{
-public:
-	QString id;
-	QString name;
-};
-
 class CalendarDataShort
 {
 public:
@@ -180,6 +173,93 @@ private:
 };
 
 /**
+ * A class for managing access to MAPI profiles. This is the root for all other
+ * MAPI interactions.
+ */
+class MapiProfiles : private TallocContext
+{
+public:
+	MapiProfiles();
+	~MapiProfiles();
+
+	/**
+	 * Find existing profiles.
+	 */
+	QStringList list();
+
+	/**
+	 * Set the default profile.
+	 */
+	bool defaultSet(QString profile);
+
+	/**
+	 * Get the default profile.
+	 */
+	QString defaultGet();
+
+	/**
+	 * Add a new profile.
+	 */
+	bool add(QString profile, QString username, QString password, QString domain, QString server);
+
+	/**
+	 * Remove a profile.
+	 */
+	bool remove(QString profile);
+
+protected:
+	mapi_context *m_context;
+
+	/**
+	 * Must be called first!
+	 */
+	bool init();
+
+private:
+	bool m_initialised;
+
+	bool addAttribute(const char *profile, const char *attribute, QString value);
+};
+
+/**
+ * The main class represents a connection to the MAPI server.
+ */
+class MapiConnector2 : public MapiProfiles
+{
+public:
+	MapiConnector2();
+	virtual ~MapiConnector2();
+
+	/**
+	 * Connect to the server.
+	 */
+	bool login(QString profile);
+
+	bool fetchFolderContent(mapi_id_t folderID, QList<CalendarDataShort>& list);
+	bool fetchCalendarData(mapi_id_t folderID, mapi_id_t messageID, CalendarData& data);
+
+	/**
+	 * Attempt to resolve a listed subset of the given recipients.
+	 */
+	bool resolveNames(QList<Attendee> &recipients, const QList<unsigned> &needingResolution);
+
+	bool calendarDataUpdate(mapi_id_t folderID, mapi_id_t messageID, CalendarData& data);
+
+	bool fetchGAL(QList<GalMember>& list);
+
+	mapi_object_t *d()
+	{
+		return &m_store;
+	}
+
+private:
+	mapi_object_t openFolder(mapi_id_t folderID);
+
+	mapi_session *m_session;
+	mapi_object_t m_store;
+};
+
+/**
  * A class which wraps a MAPI object such that objects of this type 
  * automatically free the used memory on destruction.
  */
@@ -193,13 +273,13 @@ class MapiObject
 public:
 	MapiObject(TallocContext &ctx, mapi_id_t id);
 
-	~MapiObject();
+	virtual ~MapiObject();
 
 	mapi_object_t *d() const;
 
 	mapi_id_t id() const;
 
-	bool open(mapi_object_t *store, mapi_id_t folderId);
+	virtual bool open(mapi_object_t *store, mapi_id_t folderId) = 0;
 
 	/**
 	 * Add a property with the given int.
@@ -284,12 +364,43 @@ protected:
 };
 
 /**
+ * Represents a MAPI folder.
+ */
+class MapiFolder : public MapiObject
+{
+public:
+	MapiFolder(TallocContext &ctx, mapi_id_t id);
+
+	virtual ~MapiFolder();
+
+	virtual bool open(mapi_object_t *store, mapi_id_t unused = 0);
+
+	QString id() const;
+
+	QString name;
+
+	/**
+	 * Fetch children.
+	 * 
+	 * @param children The children will be added to this list.
+	 * @param filter Only return items whose PR_CONTAINERR_CLASS start this
+	 * 		 value.
+	 */
+	bool childrenPull(QList<MapiFolder> &children, const QString &filter = QString());
+
+protected:
+	mapi_object_t m_hierarchyTable;
+};
+
+/**
  * A Message, with recipients.
  */
 class MapiMessage : public MapiObject
 {
 public:
 	MapiMessage(TallocContext &ctx, mapi_id_t id);
+
+	virtual bool open(mapi_object_t *store, mapi_id_t folderId);
 
 	/**
 	 * How many recipients do we have?
@@ -308,6 +419,37 @@ public:
 
 protected:
 	SRowSet m_recipients;
+};
+
+/**
+ * A very simple wrapper around a property.
+ */
+class MapiProperty : private SPropValue
+{
+public:
+	MapiProperty(SPropValue &property);
+
+	/**
+	 * Get the value of the property in a nice typesafe wrapper.
+	 */
+	QVariant value() const;
+
+	/**
+	 * Get the string equivalent of a property, e.g. for display purposes.
+	 * We take care to hex-ify GUIDs and other byte arrays, and lists of
+	 * the same.
+	 */
+	QString toString() const;
+
+	/**
+	 * Return the integer tag.
+	 * 
+	 * To convert this into a name, @see MapiObject::tagName().
+	 */
+	int tag() const;
+
+private:
+	SPropValue &m_property;
 };
 
 /**
@@ -331,48 +473,6 @@ public:
 
 private:
 	bool debugRecurrencyPattern(RecurrencePattern *pattern);
-};
-
-class MapiConnector2
-{
-public:
-    MapiConnector2();
-    virtual ~MapiConnector2();
-
-	QString getMapiProfileDirectory();
-
-	bool login(QString profilename);
-
-	QStringList listProfiles();
-	bool createProfile(QString profile, QString username, QString password, QString domain, QString server);
-	bool setDefaultProfile(QString profile);
-	QString getDefaultProfile();
-	bool removeProfile(QString profile);
-
-	bool fetchFolderList(QList<FolderData>& list, mapi_id_t parentFolderID=0x0, const QString filter=QString());
-	bool fetchFolderContent(mapi_id_t folderID, QList<CalendarDataShort>& list);
-	bool fetchCalendarData(mapi_id_t folderID, mapi_id_t messageID, CalendarData& data);
-
-	/**
-	 * Attempt to resolve a listed subset of the given recipients.
-	 */
-	bool resolveNames(QList<Attendee> &recipients, const QList<unsigned> &needingResolution);
-
-	bool calendarDataUpdate(mapi_id_t folderID, mapi_id_t messageID, CalendarData& data);
-
-	bool fetchGAL(QList<GalMember>& list);
-
-	mapi_object_t *d()
-	{
-		return &m_store;
-	}
-
-private:
-	mapi_object_t openFolder(mapi_id_t folderID);
-
-	struct mapi_context *m_context;
-	mapi_session *m_session;
-	mapi_object_t  m_store;
 };
 
 #endif // MAPICONNECTOR2_H

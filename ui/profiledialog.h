@@ -44,7 +44,7 @@ private slots:
 private:
 	void updateSelectedProfile();
 
-	MapiConnector2 con;
+	MapiProfiles m_profiles;
 	QString selectedProfile;
 };
 

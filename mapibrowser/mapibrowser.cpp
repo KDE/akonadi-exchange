@@ -61,12 +61,12 @@ mapibrowser::mapibrowser()
 
 void mapibrowser::checkForDefaultProfile()
 {
-	MapiConnector2 con;
-	QString profile = con.getDefaultProfile();
+	MapiProfiles profiles;
+	QString profile = profiles.defaultGet();
 	if (profile.isEmpty()) {
 		// no default profile -> query the user
 		bool ok;
-		profile = QInputDialog::getItem(this, QString::fromAscii("Select Profile"), QString::fromAscii("Profile:"), con.listProfiles(), 0, false, &ok);
+		profile = QInputDialog::getItem(this, QString::fromAscii("Select Profile"), QString::fromAscii("Profile:"), profiles.list(), 0, false, &ok);
 		if (!ok || profile.isEmpty()) {
 			this->close();
 		}
@@ -83,8 +83,14 @@ void mapibrowser::onRefreshTree()
 		return;
 	}
 
-	QList<FolderData> list;
-	if (!con.fetchFolderList(list)) {
+	TallocContext ctx("mapibrowser::onRefreshTree");
+	MapiFolder rootFolder(ctx, 0);
+	if (!rootFolder.open(con.d())) {
+		return;
+	}
+
+	QList<MapiFolder> list;
+	if (!rootFolder.childrenPull(list)) {
 		QMessageBox::warning(this, QString::fromLocal8Bit("Error"), QString::fromLocal8Bit("fetchFolderList failed!"));
 		return;
 	}
@@ -92,10 +98,10 @@ void mapibrowser::onRefreshTree()
 	QTreeWidgetItem *root = new QTreeWidgetItem(main->treeWidget);
 	root->setText(0, QString::fromLocal8Bit("Mailbox"));
 
-	foreach (const FolderData& data, list) {
+	foreach (const MapiFolder &data, list) {
 		QTreeWidgetItem *item = new QTreeWidgetItem(root);
 		item->setText(0, data.name);
-		item->setText(1, data.id);
+		item->setText(1, data.id());
 	}
 
 	root->setExpanded(true);
@@ -163,7 +169,7 @@ void mapibrowser::itemDoubleClicked(QTableWidgetItem* clickedItem)
 #endif
 
 	TallocContext ctx("mapibrowser::itemDoubleClicked");
-	MapiObject message(ctx, messageId.toULongLong());
+	MapiMessage message(ctx, messageId.toULongLong());
 	if (!message.open(con.d(), folderId.toULongLong())) {
 		QMessageBox::warning(this, QString::fromLocal8Bit("Error"), QString::fromLocal8Bit("open failed!\n")+folderId+QString::fromLocal8Bit(":")+messageId);
 		return;

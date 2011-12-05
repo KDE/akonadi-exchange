@@ -44,7 +44,7 @@ void ProfileDialog::readMapiProfiles()
 {
 	listWidget->clear();
 
-	QStringList profiles = con.listProfiles();
+	QStringList profiles = m_profiles.list();
 
 	bool profileExist = false;
 	foreach (QString profile, profiles) {
@@ -95,7 +95,7 @@ void ProfileDialog::slotCreateNewProfile()
 {
 	CreateProfileDialog dlg(this);
 	if (dlg.exec() == QDialog::Accepted) {
-		bool ok = con.createProfile(dlg.getProfileName(), dlg.getUsername(), dlg.getPassword(), dlg.getDomain(), dlg.getServer());
+		bool ok = m_profiles.add(dlg.getProfileName(), dlg.getUsername(), dlg.getPassword(), dlg.getDomain(), dlg.getServer());
 		if (!ok) 
 			KMessageBox::error(this, i18n("An error occurred during the creation of the new profile"));
 		readMapiProfiles();
@@ -108,7 +108,7 @@ void ProfileDialog::slotRemoveProfile()
 		return;
 
 	if (KMessageBox::questionYesNo(this, i18n("Do you really want to delete the selected profile?")) == KMessageBox::Yes) {
-		bool ok = con.removeProfile(selectedProfile);
+		bool ok = m_profiles.remove(selectedProfile);
 		if (!ok) 
 			KMessageBox::error(this, i18n("An error occurred during the deletion of the selected profile"));
 		readMapiProfiles();

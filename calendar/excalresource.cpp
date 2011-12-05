@@ -59,8 +59,6 @@ void ExCalResource::retrieveCollections()
 		return;
 	}
 
-	Collection::List collections;
-
 	QStringList folderMimeType;
 	folderMimeType << QString::fromAscii("text/calendar");
 
@@ -69,15 +67,30 @@ void ExCalResource::retrieveCollections()
 	root.setParentCollection(Collection::root());
 	root.setContentMimeTypes(folderMimeType);
 
-	QList<FolderData> list;
+	TallocContext ctx("ExCalResource::retrieveCollections");
+	MapiFolder rootFolder(ctx, 0);
+	if (!rootFolder.open(connector->d())) {
+		return;
+	}
+
+	QList<MapiFolder> list;
 	emit status(Running, i18n("Fetching folder list from Exchange"));
-	if (connector->fetchFolderList(list, 0x0, QString::fromAscii(IPF_APPOINTMENT))) {
-		foreach (FolderData data, list) {
-			// TODO: take the first calender for now, but Exchange might have more calendar folders
-			root.setRemoteId(data.id);
-			root.setName(i18n("Exchange: ") + data.name);
-			break;
-		}
+	if (!rootFolder.childrenPull(list, QString::fromAscii(IPF_APPOINTMENT))) {
+		kError() << "cannot open root folder";
+		return;
+	}
+	if (list.size() == 0) {
+		kError() << "no calendar folders found";
+		emit status(Broken, i18n("No calendar folders in Exchange"));
+		return;
+	}
+
+	Collection::List collections;
+	foreach (MapiFolder data, list) {
+		// TODO: take the first calender for now, but Exchange might have more calendar folders
+		root.setRemoteId(data.id());
+		root.setName(i18n("Exchange: ") + data.name);
+		break;
 	}
 	collections.append(root);
 
@@ -121,6 +134,7 @@ void ExCalResource::retrieveItems( const Akonadi::Collection &collection )
 	// get the folder content for the collection
 	Item::List items;
 	QList<CalendarDataShort> list;
+	kError() << "fetch items retrieveItems";
 	emit status(Running, i18n("Fetching calendar data from Exchange"));
 	if (connector->fetchFolderContent(collection.remoteId().toULongLong(), list)) {
 		kDebug() << "size of collection" << collection.id() << "is" << list.size();
@@ -250,7 +264,7 @@ bool ExCalResource::retrieveItem( const Akonadi::Item &itemOrig, const QSet<QByt
 		return true;
 	}
 
-	kDebug() << "Failed to get data for item"<<itemOrig.remoteId();
+	kError() << "Failed to get data for item" << itemOrig.remoteId();
 	return false;
 }
 
