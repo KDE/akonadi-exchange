@@ -65,7 +65,8 @@ private:
 	 */
 	void logoff(void);
 
-	MapiConnector2* connector;
+	MapiConnector2 *m_connection;
+	bool m_connected;
 
 private Q_SLOTS:
 	/**

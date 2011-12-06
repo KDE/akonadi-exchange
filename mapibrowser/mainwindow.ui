@@ -32,6 +32,9 @@
       </column>
      </widget>
      <widget class="QTableWidget" name="tableWidget">
+      <property name="sortingEnabled">
+       <bool>true</bool>
+      </property>
       <column>
        <property name="text">
         <string>ID</string>
@@ -52,6 +55,9 @@
    </item>
    <item>
     <widget class="QTableWidget" name="tableWidgetDetail">
+     <property name="sortingEnabled">
+      <bool>true</bool>
+     </property>
      <column>
       <property name="text">
        <string>Tag</string>

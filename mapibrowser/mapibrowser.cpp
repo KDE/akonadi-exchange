@@ -83,25 +83,25 @@ void mapibrowser::onRefreshTree()
 		return;
 	}
 
-	TallocContext ctx("mapibrowser::onRefreshTree");
-	MapiFolder rootFolder(ctx, 0);
-	if (!rootFolder.open(con.d())) {
+	MapiFolder rootFolder(&con, "mapibrowser::onRefreshTree", 0);
+	if (!rootFolder.open()) {
 		return;
 	}
 
-	QList<MapiFolder> list;
+	QList<MapiFolder *> list;
 	if (!rootFolder.childrenPull(list)) {
-		QMessageBox::warning(this, QString::fromLocal8Bit("Error"), QString::fromLocal8Bit("fetchFolderList failed!"));
+		QMessageBox::warning(this, QString::fromLocal8Bit("Error"), QString::fromLocal8Bit("childrenPull failed!"));
 		return;
 	}
 
 	QTreeWidgetItem *root = new QTreeWidgetItem(main->treeWidget);
 	root->setText(0, QString::fromLocal8Bit("Mailbox"));
 
-	foreach (const MapiFolder &data, list) {
+	foreach (const MapiFolder *data, list) {
 		QTreeWidgetItem *item = new QTreeWidgetItem(root);
-		item->setText(0, data.name);
-		item->setText(1, data.id());
+		item->setText(0, data->name);
+		item->setText(1, data->id());
+		delete data;
 	}
 
 	root->setExpanded(true);
@@ -118,9 +118,14 @@ void mapibrowser::itemDoubleClicked(QTreeWidgetItem* clickedItem, int )
 		return;
 	}
 
-	QList<CalendarDataShort> list;
-	if (!con.fetchFolderContent(remoteId.toULongLong(), list)) {
-		QMessageBox::warning(this, QString::fromLocal8Bit("Error"), QString::fromLocal8Bit("fetchFolderContent failed!\n")+remoteId);
+	MapiFolder parentFolder(&con, "mapibrowser::itemDoubleClicked", remoteId.toULongLong());
+	if (!parentFolder.open()) {
+		return;
+	}
+
+	QList<MapiItem *> list;
+	if (!parentFolder.childrenPull(list)) {
+		QMessageBox::warning(this, QString::fromLocal8Bit("Error"), QString::fromLocal8Bit("childrenPull failed!\n")+remoteId);
 		return;
 	}
 
@@ -129,15 +134,15 @@ void mapibrowser::itemDoubleClicked(QTreeWidgetItem* clickedItem, int )
 
 	main->tableWidget->setRowCount(list.size());
 	int row=0;
-	foreach (const CalendarDataShort& data, list) {
+	foreach (const MapiItem *data, list) {
 		QTableWidgetItem *newItem;
-		newItem = new QTableWidgetItem(data.id);
+		newItem = new QTableWidgetItem(data->id);
 		main->tableWidget->setItem(row, 0, newItem);
-		newItem = new QTableWidgetItem(data.title);
+		newItem = new QTableWidgetItem(data->title);
 		main->tableWidget->setItem(row, 1, newItem);
-		newItem = new QTableWidgetItem(data.modified.toString());
+		newItem = new QTableWidgetItem(data->modified.toString());
 		main->tableWidget->setItem(row, 2, newItem);
-
+		delete data;
 		row++;
 	}
 
@@ -168,9 +173,8 @@ void mapibrowser::itemDoubleClicked(QTableWidgetItem* clickedItem)
 	// JUST FOR DEBUG --END--
 #endif
 
-	TallocContext ctx("mapibrowser::itemDoubleClicked");
-	MapiMessage message(ctx, messageId.toULongLong());
-	if (!message.open(con.d(), folderId.toULongLong())) {
+	MapiMessage message(&con, "mapibrowser::itemDoubleClicked", messageId.toULongLong());
+	if (!message.open(folderId.toULongLong())) {
 		QMessageBox::warning(this, QString::fromLocal8Bit("Error"), QString::fromLocal8Bit("open failed!\n")+folderId+QString::fromLocal8Bit(":")+messageId);
 		return;
 	}

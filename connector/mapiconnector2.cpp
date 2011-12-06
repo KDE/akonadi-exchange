@@ -130,8 +130,8 @@ static int profileSelectCallback(struct SRowSet *rowset, const void* /*private_v
 	return rowset->cRows;
 }
 
-MapiAppointment::MapiAppointment(TallocContext &ctx, mapi_id_t id) :
-	MapiMessage(ctx, id)
+MapiAppointment::MapiAppointment(MapiConnector2 *connector, const char *tallocName, mapi_id_t id) :
+	MapiMessage(connector, tallocName, id)
 {
 }
 
@@ -204,19 +204,20 @@ bool MapiAppointment::debugRecurrencyPattern(RecurrencePattern *pattern)
 	return true;
 }
 
-bool MapiAppointment::getAttendees(QList<Attendee> &attendees, QList<unsigned> &needingResolution)
+bool MapiAppointment::getAttendees()
 {
-	if (!recipientsPull()) {
+	if (!MapiMessage::recipientsPull()) {
 		return false;
 	}
 
-	needingResolution.clear();
+	// Get the attendees, and find any that need resolution.
+	QList<unsigned> needingResolution;
 	for (unsigned i = 0; i < recipientCount(); i++) {
 // TODO for debugging
 //		QString tagStr;
 //		tagStr.sprintf("0x%X", recipients.aRow[i].lpProps[j].ulPropTag);
 //		qDebug() << tagStr << mapiValueToQString(&recipients.aRow[i].lpProps[j]);
-		Attendee attendee = recipientAt(i);
+		Attendee attendee(recipientAt(i));
 		if (attendee.email.isEmpty() ||
 			!attendee.email.contains(QString::fromAscii("@"))) {
 			needingResolution << i;
@@ -224,19 +225,112 @@ bool MapiAppointment::getAttendees(QList<Attendee> &attendees, QList<unsigned> &
 		}
 		attendees << attendee;
 	}
+
+	if (needingResolution.size() == 0) {
+		return true;
+	}
+
+	// Fill an array with the names we need to resolve.
+	const char *names[needingResolution.size() + 1];
+	unsigned j = 0;
+	foreach (unsigned i, needingResolution) {
+		Attendee &attendee = attendees[i];
+		names[j] = talloc_strdup(ctx(), attendee.name.toStdString().c_str());
+		j++;
+	}
+	names[j] = 0;
+
+	// Resolve the lot.
+	struct PropertyTagArray_r *statuses = NULL;
+	struct SPropTagArray *tags = NULL;
+	struct SRowSet *results = NULL;
+
+	tags = set_SPropTagArray(ctx(), 0x9, 
+				 PR_7BIT_DISPLAY_NAME,         PR_DISPLAY_NAME,         PR_RECIPIENT_DISPLAY_NAME, 
+				 PR_7BIT_DISPLAY_NAME_UNICODE, PR_DISPLAY_NAME_UNICODE, PR_RECIPIENT_DISPLAY_NAME_UNICODE, 
+				 PR_SMTP_ADDRESS,
+				 PR_SMTP_ADDRESS_UNICODE,
+				 0x6001001f);
+	if (!m_connection->resolveNames(names, tags, &results, &statuses)) {
+		return false;
+	}
+	if (results) {
+		for (unsigned i = 0; i < results->cRows; i++) {
+			if (MAPI_UNRESOLVED != statuses->aulPropTag[i]) {
+				struct SRow &recipient = results->aRow[i];
+				QString name, email;
+				for (unsigned j = 0; j < recipient.cValues; j++) {
+					MapiProperty property(recipient.lpProps[j]);
+
+					// Note that the set of properties fetched here must be aligned
+					// with those fetched in MapiMessage::recipientAt(), as well
+					// as the array above.
+					switch (property.tag()) {
+					case PR_7BIT_DISPLAY_NAME:
+					case PR_DISPLAY_NAME:
+					case PR_RECIPIENT_DISPLAY_NAME:
+						// We'd prefer a Unicode answer if there is one!
+						if (name.isEmpty()) {
+							name = property.value().toString(); 
+						}
+						break;
+					case PR_7BIT_DISPLAY_NAME_UNICODE:
+					case PR_DISPLAY_NAME_UNICODE:
+					case PR_RECIPIENT_DISPLAY_NAME_UNICODE:
+						name = property.value().toString(); 
+						break;
+					case PR_SMTP_ADDRESS:
+						// We'd prefer a Unicode answer if there is one!
+						if (email.isEmpty()) {
+							email = property.value().toString(); 
+						}
+						break;
+					case PR_SMTP_ADDRESS_UNICODE:
+					case 0x6001001f:
+						email = property.value().toString(); 
+						break;
+					default:
+						break;
+					}
+				}
+
+				// A resolved value is better than an unresolved one.
+				Attendee &attendee = attendees[needingResolution.at(i)];
+				if (!name.isEmpty()) {
+					attendee.name = name;
+				}
+				if (!email.isEmpty()) {
+					attendee.email = email;
+				}
+			}
+		}
+	}
+	MAPIFreeBuffer(results);
+	MAPIFreeBuffer(statuses);
+
+	// Time for one final fallback, based on the use of the name.
+	foreach (unsigned i, needingResolution) {
+		Attendee &attendee = attendees[i];
+		if (attendee.email.isEmpty()) {
+			attendee.email = attendee.name;
+		}
+	}
+	foreach (const Attendee &attendee, attendees) {
+		qCritical () << "Attendee" << attendee.name << attendee.email;
+	}
 	return true;
 }
 
-bool MapiAppointment::open(mapi_object_t *store, mapi_id_t folderId)
+bool MapiAppointment::open(mapi_id_t folderId)
 {
-	if (!MapiMessage::open(store, folderId)) {
+	if (!MapiMessage::open(folderId)) {
 		return false;
 	}
 
 	// Sanity check the message class.
 	QVector<int> readTags;
 	readTags.append(PidTagMessageClass);
-	if (!propertiesPull(readTags)) {
+	if (!MapiMessage::propertiesPull(readTags)) {
 		return false;
 	}
 	QString messageClass = property(PidTagMessageClass).toString();
@@ -244,52 +338,190 @@ bool MapiAppointment::open(mapi_object_t *store, mapi_id_t folderId)
 		// this one is not an appointment
 		return false;
 	}
+	fid = QString::number(folderId);
+	id = QString::number(m_id);
+	reminderActive = false;
 	return true;
 }
 
-RecurrencePattern *MapiAppointment::recurrance()
+bool MapiAppointment::propertiesPull()
 {
-	unsigned recurrenceType = propertyFind(PidLidRecurrenceType);
+	if (!MapiMessage::propertiesPull()) {
+		return false;
+	}
+
+	unsigned recurrenceType = 0;
+	RecurrencePattern *pattern = 0;
+	for (unsigned i = 0; i < m_propertyCount; i++) {
+		MapiProperty property(m_properties[i]);
+
+		// Note that the set of properties fetched here must be aligned
+		// with those set above.
+		switch (property.tag()) {
+		case PidTagConversationTopic:
+			title = property.value().toString();
+			break;
+		case PidTagBody:
+			text = property.value().toString();
+			break;
+		case PidTagLastModificationTime:
+			modified = property.value().toDateTime();
+			break;
+		case PidTagCreationTime:
+			created = property.value().toDateTime();
+			break;
+		case PidTagStartDate:
+			begin = property.value().toDateTime();
+			break;
+		case PidTagEndDate:
+			end = property.value().toDateTime();
+			break;
+		case PidTagSentRepresentingName:
+			sender = property.value().toString();
+			break;
+		case PidLidLocation:
+			location = property.value().toString();
+			break;
+		case PidLidReminderSet:
+			reminderActive = property.value().toInt();
+			break;
+		case PidLidReminderSignalTime:
+			reminderTime = property.value().toDateTime();
+			break;
+		case PidLidReminderDelta:
+			reminderMinutes = property.value().toInt();
+			break;
+		case PidLidRecurrenceType:
+			recurrenceType = property.value().toInt();
+			break;
+		case PidLidAppointmentRecur:
+			pattern = get_RecurrencePattern(ctx(), &m_properties[i].value.bin);
+			break;
+		default:
+			//qCritical() << "ignoring appointment property name:" << tagName(property.tag()) << property.value();
+			break;
+		}
+	}
 
 	// Is there a recurrance type set?
-	if (recurrenceType == UINT_MAX) {
-		return 0;
-	}
-	recurrenceType = propertyAt(recurrenceType).toInt();
-	if (recurrenceType == 0x0) {
-		return 0;
+	if (recurrenceType != 0) {
+		if (pattern) {
+			debugRecurrencyPattern(pattern);
+			recurrency.setData(pattern);
+		} else {
+			// TODO This should not happen. PidLidRecurrenceType says this is a recurring event, so why is there no PidLidAppointmentRecur???
+			qCritical() << "missing recurrencePattern in message" << m_id;
+		}
+		return false;
 	}
 
-	// Can we find the recurrance data? 
-	unsigned recurrenceData = propertyFind(PidLidAppointmentRecur);
-	if (recurrenceData == UINT_MAX) {
-		// TODO This should not happen. PidLidRecurrenceType says this is a recurring event, so why is there no PidLidAppointmentRecur???
-		qDebug() << "missing recurrencePattern in message" << m_id;
-		return 0;
+	if (!getAttendees()) {
+		return false;
 	}
-	RecurrencePattern *pattern = get_RecurrencePattern(m_ctx.d(), &m_properties[recurrenceData].value.bin);
-	debugRecurrencyPattern(pattern);
-	return pattern;
+	return true;
 }
 
-Attendee MapiAppointment::recipientAt(unsigned i) const
+bool MapiAppointment::propertiesPush()
 {
-	Attendee result(MapiMessage::recipientAt(i));
+	// Overwrite all the fields we know about.
+	if (!propertyWrite(PidTagConversationTopic, title)) {
+		return false;
+	}
+	if (!propertyWrite(PidTagBody, text)) {
+		return false;
+	}
+	if (!propertyWrite(PidTagLastModificationTime, modified)) {
+		return false;
+	}
+	if (!propertyWrite(PidTagCreationTime, created)) {
+		return false;
+	}
+	if (!propertyWrite(PidTagStartDate, begin)) {
+		return false;
+	}
+	if (!propertyWrite(PidTagEndDate, end)) {
+		return false;
+	}
+	if (!propertyWrite(PidTagSentRepresentingName, sender)) {
+		return false;
+	}
+	if (!propertyWrite(PidLidLocation, location)) {
+		return false;
+	}
+	if (!propertyWrite(PidLidReminderSet, reminderActive)) {
+		return false;
+	}
+	if (reminderActive) {
+		if (!propertyWrite(PidLidReminderSignalTime, reminderTime)) {
+			return false;
+		}
+		if (!propertyWrite(PidLidReminderDelta, reminderMinutes)) {
+			return false;
+		}
+	}
+#if 0
+	const char* toAttendeesString = (const char *)find_mapi_SPropValue_data(&properties_array, PR_DISPLAY_TO_UNICODE);
+	uint32_t* recurrenceType = (uint32_t*)find_mapi_SPropValue_data(&properties_array, PidLidRecurrenceType);
+	Binary_r* binDataRecurrency = (Binary_r*)find_mapi_SPropValue_data(&properties_array, PidLidAppointmentRecur);
 
-	return result;
+	if (recurrenceType && (*recurrenceType) > 0x0) {
+		if (binDataRecurrency != 0x0) {
+			RecurrencePattern* pattern = get_RecurrencePattern(mem_ctx, binDataRecurrency);
+			debugRecurrencyPattern(pattern);
+
+			data.recurrency.setData(pattern);
+		} else {
+			// TODO This should not happen. PidLidRecurrenceType says this is a recurring event, so why is there no PidLidAppointmentRecur???
+			qDebug() << "missing recurrencePattern in message"<<messageID<<"in folder"<<folderID;
+			}
+	}
+
+	getAttendees(obj_message, QString::fromLocal8Bit(toAttendeesString), data);
+#endif
+	if (!MapiMessage::propertiesPush()) {
+		return false;
+	}
+#if 0
+	qCritical() << "************  OpenFolder";
+	if (!OpenFolder(&m_store, folder.id(), folder.d())) {
+		qCritical() << "cannot open folder" << folderID
+			<< ", error:" << mapiError();
+		return false;
+        }
+	qCritical() << "************  SaveChangesMessage";
+	if (!SaveChangesMessage(folder.d(), message.d(), KeepOpenReadWrite)) {
+		qCritical() << "cannot save message" << messageID << "in folder" << folderID
+			<< ", error:" << mapiError();
+		return false;
+	}
+#endif
+	qCritical() << "************  SubmitMessage";
+	if (MAPI_E_SUCCESS != SubmitMessage(&m_object)) {
+		qCritical() << "cannot submit message" << id << "in folder" << fid
+			<< ", error:" << mapiError();
+		return false;
+	}
+	struct mapi_SPropValue_array replyProperties;
+	qCritical() << "************  TransportSend";
+	if (MAPI_E_SUCCESS != TransportSend(&m_object, &replyProperties)) {
+		qDebug() << "cannot send message" << id << "in folder" << fid
+			<< ", error:" << mapiError();
+		return false;
+	}
+	return true;
 }
 
-MapiFolder::MapiFolder(TallocContext &ctx, mapi_id_t id) :
-	MapiObject(ctx, id)
+MapiFolder::MapiFolder(MapiConnector2 *connection, const char *tallocName, mapi_id_t id) :
+	MapiObject(connection, tallocName, id)
 {
-	mapi_object_init(&m_hierarchyTable);
+	mapi_object_init(&m_contents);
 	// A temporary name.
 	name = this->id();
 }
 
 MapiFolder::~MapiFolder()
 {
-	mapi_object_release(&m_hierarchyTable);
+	mapi_object_release(&m_contents);
 }
 
 QString MapiFolder::id() const
@@ -297,19 +529,21 @@ QString MapiFolder::id() const
 	return QString::number(m_id);
 }
 
-bool MapiFolder::childrenPull(QList<class MapiFolder> &children, const QString &filter)
+bool MapiFolder::childrenPull(QList<MapiFolder *> &children, const QString &filter)
 {
-	if (MAPI_E_SUCCESS != GetHierarchyTable(&m_object, &m_hierarchyTable, 0, NULL)) {
+	// Retrieve folder's folder table
+	if (MAPI_E_SUCCESS != GetHierarchyTable(&m_object, &m_contents, 0, NULL)) {
 		qCritical() << "cannot get hierarchy table" << mapiError();
 		return false;
 	}
 
-	SPropTagArray* tags = set_SPropTagArray(m_ctx.d(), 0x3, PR_FID, PR_DISPLAY_NAME, PR_CONTAINER_CLASS);
+	// Create the MAPI table view
+	SPropTagArray* tags = set_SPropTagArray(ctx(), 0x3, PR_FID, PR_DISPLAY_NAME, PR_CONTAINER_CLASS);
 	if (!tags) {
 		qCritical() << "cannot set hierarchy table tags" << mapiError();
 		return false;
 	}
-	if (MAPI_E_SUCCESS != SetColumns(&m_hierarchyTable, tags)) {
+	if (MAPI_E_SUCCESS != SetColumns(&m_contents, tags)) {
 		qCritical() << "cannot set hierarchy table columns" << mapiError();
 		MAPIFreeBuffer(tags);
 		return false;
@@ -318,14 +552,15 @@ bool MapiFolder::childrenPull(QList<class MapiFolder> &children, const QString &
 
 	// Get current cursor position.
 	uint32_t cursor;
-	if (MAPI_E_SUCCESS != QueryPosition(&m_hierarchyTable, NULL, &cursor)) {
+	if (MAPI_E_SUCCESS != QueryPosition(&m_contents, NULL, &cursor)) {
 		qCritical() << "cannot query position" << mapiError();
 		return false;
 	}
 
+	// Iterate through sets of rows.
 	SRowSet rowset;
-	while ((QueryRows(&m_hierarchyTable, cursor, TBL_ADVANCE, &rowset) == MAPI_E_SUCCESS) && rowset.cRows) {
-		for (unsigned i = 0; i < rowset.cRows; ++i) {
+	while ((QueryRows(&m_contents, cursor, TBL_ADVANCE, &rowset) == MAPI_E_SUCCESS) && rowset.cRows) {
+		for (unsigned i = 0; i < rowset.cRows; i++) {
 			SRow &row = rowset.aRow[i];
 			mapi_id_t fid;
 			QString name;
@@ -357,27 +592,95 @@ bool MapiFolder::childrenPull(QList<class MapiFolder> &children, const QString &
 			}
 
 			// Add the entry to the output list!
-			MapiFolder data(m_ctx, fid);
-			data.name = name;
+			MapiFolder *data = new MapiFolder(m_connection, "MapiFolder::childrenPull", fid);
+			data->name = name;
 			children.append(data);
 		}
 	}
 	return true;
 }
 
-bool MapiFolder::open(mapi_object_t *store, mapi_id_t unused)
+bool MapiFolder::childrenPull(QList<MapiItem *> &children)
+{
+	// Retrieve folder's content table
+	if (MAPI_E_SUCCESS != GetContentsTable(&m_object, &m_contents, 0, NULL)) {
+		qCritical() << "cannot get content table" << mapiError();
+		return false;
+	}
+
+	// Create the MAPI table view
+	SPropTagArray* tags = set_SPropTagArray(ctx(), 0x4, PR_FID, PR_MID, PR_CONVERSATION_TOPIC, PR_LAST_MODIFICATION_TIME);
+	if (!tags) {
+		qCritical() << "cannot set content table tags" << mapiError();
+		return false;
+	}
+	if (MAPI_E_SUCCESS != SetColumns(&m_contents, tags)) {
+		qCritical() << "cannot set content table columns" << mapiError();
+		MAPIFreeBuffer(tags);
+		return false;
+	}
+	MAPIFreeBuffer(tags);
+
+	// Get current cursor position.
+	uint32_t cursor;
+	if (MAPI_E_SUCCESS != QueryPosition(&m_contents, NULL, &cursor)) {
+		qCritical() << "cannot query position" << mapiError();
+		return false;
+	}
+
+	// Iterate through sets of rows.
+	SRowSet rowset;
+	while ((QueryRows(&m_contents, cursor, TBL_ADVANCE, &rowset) == MAPI_E_SUCCESS) && rowset.cRows) {
+		for (unsigned i = 0; i < rowset.cRows; i++) {
+			SRow &row = rowset.aRow[i];
+			MapiItem *data = new MapiItem();
+
+			for (unsigned j = 0; j < row.cValues; j++) {
+				MapiProperty property(row.lpProps[j]); 
+
+				// Note that the set of properties fetched here must be aligned
+				// with those set above.
+				switch (property.tag()) {
+				case PR_FID:
+					data->fid = QString::number(property.value().toULongLong()); 
+					break;
+				case PR_MID:
+					data->id = QString::number(property.value().toULongLong()); 
+					break;
+				case PR_CONVERSATION_TOPIC:
+					data->title = property.value().toString(); 
+					break;
+				case PR_LAST_MODIFICATION_TIME:
+					data->modified = property.value().toDateTime(); 
+					break;
+				default:
+					qCritical() << "ignoring item property name:" << tagName(property.tag()) << property.value();
+					break;
+				}
+			}
+
+			// Add the entry to the output list!
+			children.append(data);
+			//TODO Just for debugging (in case the content list ist very long)
+			//if (i >= 10) break;
+		}
+	}
+	return true;
+}
+
+bool MapiFolder::open(mapi_id_t unused)
 {
 	Q_UNUSED(unused);
 	mapi_id_t id = m_id;
 
 	// Get the toplevel folder id if needed.
 	if (id == 0) {
-		if (MAPI_E_SUCCESS != GetDefaultFolder(store, &id, olFolderTopInformationStore)) {
+		if (MAPI_E_SUCCESS != GetDefaultFolder(m_connection->d(), &id, olFolderTopInformationStore)) {
 			qCritical() << "cannot get default folder" << mapiError();
 			return false;
 		}
 	}
-	if (MAPI_E_SUCCESS != OpenFolder(store, id, &m_object)) {
+	if (MAPI_E_SUCCESS != OpenFolder(m_connection->d(), id, &m_object)) {
 		qCritical() << "cannot open folder" << id << mapiError();
 		return false;
 	}
@@ -639,104 +942,11 @@ bool MapiConnector2::login(QString profile)
 	return true;
 }
 
-bool MapiConnector2::fetchFolderContent(mapi_id_t folderID, QList<CalendarDataShort>& list)
+bool MapiConnector2::resolveNames(const char *names[], SPropTagArray *tags,
+				  SRowSet **results, PropertyTagArray_r **statuses)
 {
-	::TallocContext ctx("MapiConnector2::fetchFolderContent");
-	MapiFolder topFolder(ctx, folderID);
-	if (!topFolder.open(&m_store, folderID)) {
-		return false;
-	}
-
-	// Retrieve folder's content table
-	mapi_object_t obj_table;
-	mapi_object_init(&obj_table);
-	if (GetContentsTable(topFolder.d(), &obj_table, 0x0, NULL) != MAPI_E_SUCCESS) {
-		mapi_object_release(&obj_table);
-		return false;
-	}
-
-	// Create the MAPI table view
-	struct SPropTagArray *SPropTagArray =  set_SPropTagArray(m_context, 0x4, PR_FID, PR_MID, PR_CONVERSATION_TOPIC, PR_LAST_MODIFICATION_TIME);
-	if (SetColumns(&obj_table, SPropTagArray) != MAPI_E_SUCCESS) {
-		MAPIFreeBuffer(SPropTagArray);
-		mapi_object_release(&obj_table);
-		return false;
-	}
-	MAPIFreeBuffer(SPropTagArray);
-
-	// Get current cursor position
-	uint32_t Denominator;
-	if (QueryPosition(&obj_table, NULL, &Denominator) != MAPI_E_SUCCESS) {
-		mapi_object_release(&obj_table);
-		return false;
-	}
-
-	// Iterate through rows
-	SRowSet rowset;
-	while (QueryRows(&obj_table, Denominator, TBL_ADVANCE, &rowset) == MAPI_E_SUCCESS && rowset.cRows) {
-		for (uint32_t i = 0; i < rowset.cRows; i++) {
-			mapi_id_t* fid = (mapi_id_t *)find_SPropValue_data(&(rowset.aRow[i]), PR_FID);
-			mapi_id_t* mid = (mapi_id_t *)find_SPropValue_data(&(rowset.aRow[i]), PR_MID);
-			const char* topic = (const char *)find_SPropValue_data(&(rowset.aRow[i]), PR_CONVERSATION_TOPIC);
-			const FILETIME* modTime = (const FILETIME*)find_SPropValue_data(&(rowset.aRow[i]), PR_LAST_MODIFICATION_TIME);
-
-			CalendarDataShort data;
-			data.fid = QString::number(*fid);
-			data.id = QString::number(*mid);
-			data.title = QString::fromAscii(topic);
-			data.modified = convertSysTime(*modTime);
-			list.append(data);
-
-			//TODO Just for debugging (in case the content list ist very long)
-			//if (i >= 10) break;
-		}
-	}
-
-	mapi_object_release(&obj_table);
-	return true;
-}
-
-bool MapiConnector2::fetchCalendarData(mapi_id_t folderID, mapi_id_t messageID, CalendarData& data)
-{
-	::TallocContext ctx("MapiConnector2::fetchCalendarData");
-	MapiAppointment message(ctx, messageID);
-
-	if (!message.open(&m_store, folderID)) {
-		return false;
-	}
-
-	if (!message.propertiesPull()) {
-		return false;
-	}
-
-	data.fid = QString::number(folderID);
-	data.id = QString::number(messageID);
-	data.title = message.property(PidTagConversationTopic).toString();
-	data.text = message.property(PidTagBody).toString();
-	data.modified = message.property(PidTagLastModificationTime).toDateTime();
-	data.created = message.property(PidTagCreationTime).toDateTime();
-	data.begin = message.property(PidTagStartDate).toDateTime();
-	data.end = message.property(PidTagEndDate).toDateTime();
-	data.sender = message.property(PidTagSentRepresentingName).toString();
-	data.location = message.property(PidLidLocation).toString();
-//	const char* recurrencePattern = (const char* )find_mapi_SPropValue_data(&properties_array, PidLidRecurrencePattern);
-//	const SBinary_short *binData = (const SBinary_short*)find_mapi_SPropValue_data(&properties_array, PidLidAppointmentRecur);
-	RecurrencePattern *pattern = message.recurrance();
-	if (pattern) {
-		data.recurrency.setData(pattern);
-	}
-	data.reminderActive = message.property(PidLidReminderSet).toInt();
-	if (data.reminderActive) {
-		data.reminderTime = message.property(PidLidReminderSignalTime).toDateTime();
-		data.reminderDelta = message.property(PidLidReminderDelta).toInt();
-	}
-
-	// Get the attendees, and find any that need resolution.
-	QList<unsigned> needingResolution;
-	if (!message.getAttendees(data.attendees, needingResolution)) {
-		return false;
-	}
-	if (!resolveNames(data.attendees, needingResolution)) {
+	if (MAPI_E_SUCCESS != ResolveNames(m_session, names, tags, results, statuses, 0x0)) {
+		qCritical() << "cannot resolve names" << mapiError();
 		return false;
 	}
 	return true;
@@ -752,22 +962,22 @@ TallocContext::~TallocContext()
 	talloc_free(m_ctx);
 }
 
-TALLOC_CTX *TallocContext::d()
+TALLOC_CTX *TallocContext::ctx()
 {
 	return m_ctx;
 }
 
-MapiMessage::MapiMessage(TallocContext &ctx, mapi_id_t id) :
-	MapiObject(ctx, id)
+MapiMessage::MapiMessage(MapiConnector2 *connection, const char *tallocName, mapi_id_t id) :
+	MapiObject(connection, tallocName, id)
 {
 	m_recipients.cRows = 0;
 }
 
-bool MapiMessage::open(mapi_object_t *store, mapi_id_t folderId)
+bool MapiMessage::open(mapi_id_t folderId)
 {
-	if (MAPI_E_SUCCESS != OpenMessage(store, folderId, m_id, &m_object, 0x0)) {
-		qCritical() << "cannot open message:" << m_id << "in folder:" << folderId
-		<< ", error:" << mapiError();
+	if (MAPI_E_SUCCESS != OpenMessage(m_connection->d(), folderId, m_id, &m_object, 0x0)) {
+		qCritical() << "cannot open message:" << m_id << "in folder:" <<
+			folderId << ", error:" << mapiError();
 		return false;
 	}
 	return true;
@@ -847,8 +1057,9 @@ Recipient MapiMessage::recipientAt(unsigned i) const
 	return result;
 }
 
-MapiObject::MapiObject(TallocContext &ctx, mapi_id_t id) :
-	m_ctx(ctx),
+MapiObject::MapiObject(MapiConnector2 *connection, const char *tallocName, mapi_id_t id) :
+	TallocContext(tallocName),
+	m_connection(connection),
 	m_id(id),
 	m_properties(0),
 	m_propertyCount(0)
@@ -888,7 +1099,7 @@ bool MapiObject::propertyWrite(int tag, void *data, bool idempotent)
 	}
 
 	// Add a new entry to the array.
-	m_properties = add_SPropValue(m_ctx.d(), m_properties, &m_propertyCount, (MAPITAGS)tag, data);
+	m_properties = add_SPropValue(ctx(), m_properties, &m_propertyCount, (MAPITAGS)tag, data);
 	if (!m_properties) {
 		qCritical() << "cannot write tag:" << tagName(tag) << "value:" << data;
 		return false;
@@ -903,7 +1114,7 @@ bool MapiObject::propertyWrite(int tag, int data, bool idempotent)
 
 bool MapiObject::propertyWrite(int tag, QString &data, bool idempotent)
 {
-	char *copy = talloc_strdup(m_ctx.d(), data.toUtf8().data());
+	char *copy = talloc_strdup(ctx(), data.toUtf8().data());
 
 	if (!copy) {
 		qCritical() << "cannot talloc:" << data;
@@ -915,7 +1126,7 @@ bool MapiObject::propertyWrite(int tag, QString &data, bool idempotent)
 
 bool MapiObject::propertyWrite(int tag, QDateTime &data, bool idempotent)
 {
-	FILETIME *copy = talloc(m_ctx.d(), FILETIME);
+	FILETIME *copy = talloc(ctx(), FILETIME);
 
 	if (!copy) {
 		qCritical() << "cannot talloc:" << data;
@@ -949,13 +1160,13 @@ bool MapiObject::propertiesPull(QVector<int> &tags)
 	m_propertyCount = 0;
 	foreach (int tag, tags) {
 		if (!tagArray) {
-			tagArray = set_SPropTagArray(m_ctx.d(), 1, (MAPITAGS)tag);
+			tagArray = set_SPropTagArray(ctx(), 1, (MAPITAGS)tag);
 			if (!tagArray) {
 				qCritical() << "cannot allocate tags:" << mapiError();
 				return false;
 			}
 		} else {
-			if (MAPI_E_SUCCESS != SPropTagArray_add(m_ctx.d(), tagArray, (MAPITAGS)tag)) {
+			if (MAPI_E_SUCCESS != SPropTagArray_add(ctx(), tagArray, (MAPITAGS)tag)) {
 				qCritical() << "cannot extend tags:" << mapiError();
 				MAPIFreeBuffer(tagArray);
 				return false;
@@ -983,10 +1194,10 @@ bool MapiObject::propertiesPull()
 	}
 
 	// Copy results from MAPI array to our array.
-	m_properties = talloc_array(m_ctx.d(), SPropValue, mapiProperties.cValues);
+	m_properties = talloc_array(ctx(), SPropValue, mapiProperties.cValues);
 	if (m_properties) {
 		for (m_propertyCount = 0; m_propertyCount < mapiProperties.cValues; m_propertyCount++) {
-			cast_SPropValue(m_ctx.d(), &mapiProperties.lpProps[m_propertyCount], 
+			cast_SPropValue(ctx(), &mapiProperties.lpProps[m_propertyCount], 
 					&m_properties[m_propertyCount]);
 		}
 	} else {
@@ -1238,209 +1449,6 @@ QString MapiProperty::toString() const
 int MapiProperty::tag() const
 {
 	return m_property.ulPropTag;
-}
-
-bool MapiConnector2::calendarDataUpdate(mapi_id_t folderID, mapi_id_t messageID, CalendarData& data)
-{
-	::TallocContext ctx("MapiConnector2::calendarDataUpdate");
-	MapiAppointment message(ctx, messageID);
-
-	if (!message.open(&m_store, folderID)) {
-		return false;
-	}
-
-        if (!message.propertiesPull()) {
-		return false;
-	}
-	for (unsigned i = 0; i < message.propertyCount(); i++) {
-		qCritical() << "pulled:" << message.tagAt(i) << "value:" << message.propertyString(i); 
-	}
-
-	// Overwrite all the fields we know about.
-	if (!message.propertyWrite(PidTagConversationTopic, data.title)) {
-		return false;
-	}
-	if (!message.propertyWrite(PidTagBody, data.text)) {
-		return false;
-	}
-	if (!message.propertyWrite(PidTagLastModificationTime, data.modified)) {
-		return false;
-	}
-	if (!message.propertyWrite(PidTagCreationTime, data.created)) {
-		return false;
-	}
-	if (!message.propertyWrite(PidTagStartDate, data.begin)) {
-		return false;
-	}
-	if (!message.propertyWrite(PidTagEndDate, data.end)) {
-		return false;
-	}
-	if (!message.propertyWrite(PidTagSentRepresentingName, data.sender)) {
-		return false;
-	}
-	if (!message.propertyWrite(PidLidLocation, data.location)) {
-		return false;
-	}
-	if (!message.propertyWrite(PidLidReminderSet, data.reminderActive)) {
-		return false;
-	}
-	if (data.reminderActive) {
-		if (!message.propertyWrite(PidLidReminderSignalTime, data.reminderTime)) {
-			return false;
-		}
-		if (!message.propertyWrite(PidLidReminderDelta, data.reminderDelta)) {
-			return false;
-		}
-	}
-#if 0
-	const char* toAttendeesString = (const char *)find_mapi_SPropValue_data(&properties_array, PR_DISPLAY_TO_UNICODE);
-	uint32_t* recurrenceType = (uint32_t*)find_mapi_SPropValue_data(&properties_array, PidLidRecurrenceType);
-	Binary_r* binDataRecurrency = (Binary_r*)find_mapi_SPropValue_data(&properties_array, PidLidAppointmentRecur);
-
-	if (recurrenceType && (*recurrenceType) > 0x0) {
-		if (binDataRecurrency != 0x0) {
-			RecurrencePattern* pattern = get_RecurrencePattern(mem_ctx, binDataRecurrency);
-			debugRecurrencyPattern(pattern);
-
-			data.recurrency.setData(pattern);
-		} else {
-			// TODO This should not happen. PidLidRecurrenceType says this is a recurring event, so why is there no PidLidAppointmentRecur???
-			qDebug() << "missing recurrencePattern in message"<<messageID<<"in folder"<<folderID;
-			}
-	}
-
-	getAttendees(obj_message, QString::fromLocal8Bit(toAttendeesString), data);
-#endif
-	if (!message.propertiesPush()) {
-		return false;
-	}
-#if 0
-	qCritical() << "************  OpenFolder";
-	if (!OpenFolder(&m_store, folder.id(), folder.d())) {
-		qCritical() << "cannot open folder" << folderID
-			<< ", error:" << mapiError();
-		return false;
-        }
-	qCritical() << "************  SaveChangesMessage";
-	if (!SaveChangesMessage(folder.d(), message.d(), KeepOpenReadWrite)) {
-		qCritical() << "cannot save message" << messageID << "in folder" << folderID
-			<< ", error:" << mapiError();
-		return false;
-	}
-#endif
-	qCritical() << "************  SubmitMessage";
-	if (MAPI_E_SUCCESS != SubmitMessage(message.d())) {
-		qCritical() << "cannot submit message" << messageID << "in folder" << folderID
-			<< ", error:" << mapiError();
-		return false;
-	}
-	struct mapi_SPropValue_array replyProperties;
-	qCritical() << "************  TransportSend";
-	if (MAPI_E_SUCCESS != TransportSend(message.d(), &replyProperties)) {
-		qDebug() << "cannot send message" << messageID << "in folder" << folderID
-			<< ", error:" << mapiError();
-		return false;
-	}
-	return true;
-}
-
-bool MapiConnector2::resolveNames(QList<Attendee> &attendees, const QList<unsigned> &needingResolution)
-{
-	if (needingResolution.size() == 0) {
-		return true;
-	}
-
-	// Fill an array with the names we need to resolve.
-	const char *names[needingResolution.size() + 1];
-	::TallocContext ctx("MapiConnector2::resolveNames");
-
-	unsigned j = 0;
-	foreach (unsigned i, needingResolution) {
-		Attendee &attendee = attendees[i];
-		names[j] = talloc_strdup(ctx.d(), attendee.name.toStdString().c_str());
-		j++;
-	}
-	names[j] = 0;
-
-	// Resolve the lot.
-	struct PropertyTagArray_r *statuses = NULL;
-	struct SPropTagArray *tags = NULL;
-	struct SRowSet *results = NULL;
-
-	tags = set_SPropTagArray(ctx.d(), 0x9, 
-				 PR_7BIT_DISPLAY_NAME,         PR_DISPLAY_NAME,         PR_RECIPIENT_DISPLAY_NAME, 
-				 PR_7BIT_DISPLAY_NAME_UNICODE, PR_DISPLAY_NAME_UNICODE, PR_RECIPIENT_DISPLAY_NAME_UNICODE, 
-				 PR_SMTP_ADDRESS,
-				 PR_SMTP_ADDRESS_UNICODE,
-				 0x6001001f);
-	if (MAPI_E_SUCCESS != ResolveNames(m_session, names, tags, &results, &statuses, 0x0)) {
-		return false;
-	}
-	if (results) {
-		for (unsigned i = 0; i < results->cRows; i++) {
-			if (MAPI_UNRESOLVED != statuses->aulPropTag[i]) {
-				struct SRow &recipient = results->aRow[i];
-				QString name, email;
-				for (unsigned j = 0; j < recipient.cValues; j++) {
-					MapiProperty property(recipient.lpProps[j]);
-
-					// Note that the set of properties fetched here must be aligned
-					// with those fetched in MapiMessage::recipientAt(), as well
-					// as the array above.
-					switch (property.tag()) {
-					case PR_7BIT_DISPLAY_NAME:
-					case PR_DISPLAY_NAME:
-					case PR_RECIPIENT_DISPLAY_NAME:
-						// We'd prefer a Unicode answer if there is one!
-						if (name.isEmpty()) {
-							name = property.value().toString(); 
-						}
-						break;
-					case PR_7BIT_DISPLAY_NAME_UNICODE:
-					case PR_DISPLAY_NAME_UNICODE:
-					case PR_RECIPIENT_DISPLAY_NAME_UNICODE:
-						name = property.value().toString(); 
-						break;
-					case PR_SMTP_ADDRESS:
-						// We'd prefer a Unicode answer if there is one!
-						if (email.isEmpty()) {
-							email = property.value().toString(); 
-						}
-						break;
-					case PR_SMTP_ADDRESS_UNICODE:
-					case 0x6001001f:
-						email = property.value().toString(); 
-						break;
-					default:
-						break;
-					}
-				}
-
-				// A resolved value is better than an unresolved one.
-				Attendee &attendee = attendees[needingResolution.at(i)];
-				if (!name.isEmpty()) {
-					attendee.name = name;
-				}
-				if (!email.isEmpty()) {
-					attendee.email = email;
-				}
-			}
-		}
-	}
-	MAPIFreeBuffer(results);
-	MAPIFreeBuffer(statuses);
-
-	// Time for one final fallback, based on the use of the name.
-	foreach (unsigned i, needingResolution) {
-		Attendee &attendee = attendees[i];
-		if (attendee.email.isEmpty()) {
-			attendee.email = attendee.name;
-		}
-	}
-	foreach (const Attendee &attendee, attendees) {
-		qCritical () << "Attendee" << attendee.name << attendee.email;
-	}
-	return true;
 }
 
 bool MapiConnector2::fetchGAL(QList< GalMember >& list)

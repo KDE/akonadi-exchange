@@ -26,21 +26,12 @@
 #include <QDateTime>
 #include <QList>
 #include <QBitArray>
-
+ 
 extern "C" {
 // libmapi is a C library and must therefore be included that way
 // otherwise we'll get linker errors due to C++ name mangling
 #include <libmapi/libmapi.h>
 }
-
-class CalendarDataShort
-{
-public:
-	QString fid;
-	QString id;
-	QString title;
-	QDateTime modified;
-};
 
 class Recipient
 {
@@ -125,26 +116,6 @@ public:
 	QDateTime mEndDate;
 };
 
-class CalendarData
-{
-public:
-	QString fid;
-	QString id;
-	QString title;
-	QString text;
-	QString location;
-	QString sender;
-	QDateTime created;
-	QDateTime begin;
-	QDateTime end;
-	QDateTime modified;
-	bool reminderActive;
-	QDateTime reminderTime;
-	uint32_t reminderDelta; // stored in minutes
-	QList<Attendee> attendees;
-	MapiRecurrencyPattern recurrency;
-};
-
 class GalMember {
 public:
 	QString id;
@@ -164,9 +135,9 @@ class TallocContext
 public:
 	TallocContext(const char *name);
 
-	~TallocContext();
+	virtual ~TallocContext();
 
-	TALLOC_CTX *d();
+	TALLOC_CTX *ctx();
 
 private:
 	TALLOC_CTX *m_ctx;
@@ -180,7 +151,7 @@ class MapiProfiles : private TallocContext
 {
 public:
 	MapiProfiles();
-	~MapiProfiles();
+	virtual ~MapiProfiles();
 
 	/**
 	 * Find existing profiles.
@@ -235,16 +206,6 @@ public:
 	 */
 	bool login(QString profile);
 
-	bool fetchFolderContent(mapi_id_t folderID, QList<CalendarDataShort>& list);
-	bool fetchCalendarData(mapi_id_t folderID, mapi_id_t messageID, CalendarData& data);
-
-	/**
-	 * Attempt to resolve a listed subset of the given recipients.
-	 */
-	bool resolveNames(QList<Attendee> &recipients, const QList<unsigned> &needingResolution);
-
-	bool calendarDataUpdate(mapi_id_t folderID, mapi_id_t messageID, CalendarData& data);
-
 	bool fetchGAL(QList<GalMember>& list);
 
 	mapi_object_t *d()
@@ -252,6 +213,15 @@ public:
 		return &m_store;
 	}
 
+	/**
+	 * Resolve the given names.
+	 * 
+	 * @param names A 0-terminated array of 0-terminated names to be resolved.
+	 * @param tags  The item properties we are interested in.
+	 */
+	bool resolveNames(const char *names[], SPropTagArray *tags,
+			  SRowSet **results, PropertyTagArray_r **statuses);
+	
 private:
 	mapi_object_t openFolder(mapi_id_t folderID);
 
@@ -263,15 +233,10 @@ private:
  * A class which wraps a MAPI object such that objects of this type 
  * automatically free the used memory on destruction.
  */
-class MapiObject
+class MapiObject : protected TallocContext
 {
-	/**
-	 * Add a property with the given value, using an immediate assignment.
-	 */
-	bool propertyWrite(int tag, void *data, bool idempotent = true);
-
 public:
-	MapiObject(TallocContext &ctx, mapi_id_t id);
+	MapiObject(MapiConnector2 *connection, const char *tallocName, mapi_id_t id);
 
 	virtual ~MapiObject();
 
@@ -279,7 +244,7 @@ public:
 
 	mapi_id_t id() const;
 
-	virtual bool open(mapi_object_t *store, mapi_id_t folderId) = 0;
+	virtual bool open(mapi_id_t folderId) = 0;
 
 	/**
 	 * Add a property with the given int.
@@ -299,7 +264,7 @@ public:
 	/**
 	 * Set the written properties onto the object, and prepare to go again.
 	 */
-	bool propertiesPush();
+	virtual bool propertiesPush();
 
 	/**
 	 * How many properties do we have?
@@ -317,7 +282,7 @@ public:
 	/**
 	 * Fetch all properties.
 	 */
-	bool propertiesPull();
+	virtual bool propertiesPull();
 
 	/**
 	 * Find a property by tag.
@@ -356,40 +321,97 @@ public:
 	QString tagName(int tag) const;
 
 protected:
-	TallocContext &m_ctx;
+	MapiConnector2 *m_connection;
 	const mapi_id_t m_id;
 	struct SPropValue *m_properties;
 	uint32_t m_propertyCount;
 	mutable mapi_object_t m_object;
+
+	/**
+	 * Add a property with the given value, using an immediate assignment.
+	 */
+	bool propertyWrite(int tag, void *data, bool idempotent = true);
+};
+
+/**
+ * Represents a MAPI item. Objects of this type contain enough information to
+ * allow the corresponding full item to be retrieved.
+ * 
+ * @see MapiFolder
+ */
+class MapiItem
+{
+public:
+	/**
+	 * The folder containing the full item.
+	 */
+	QString fid;
+
+	/**
+	 * The id of the full item.
+	 */
+	QString id;
+
+	/**
+	 * The title of this item.
+	 */
+	QString title;
+
+	/**
+	 * The last-modified date time of the full item.
+	 */
+	QDateTime modified;
 };
 
 /**
  * Represents a MAPI folder.
+ * 
+ * @see MapiItem
  */
 class MapiFolder : public MapiObject
 {
 public:
-	MapiFolder(TallocContext &ctx, mapi_id_t id);
+	MapiFolder(MapiConnector2 *connection, const char *tallocName, mapi_id_t id);
 
 	virtual ~MapiFolder();
 
-	virtual bool open(mapi_object_t *store, mapi_id_t unused = 0);
+	bool open()
+	{
+		return open(0);
+	}
 
 	QString id() const;
 
 	QString name;
 
 	/**
-	 * Fetch children.
+	 * Fetch children which are folders.
 	 * 
-	 * @param children The children will be added to this list.
-	 * @param filter Only return items whose PR_CONTAINERR_CLASS start this
-	 * 		 value.
+	 * @param children	The children will be added to this list. The 
+	 * 			caller is responsible for freeing entries on 
+	 * 			the list.
+	 * @param filter	Only return items whose PR_CONTAINER_CLASS 
+	 * 			starts with this value, or the empty string to
+	 * 			get all of them.
 	 */
-	bool childrenPull(QList<MapiFolder> &children, const QString &filter = QString());
+	bool childrenPull(QList<MapiFolder *> &children, const QString &filter = QString());
+
+	/**
+	 * Fetch children which are not folders.
+	 * 
+	 * @param children	The children will be added to this list. The 
+	 * 			caller is responsible for freeing entries on 
+	 * 			the list.
+	 */
+	bool childrenPull(QList<MapiItem *> &children);
 
 protected:
-	mapi_object_t m_hierarchyTable;
+	mapi_object_t m_contents;
+
+	/**
+	 * Hide the version with the unused argment.
+	 */
+	virtual bool open(mapi_id_t unused);
 };
 
 /**
@@ -398,9 +420,9 @@ protected:
 class MapiMessage : public MapiObject
 {
 public:
-	MapiMessage(TallocContext &ctx, mapi_id_t id);
+	MapiMessage(MapiConnector2 *connection, const char *tallocName, mapi_id_t id);
 
-	virtual bool open(mapi_object_t *store, mapi_id_t folderId);
+	virtual bool open(mapi_id_t folderId);
 
 	/**
 	 * How many recipients do we have?
@@ -419,6 +441,48 @@ public:
 
 protected:
 	SRowSet m_recipients;
+};
+
+/**
+ * An Appointment, with attendee recipients.
+ */
+class MapiAppointment : public MapiMessage
+{
+public:
+	MapiAppointment(MapiConnector2 *connection, const char *tallocName, mapi_id_t id);
+
+	virtual bool open(mapi_id_t folderId);
+
+	/**
+	 * Fetch all calendar properties.
+	 */
+	virtual bool propertiesPull();
+
+	/**
+	 * Update a calendar item.
+	 */
+	virtual bool propertiesPush();
+
+	QString fid;
+	QString id;
+	QString title;
+	QString text;
+	QString location;
+	QString sender;
+	QDateTime created;
+	QDateTime begin;
+	QDateTime end;
+	QDateTime modified;
+	bool reminderActive;
+	QDateTime reminderTime;
+	uint32_t reminderMinutes; // stored in minutes
+	QList<Attendee> attendees;
+	MapiRecurrencyPattern recurrency;
+
+private:
+	bool debugRecurrencyPattern(RecurrencePattern *pattern);
+
+	bool getAttendees();
 };
 
 /**
@@ -450,29 +514,6 @@ public:
 
 private:
 	SPropValue &m_property;
-};
-
-/**
- * An Appointment, with attendee recipients.
- */
-class MapiAppointment : public MapiMessage
-{
-public:
-	MapiAppointment(TallocContext &ctx, mapi_id_t id);
-
-	bool open(mapi_object_t *store, mapi_id_t folderId);
-
-	RecurrencePattern *recurrance();
-
-	/**
-	 * Fetch a property by index.
-	 */
-	Attendee recipientAt(unsigned i) const;
-
-	bool getAttendees(QList<Attendee> &attendees, QList<unsigned> &needingResolution);
-
-private:
-	bool debugRecurrencyPattern(RecurrencePattern *pattern);
 };
 
 #endif // MAPICONNECTOR2_H
