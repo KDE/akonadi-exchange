@@ -20,12 +20,12 @@
 #ifndef MAPICONNECTOR2_H
 #define MAPICONNECTOR2_H
 
+#include <QBitArray>
+#include <QDateTime>
+#include <QDebug>
 #include <QList>
 #include <QMap>
 #include <QString>
-#include <QDateTime>
-#include <QList>
-#include <QBitArray>
  
 extern "C" {
 // libmapi is a C library and must therefore be included that way
@@ -139,15 +139,29 @@ public:
 
 	TALLOC_CTX *ctx();
 
-private:
+protected:
 	TALLOC_CTX *m_ctx;
+
+	/**
+	 * Debug and error reporting. Each subclass should reimplement with 
+	 * logic that emits a prefix identifying the object involved. 
+	 */
+	virtual QDebug debug() const = 0;
+	virtual QDebug error() const = 0;
+
+	/**
+	 * A couple of helper functions that sbclasses can use to implement the
+	 * above virtual methods.
+	 */
+	QDebug debug(const QString &caller) const;
+	QDebug error(const QString &caller) const;
 };
 
 /**
  * A class for managing access to MAPI profiles. This is the root for all other
  * MAPI interactions.
  */
-class MapiProfiles : private TallocContext
+class MapiProfiles : protected TallocContext
 {
 public:
 	MapiProfiles();
@@ -190,6 +204,9 @@ private:
 	bool m_initialised;
 
 	bool addAttribute(const char *profile, const char *attribute, QString value);
+
+	virtual QDebug debug() const;
+	virtual QDebug error() const;
 };
 
 /**
@@ -227,6 +244,9 @@ private:
 
 	mapi_session *m_session;
 	mapi_object_t m_store;
+
+	virtual QDebug debug() const;
+	virtual QDebug error() const;
 };
 
 /**
@@ -327,6 +347,7 @@ protected:
 	uint32_t m_propertyCount;
 	mutable mapi_object_t m_object;
 
+private:
 	/**
 	 * Add a property with the given value, using an immediate assignment.
 	 */
@@ -337,7 +358,7 @@ protected:
  * Represents a MAPI item. Objects of this type contain enough information to
  * allow the corresponding full item to be retrieved.
  * 
- * @see MapiFolder
+ * @ref MapiFolder
  */
 class MapiItem
 {
@@ -366,7 +387,7 @@ public:
 /**
  * Represents a MAPI folder.
  * 
- * @see MapiItem
+ * @ref MapiItem
  */
 class MapiFolder : public MapiObject
 {
@@ -412,6 +433,10 @@ protected:
 	 * Hide the version with the unused argment.
 	 */
 	virtual bool open(mapi_id_t unused);
+
+private:
+	virtual QDebug debug() const;
+	virtual QDebug error() const;
 };
 
 /**
@@ -441,6 +466,10 @@ public:
 
 protected:
 	SRowSet m_recipients;
+
+private:
+	virtual QDebug debug() const;
+	virtual QDebug error() const;
 };
 
 /**
@@ -475,14 +504,23 @@ public:
 	QDateTime modified;
 	bool reminderActive;
 	QDateTime reminderTime;
-	uint32_t reminderMinutes; // stored in minutes
+	uint32_t reminderMinutes;
+	/**
+	 * The attendees include not just the recipients (@ref recipientsPull)
+	 * but also whoever the meeting was sent-on-behalf-of. That might or 
+	 * might not be the sender of the invitation.
+	 */
 	QList<Attendee> attendees;
 	MapiRecurrencyPattern recurrency;
 
 private:
 	bool debugRecurrencyPattern(RecurrencePattern *pattern);
 
-	bool getAttendees();
+	void addUniqueAttendee(Attendee candidate);
+	static unsigned isGoodEmailAddress(QString &email);
+
+	virtual QDebug debug() const;
+	virtual QDebug error() const;
 };
 
 /**
@@ -508,7 +546,7 @@ public:
 	/**
 	 * Return the integer tag.
 	 * 
-	 * To convert this into a name, @see MapiObject::tagName().
+	 * To convert this into a name, @ref MapiObject::tagName().
 	 */
 	int tag() const;
 

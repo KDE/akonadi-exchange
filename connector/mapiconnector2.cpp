@@ -23,7 +23,18 @@
 #include <QStringList>
 #include <QDir>
 #include <QMessageBox>
+#include <QRegExp>
 #include <QVariant>
+
+#define CASE_PREFER_UNICODE(unicode, lvalue, rvalue) \
+case unicode ## _string8: \
+	if (lvalue.isEmpty()) { \
+		lvalue = rvalue; \
+	} \
+	break; \
+case unicode: \
+	lvalue = rvalue; \
+	break;
 
 /**
  * Map all MAPI errors to strings. Note that all MAPI error handling 
@@ -124,7 +135,7 @@ static QDateTime convertSysTime(const FILETIME& filetime)
 
 static int profileSelectCallback(struct SRowSet *rowset, const void* /*private_var*/)
 {
-	qDebug() << "Found more than 1 matching users -> cancel";
+	qCritical() << "Found more than 1 matching users -> cancel";
 
 	//  TODO Some sort of handling would be needed here
 	return rowset->cRows;
@@ -135,190 +146,160 @@ MapiAppointment::MapiAppointment(MapiConnector2 *connector, const char *tallocNa
 {
 }
 
+QDebug MapiAppointment::debug() const
+{
+	static QString prefix = QString::fromAscii("MapiAppointment:");
+	return MapiObject::debug(prefix) << m_id /*<< title*/;
+}
+
+QDebug MapiAppointment::error() const
+{
+	static QString prefix = QString::fromAscii("MapiAppointment:");
+	return MapiObject::error(prefix) << m_id /*<< title*/;
+}
+
 bool MapiAppointment::debugRecurrencyPattern(RecurrencePattern *pattern)
 {
 	// do the actual work
-	qDebug() << "-- Recurrency debug output [BEGIN] --";
+	debug() << "-- Recurrency debug output [BEGIN] --";
 	switch (pattern->RecurFrequency) {
 	case RecurFrequency_Daily:
-		qDebug() << "Fequency: daily";
+		debug() << "Fequency: daily";
 		break;
 	case RecurFrequency_Weekly:
-		qDebug() << "Fequency: weekly";
+		debug() << "Fequency: weekly";
 		break;
 	case RecurFrequency_Monthly:
-		qDebug() << "Fequency: monthly";
+		debug() << "Fequency: monthly";
 		break;
 	case RecurFrequency_Yearly:
-		qDebug() << "Fequency: yearly";
+		debug() << "Fequency: yearly";
 		break;
 	default:
-		qDebug() << "unsupported frequency:"<<pattern->RecurFrequency;
+		debug() << "unsupported frequency:"<<pattern->RecurFrequency;
 		return false;
 	}
 
 	switch (pattern->PatternType) {
 	case PatternType_Day:
-		qDebug() << "PatternType: day";
+		debug() << "PatternType: day";
 		break;
 	case PatternType_Week:
-		qDebug() << "PatternType: week";
+		debug() << "PatternType: week";
 		break;
 	case PatternType_Month:
-		qDebug() << "PatternType: month";
+		debug() << "PatternType: month";
 		break;
 	default:
-		qDebug() << "unsupported patterntype:"<<pattern->PatternType;
+		debug() << "unsupported patterntype:"<<pattern->PatternType;
 		return false;
 	}
 
-	qDebug() << "Calendar:" << pattern->CalendarType;
-	qDebug() << "FirstDateTime:" << pattern->FirstDateTime;
-	qDebug() << "Period:" << pattern->Period;
+	debug() << "Calendar:" << pattern->CalendarType;
+	debug() << "FirstDateTime:" << pattern->FirstDateTime;
+	debug() << "Period:" << pattern->Period;
 	if (pattern->PatternType == PatternType_Month) {
-		qDebug() << "PatternTypeSpecific:" << pattern->PatternTypeSpecific.Day;
+		debug() << "PatternTypeSpecific:" << pattern->PatternTypeSpecific.Day;
 	} else if (pattern->PatternType == PatternType_Week) {
-		qDebug() << "PatternTypeSpecific:" << QString::number(pattern->PatternTypeSpecific.WeekRecurrencePattern, 2);
+		debug() << "PatternTypeSpecific:" << QString::number(pattern->PatternTypeSpecific.WeekRecurrencePattern, 2);
 	}
 
 	switch (pattern->EndType) {
 		case END_AFTER_DATE:
-			qDebug() << "EndType: after date";
+			debug() << "EndType: after date";
 			break;
 		case END_AFTER_N_OCCURRENCES:
-			qDebug() << "EndType: after occurenc count";
+			debug() << "EndType: after occurenc count";
 			break;
 		case END_NEVER_END:
-			qDebug() << "EndType: never";
+			debug() << "EndType: never";
 			break;
 		default:
-			qDebug() << "unsupported endtype:"<<pattern->EndType;
+			debug() << "unsupported endtype:"<<pattern->EndType;
 			return false;
 	}
-	qDebug() << "OccurencCount:" << pattern->OccurrenceCount;
-	qDebug() << "FirstDOW:" << pattern->FirstDOW;
-	qDebug() << "Start:" << pattern->StartDate;
-	qDebug() << "End:" << pattern->EndDate;
-	qDebug() << "-- Recurrency debug output [END] --";
+	debug() << "OccurencCount:" << pattern->OccurrenceCount;
+	debug() << "FirstDOW:" << pattern->FirstDOW;
+	debug() << "Start:" << pattern->StartDate;
+	debug() << "End:" << pattern->EndDate;
+	debug() << "-- Recurrency debug output [END] --";
 
 	return true;
 }
 
-bool MapiAppointment::getAttendees()
+unsigned MapiAppointment::isGoodEmailAddress(QString &email)
 {
-	if (!MapiMessage::recipientsPull()) {
-		return false;
+	static QChar at(QChar::fromAscii('@'));
+	static QChar x500Prefix(QChar::fromAscii('/'));
+
+	// Anything is better than an empty address!
+	if (email.isEmpty()) {
+		return 0;
 	}
 
-	// Get the attendees, and find any that need resolution.
-	QList<unsigned> needingResolution;
-	for (unsigned i = 0; i < recipientCount(); i++) {
-// TODO for debugging
-//		QString tagStr;
-//		tagStr.sprintf("0x%X", recipients.aRow[i].lpProps[j].ulPropTag);
-//		qDebug() << tagStr << mapiValueToQString(&recipients.aRow[i].lpProps[j]);
-		Attendee attendee(recipientAt(i));
-		if (attendee.email.isEmpty() ||
-			!attendee.email.contains(QString::fromAscii("@"))) {
-			needingResolution << i;
-			qCritical() << "needingResolution:" << attendee.name << attendee.email;
+	// KDEPIM does not currently handle anything like this:
+	//
+	// "/O=CISCO SYSTEMS/OU=FIRST ADMINISTRATIVE GROUP/CN=RECIPIENTS/CN=name"
+	//
+	// but for the user, it is still better than nothing, so we give it a
+	// low priority.
+	if (email[0] == x500Prefix) {
+		return 1;
+	}
+
+	// An @ sign is better than no @ sign.
+	if (!email.contains(at)) {
+		return 2;
+	} else {
+		return 3;
+	}
+}
+
+void MapiAppointment::addUniqueAttendee(Attendee candidate)
+{
+	// See if we can deduce a better email address from the name than we 
+	// have in the explicit value. Look for the last possible starting 
+	// delimiter, and work forward from there. Thus:
+	//
+	//       "blah (blah) <blah> <result>"
+	//
+	// should return "result". Note that we don't remove this from the name
+	// so as to give the resolution process as much to work with as possible.
+	static QRegExp firstRE(QString::fromAscii("[(<]"));
+	static QRegExp lastRE(QString::fromAscii("[)>]"));
+
+	int first = candidate.name.lastIndexOf(firstRE);
+	int last = candidate.name.indexOf(lastRE, first);
+
+	if ((first > -1) && (last > first + 1)) {
+		QString mid = candidate.name.mid(first + 1, last - first - 1);
+		if (isGoodEmailAddress(candidate.email) < isGoodEmailAddress(mid)) {
+			candidate.email = mid;
 		}
-		attendees << attendee;
 	}
 
-	if (needingResolution.size() == 0) {
-		return true;
-	}
+	for (int i = 0; i < attendees.size(); i++) {
+		Attendee &entry = attendees[i];
 
-	// Fill an array with the names we need to resolve.
-	const char *names[needingResolution.size() + 1];
-	unsigned j = 0;
-	foreach (unsigned i, needingResolution) {
-		Attendee &attendee = attendees[i];
-		names[j] = talloc_strdup(ctx(), attendee.name.toStdString().c_str());
-		j++;
-	}
-	names[j] = 0;
+		// If we find a name match, fill in a missing email if we can.
+		if (!candidate.name.isEmpty() && (entry.name == candidate.name)) {
+			if (isGoodEmailAddress(entry.email) < isGoodEmailAddress(candidate.email)) {
+				entry.email = candidate.email;
+				return;
+			}
+		}
 
-	// Resolve the lot.
-	struct PropertyTagArray_r *statuses = NULL;
-	struct SPropTagArray *tags = NULL;
-	struct SRowSet *results = NULL;
-
-	tags = set_SPropTagArray(ctx(), 0x9, 
-				 PR_7BIT_DISPLAY_NAME,         PR_DISPLAY_NAME,         PR_RECIPIENT_DISPLAY_NAME, 
-				 PR_7BIT_DISPLAY_NAME_UNICODE, PR_DISPLAY_NAME_UNICODE, PR_RECIPIENT_DISPLAY_NAME_UNICODE, 
-				 PR_SMTP_ADDRESS,
-				 PR_SMTP_ADDRESS_UNICODE,
-				 0x6001001f);
-	if (!m_connection->resolveNames(names, tags, &results, &statuses)) {
-		return false;
-	}
-	if (results) {
-		for (unsigned i = 0; i < results->cRows; i++) {
-			if (MAPI_UNRESOLVED != statuses->aulPropTag[i]) {
-				struct SRow &recipient = results->aRow[i];
-				QString name, email;
-				for (unsigned j = 0; j < recipient.cValues; j++) {
-					MapiProperty property(recipient.lpProps[j]);
-
-					// Note that the set of properties fetched here must be aligned
-					// with those fetched in MapiMessage::recipientAt(), as well
-					// as the array above.
-					switch (property.tag()) {
-					case PR_7BIT_DISPLAY_NAME:
-					case PR_DISPLAY_NAME:
-					case PR_RECIPIENT_DISPLAY_NAME:
-						// We'd prefer a Unicode answer if there is one!
-						if (name.isEmpty()) {
-							name = property.value().toString(); 
-						}
-						break;
-					case PR_7BIT_DISPLAY_NAME_UNICODE:
-					case PR_DISPLAY_NAME_UNICODE:
-					case PR_RECIPIENT_DISPLAY_NAME_UNICODE:
-						name = property.value().toString(); 
-						break;
-					case PR_SMTP_ADDRESS:
-						// We'd prefer a Unicode answer if there is one!
-						if (email.isEmpty()) {
-							email = property.value().toString(); 
-						}
-						break;
-					case PR_SMTP_ADDRESS_UNICODE:
-					case 0x6001001f:
-						email = property.value().toString(); 
-						break;
-					default:
-						break;
-					}
-				}
-
-				// A resolved value is better than an unresolved one.
-				Attendee &attendee = attendees[needingResolution.at(i)];
-				if (!name.isEmpty()) {
-					attendee.name = name;
-				}
-				if (!email.isEmpty()) {
-					attendee.email = email;
-				}
+		// If we find an email match, fill in a missing name if we can.
+		if (!candidate.email.isEmpty() && (entry.email == candidate.email)) {
+			if (entry.name.isEmpty() && !candidate.name.isEmpty()) {
+				entry.name = candidate.name;
+				return;
 			}
 		}
 	}
-	MAPIFreeBuffer(results);
-	MAPIFreeBuffer(statuses);
 
-	// Time for one final fallback, based on the use of the name.
-	foreach (unsigned i, needingResolution) {
-		Attendee &attendee = attendees[i];
-		if (attendee.email.isEmpty()) {
-			attendee.email = attendee.name;
-		}
-	}
-	foreach (const Attendee &attendee, attendees) {
-		qCritical () << "Attendee" << attendee.name << attendee.email;
-	}
-	return true;
+	// Add the entry if it did not match.
+	attendees.append(candidate);
 }
 
 bool MapiAppointment::open(mapi_id_t folderId)
@@ -344,20 +325,52 @@ bool MapiAppointment::open(mapi_id_t folderId)
 	return true;
 }
 
+/**
+ * We collect recipients as well as properties. The recipients are pulled from
+ * multiple sources, but need to go through a resolution process to fix them up.
+ * The duplicates will disappear as part of the resolution process.
+ */
 bool MapiAppointment::propertiesPull()
 {
+	// Now gather the set of attendees. Start with a clean slate.
+	attendees.clear();
+
+	// Step 1. Add all the recipients from the actual table.
+	if (!MapiMessage::recipientsPull()) {
+		return false;
+	}
+	for (unsigned i = 0; i < recipientCount(); i++) {
+		addUniqueAttendee(Attendee(recipientAt(i)));
+	}
+
+	QStringList displayTo;
+	Attendee displayed;
+	unsigned recurrenceType = 0;
+	RecurrencePattern *pattern = 0;
+	Attendee sentRepresenting;
+	Attendee originalSentRepresenting;
+
+	// Walk through the properties and extract the values of interest.
 	if (!MapiMessage::propertiesPull()) {
 		return false;
 	}
-
-	unsigned recurrenceType = 0;
-	RecurrencePattern *pattern = 0;
 	for (unsigned i = 0; i < m_propertyCount; i++) {
 		MapiProperty property(m_properties[i]);
 
-		// Note that the set of properties fetched here must be aligned
-		// with those set above.
 		switch (property.tag()) {
+		case PidTagDisplayTo:
+			// Step 2. Add the DisplayTo items.
+			//
+			// Astonishingly, when we call recipientsPull() later,
+			// the results can contain entries with missing name (!)
+			// and email values. Reading this property is a pathetic
+			// workaround.
+			displayTo = property.value().toString().split(QChar::fromAscii(';'));
+			foreach (QString name, displayTo) {
+				displayed.name = name.trimmed();
+				addUniqueAttendee(displayed);
+			}
+			break;
 		case PidTagConversationTopic:
 			title = property.value().toString();
 			break;
@@ -375,9 +388,6 @@ bool MapiAppointment::propertiesPull()
 			break;
 		case PidTagEndDate:
 			end = property.value().toDateTime();
-			break;
-		case PidTagSentRepresentingName:
-			sender = property.value().toString();
 			break;
 		case PidLidLocation:
 			location = property.value().toString();
@@ -397,8 +407,13 @@ bool MapiAppointment::propertiesPull()
 		case PidLidAppointmentRecur:
 			pattern = get_RecurrencePattern(ctx(), &m_properties[i].value.bin);
 			break;
+		CASE_PREFER_UNICODE(PidTagSentRepresentingEmailAddress, sentRepresenting.email, property.value().toString())
+		CASE_PREFER_UNICODE(PidTagSentRepresentingName, sentRepresenting.name, property.value().toString())
+		CASE_PREFER_UNICODE(PidTagSentRepresentingSimpleDisplayName, sentRepresenting.name, property.value().toString())
+		CASE_PREFER_UNICODE(PidTagOriginalSentRepresentingEmailAddress, originalSentRepresenting.email, property.value().toString())
+		CASE_PREFER_UNICODE(PidTagOriginalSentRepresentingName, originalSentRepresenting.name, property.value().toString())
 		default:
-			//qCritical() << "ignoring appointment property name:" << tagName(property.tag()) << property.value();
+			//debug() << "ignoring appointment property name:" << tagName(property.tag()) << property.value();
 			break;
 		}
 	}
@@ -410,14 +425,179 @@ bool MapiAppointment::propertiesPull()
 			recurrency.setData(pattern);
 		} else {
 			// TODO This should not happen. PidLidRecurrenceType says this is a recurring event, so why is there no PidLidAppointmentRecur???
-			qCritical() << "missing recurrencePattern in message" << m_id;
+			debug() << "missing recurrencePattern";
+			return false;
 		}
-		return false;
 	}
 
-	if (!getAttendees()) {
-		return false;
+	// Step 3. Add the sent-on-behalf-of (not the sender!).
+	if (!originalSentRepresenting.name.isEmpty()) {
+		sender = originalSentRepresenting.name;
+		addUniqueAttendee(originalSentRepresenting);
+		attendees.append(originalSentRepresenting);
 	}
+	if (!sentRepresenting.name.isEmpty()) {
+		sender = sentRepresenting.name;
+		addUniqueAttendee(sentRepresenting);
+	}
+
+	// We have all the attendees; find any that need resolution.
+	QList<int> needingResolution;
+	for (int i = 0; i < attendees.size(); i++) {
+		Attendee &attendee = attendees[i];
+		static QString perfectForm = QString::fromAscii("foo@foo");
+		static unsigned perfect = isGoodEmailAddress(perfectForm);
+
+		// If we find a missing/incomplete email, it needs resolution.
+		if (isGoodEmailAddress(attendee.email) < perfect) {
+			needingResolution << i;
+		}
+	}
+	debug() << "attendees needing primary resolution:" << needingResolution.size() << "from a total:" << attendees.size();
+
+	// Primary resolution is to ask Exchange to resolve the names.
+	struct PropertyTagArray_r *statuses = NULL;
+	struct SRowSet *results = NULL;
+	if (needingResolution.size() > 0) {
+		// Fill an array with the names we need to resolve. We will do a Unicode
+		// lookup, so use UTF8.
+		const char *names[needingResolution.size() + 1];
+		unsigned j = 0;
+		foreach (int i, needingResolution) {
+			Attendee &attendee = attendees[i];
+			QByteArray utf8(attendee.name.toUtf8());
+
+			utf8.append('\0');
+			names[j] = talloc_strdup(ctx(), utf8.data());
+			j++;
+		}
+		names[j] = 0;
+		struct SPropTagArray *tags = NULL;
+		tags = set_SPropTagArray(ctx(), 10, 
+					PidTag7BitDisplayName,         PidTagDisplayName,         PidTagRecipientDisplayName, 
+					PidTag7BitDisplayName_string8, PidTagDisplayName_string8, PidTagRecipientDisplayName_string8,
+					PidTagPrimarySmtpAddress,
+					PidTagPrimarySmtpAddress_string8,
+					0x6001001f,
+					0x60010018);
+
+		// Server round trip here!
+		if (!m_connection->resolveNames(names, tags, &results, &statuses)) {
+			return false;
+		}
+	}
+	if (results) {
+		// Walk the returned results. Every request has a status, but
+		// only resolved items also have a row of results.
+		//
+		// As we do the walk, we trim the needingResolution array so
+		// that when we are done with this loop, it only contains
+		// entries which need more work.
+		for (unsigned i = 0, unresolveds = 0; i < statuses->cValues; i++) {
+			Attendee &attendee = attendees[needingResolution.at(unresolveds)];
+
+			if (MAPI_RESOLVED == statuses->aulPropTag[i]) {
+				struct SRow &recipient = results->aRow[i - unresolveds];
+				QString name, email;
+				for (unsigned j = 0; j < recipient.cValues; j++) {
+					MapiProperty property(recipient.lpProps[j]);
+
+					// Note that the set of properties fetched here must be aligned
+					// with those fetched in MapiMessage::recipientAt(), as well
+					// as the array above.
+					switch (property.tag()) {
+					CASE_PREFER_UNICODE(PidTag7BitDisplayName, name, property.value().toString())
+					CASE_PREFER_UNICODE(PidTagDisplayName, name, property.value().toString())
+					CASE_PREFER_UNICODE(PidTagRecipientDisplayName, name, property.value().toString())
+					CASE_PREFER_UNICODE(PidTagPrimarySmtpAddress, email, property.value().toString())
+					case 0x6001001e:
+						if (email.isEmpty()) {
+							email = property.value().toString();
+						}
+						break;
+					case 0x6001001f:
+						email = property.value().toString();
+						break;
+					default:
+						break;
+					}
+				}
+
+				// A resolved value is better than an unresolved one.
+				if (!name.isEmpty()) {
+					attendee.name = name;
+				}
+				if (isGoodEmailAddress(attendee.email) < isGoodEmailAddress(email)) {
+					attendee.email = email;
+				}
+				needingResolution.removeAt(unresolveds);
+			} else {
+				unresolveds++;
+			}
+		}
+	}
+	MAPIFreeBuffer(results);
+	MAPIFreeBuffer(statuses);
+	debug() << "attendees needing secondary resolution:" << needingResolution.size();
+
+	// Secondary resolution is to remove entries which have the the same 
+	// email. But we must take care since we'll still have unresolved 
+	// entries with empty email values (which would collide).
+	QMap<QString, Attendee> uniqueResolvedAttendees;
+	for (int i = 0; i < attendees.size(); i++) {
+		Attendee &attendee = attendees[i];
+
+		if (!attendee.email.isEmpty()) {
+			// If we have duplicates, keep the one with the longer 
+			// name in the hopes that it will be the more 
+			// descriptive.
+			QMap<QString, Attendee>::const_iterator i = uniqueResolvedAttendees.constFind(attendee.email);
+			if (i != uniqueResolvedAttendees.constEnd()) {
+				if (attendee.name.length() < i.value().name.length()) {
+					continue;
+				}
+			}
+			uniqueResolvedAttendees.insert(attendee.email, attendee);
+
+			// If the name we just inserted matches one with an empty
+			// email, we can kill the latter.
+			for (int j = 0; j < needingResolution.size(); j++)
+			{
+				if (attendee.name == attendees[needingResolution.at(j)].name) {
+					needingResolution.removeAt(j);
+					j--;
+				}
+			}
+		}
+	}
+	debug() << "attendees needing tertiary resolution:" << needingResolution.size();
+
+	// Tertiary resolution.
+	//
+	// Add items needing more work. They should have an empty email. Just 
+	// suck it up accepting the fact they'll be "duplicates" by key, but 
+	// not by name. And delete any which have no name either.
+	for (int i = 0; i < needingResolution.size(); i++)
+	{
+		Attendee &attendee = attendees[needingResolution.at(i)];
+
+		if (attendee.name.isEmpty()) {
+			// Grrrr...
+			continue;
+		}
+
+		// Set the email to be the same as the name. It cannot be any
+		// worse, right?
+		attendee.email = attendee.name;
+		uniqueResolvedAttendees.insertMulti(attendee.email, attendee);
+	}
+
+	// Finally, recreate the sanitised list.
+	attendees.clear();
+	foreach (Attendee attendee, uniqueResolvedAttendees) {
+		attendees.append(attendee);
+	}
+	debug() << "attendees after resolution:" << attendees.size();
 	return true;
 }
 
@@ -472,7 +652,7 @@ bool MapiAppointment::propertiesPush()
 			data.recurrency.setData(pattern);
 		} else {
 			// TODO This should not happen. PidLidRecurrenceType says this is a recurring event, so why is there no PidLidAppointmentRecur???
-			qDebug() << "missing recurrencePattern in message"<<messageID<<"in folder"<<folderID;
+			debug() << "missing recurrencePattern in message"<<messageID<<"in folder"<<folderID;
 			}
 	}
 
@@ -482,29 +662,29 @@ bool MapiAppointment::propertiesPush()
 		return false;
 	}
 #if 0
-	qCritical() << "************  OpenFolder";
+	debug() << "************  OpenFolder";
 	if (!OpenFolder(&m_store, folder.id(), folder.d())) {
-		qCritical() << "cannot open folder" << folderID
+		error() << "cannot open folder" << folderID
 			<< ", error:" << mapiError();
 		return false;
         }
-	qCritical() << "************  SaveChangesMessage";
+	debug() << "************  SaveChangesMessage";
 	if (!SaveChangesMessage(folder.d(), message.d(), KeepOpenReadWrite)) {
-		qCritical() << "cannot save message" << messageID << "in folder" << folderID
+		error() << "cannot save message" << messageID << "in folder" << folderID
 			<< ", error:" << mapiError();
 		return false;
 	}
 #endif
-	qCritical() << "************  SubmitMessage";
+	debug() << "************  SubmitMessage";
 	if (MAPI_E_SUCCESS != SubmitMessage(&m_object)) {
-		qCritical() << "cannot submit message" << id << "in folder" << fid
+		error() << "cannot submit message in folder" << fid
 			<< ", error:" << mapiError();
 		return false;
 	}
 	struct mapi_SPropValue_array replyProperties;
-	qCritical() << "************  TransportSend";
+	debug() << "************  TransportSend";
 	if (MAPI_E_SUCCESS != TransportSend(&m_object, &replyProperties)) {
-		qDebug() << "cannot send message" << id << "in folder" << fid
+		error() << "cannot send message in folder" << fid
 			<< ", error:" << mapiError();
 		return false;
 	}
@@ -524,6 +704,18 @@ MapiFolder::~MapiFolder()
 	mapi_object_release(&m_contents);
 }
 
+QDebug MapiFolder::debug() const
+{
+	static QString prefix = QString::fromAscii("MapiFolder:");
+	return MapiObject::debug(prefix) << m_id;
+}
+
+QDebug MapiFolder::error() const
+{
+	static QString prefix = QString::fromAscii("MapiFolder:");
+	return MapiObject::error(prefix) << m_id;
+}
+
 QString MapiFolder::id() const
 {
 	return QString::number(m_id);
@@ -533,18 +725,18 @@ bool MapiFolder::childrenPull(QList<MapiFolder *> &children, const QString &filt
 {
 	// Retrieve folder's folder table
 	if (MAPI_E_SUCCESS != GetHierarchyTable(&m_object, &m_contents, 0, NULL)) {
-		qCritical() << "cannot get hierarchy table" << mapiError();
+		error() << "cannot get hierarchy table" << mapiError();
 		return false;
 	}
 
 	// Create the MAPI table view
-	SPropTagArray* tags = set_SPropTagArray(ctx(), 0x3, PR_FID, PR_DISPLAY_NAME, PR_CONTAINER_CLASS);
+	SPropTagArray* tags = set_SPropTagArray(ctx(), 0x3, PidTagFolderId, PidTagDisplayName, PidTagContainerClass);
 	if (!tags) {
-		qCritical() << "cannot set hierarchy table tags" << mapiError();
+		error() << "cannot set hierarchy table tags" << mapiError();
 		return false;
 	}
 	if (MAPI_E_SUCCESS != SetColumns(&m_contents, tags)) {
-		qCritical() << "cannot set hierarchy table columns" << mapiError();
+		error() << "cannot set hierarchy table columns" << mapiError();
 		MAPIFreeBuffer(tags);
 		return false;
 	}
@@ -553,7 +745,7 @@ bool MapiFolder::childrenPull(QList<MapiFolder *> &children, const QString &filt
 	// Get current cursor position.
 	uint32_t cursor;
 	if (MAPI_E_SUCCESS != QueryPosition(&m_contents, NULL, &cursor)) {
-		qCritical() << "cannot query position" << mapiError();
+		error() << "cannot query position" << mapiError();
 		return false;
 	}
 
@@ -572,22 +764,22 @@ bool MapiFolder::childrenPull(QList<MapiFolder *> &children, const QString &filt
 				// Note that the set of properties fetched here must be aligned
 				// with those set above.
 				switch (property.tag()) {
-				case PR_FID:
+				case PidTagFolderId:
 					fid = property.value().toULongLong(); 
 					break;
-				case PR_DISPLAY_NAME:
+				case PidTagDisplayName:
 					name = property.value().toString(); 
 					break;
-				case PR_CONTAINER_CLASS:
+				case PidTagContainerClass:
 					folderClass = property.value().toString(); 
 					break;
 				default:
-					//qCritical() << "ignoring folder property name:" << tagName(property.tag()) << property.value();
+					//debug() << "ignoring folder property name:" << tagName(property.tag()) << property.value();
 					break;
 				}
 			}
 			if (!filter.isEmpty() && !(folderClass).startsWith(filter)) {
-				qCritical() << "Folder" << name << "does not match filter" << filter;
+				debug() << "folder" << name << "does not match filter" << filter;
 				continue;
 			}
 
@@ -604,18 +796,18 @@ bool MapiFolder::childrenPull(QList<MapiItem *> &children)
 {
 	// Retrieve folder's content table
 	if (MAPI_E_SUCCESS != GetContentsTable(&m_object, &m_contents, 0, NULL)) {
-		qCritical() << "cannot get content table" << mapiError();
+		error() << "cannot get content table" << mapiError();
 		return false;
 	}
 
 	// Create the MAPI table view
-	SPropTagArray* tags = set_SPropTagArray(ctx(), 0x4, PR_FID, PR_MID, PR_CONVERSATION_TOPIC, PR_LAST_MODIFICATION_TIME);
+	SPropTagArray* tags = set_SPropTagArray(ctx(), 0x4, PidTagFolderId, PidTagMid, PidTagConversationTopic, PidTagLastModificationTime);
 	if (!tags) {
-		qCritical() << "cannot set content table tags" << mapiError();
+		error() << "cannot set content table tags" << mapiError();
 		return false;
 	}
 	if (MAPI_E_SUCCESS != SetColumns(&m_contents, tags)) {
-		qCritical() << "cannot set content table columns" << mapiError();
+		error() << "cannot set content table columns" << mapiError();
 		MAPIFreeBuffer(tags);
 		return false;
 	}
@@ -624,7 +816,7 @@ bool MapiFolder::childrenPull(QList<MapiItem *> &children)
 	// Get current cursor position.
 	uint32_t cursor;
 	if (MAPI_E_SUCCESS != QueryPosition(&m_contents, NULL, &cursor)) {
-		qCritical() << "cannot query position" << mapiError();
+		error() << "cannot query position" << mapiError();
 		return false;
 	}
 
@@ -641,20 +833,20 @@ bool MapiFolder::childrenPull(QList<MapiItem *> &children)
 				// Note that the set of properties fetched here must be aligned
 				// with those set above.
 				switch (property.tag()) {
-				case PR_FID:
+				case PidTagFolderId:
 					data->fid = QString::number(property.value().toULongLong()); 
 					break;
-				case PR_MID:
+				case PidTagMid:
 					data->id = QString::number(property.value().toULongLong()); 
 					break;
-				case PR_CONVERSATION_TOPIC:
+				case PidTagConversationTopic:
 					data->title = property.value().toString(); 
 					break;
-				case PR_LAST_MODIFICATION_TIME:
+				case PidTagLastModificationTime:
 					data->modified = property.value().toDateTime(); 
 					break;
 				default:
-					qCritical() << "ignoring item property name:" << tagName(property.tag()) << property.value();
+					//debug() << "ignoring item property name:" << tagName(property.tag()) << property.value();
 					break;
 				}
 			}
@@ -676,12 +868,12 @@ bool MapiFolder::open(mapi_id_t unused)
 	// Get the toplevel folder id if needed.
 	if (id == 0) {
 		if (MAPI_E_SUCCESS != GetDefaultFolder(m_connection->d(), &id, olFolderTopInformationStore)) {
-			qCritical() << "cannot get default folder" << mapiError();
+			error() << "cannot get default folder" << mapiError();
 			return false;
 		}
 	}
 	if (MAPI_E_SUCCESS != OpenFolder(m_connection->d(), id, &m_object)) {
-		qCritical() << "cannot open folder" << id << mapiError();
+		error() << "cannot open folder" << id << mapiError();
 		return false;
 	}
 	return true;
@@ -710,7 +902,7 @@ bool MapiProfiles::add(QString profile, QString username, QString password, QStr
 	const char *profile8 = profile.toUtf8();
 
 	if (MAPI_E_SUCCESS != CreateProfile(m_context, profile8, username.toUtf8(), password.toUtf8(), 0)) {
-		qCritical() << "cannot create profile:" << mapiError();
+		error() << "cannot create profile:" << mapiError();
 		return false;
 	}
 
@@ -721,15 +913,15 @@ bool MapiProfiles::add(QString profile, QString username, QString password, QStr
 	QString workstation = QString::fromLatin1(hostname);
 
 	if (!addAttribute(profile8, "binding", server)) {
-		qCritical() << "cannot add binding:" << server << mapiError();
+		error() << "cannot add binding:" << server << mapiError();
 		return false;
 	}
 	if (!addAttribute(profile8, "workstation", workstation)) {
-		qCritical() << "cannot add workstation:" << workstation << mapiError();
+		error() << "cannot add workstation:" << workstation << mapiError();
 		return false;
 	}
 	if (!addAttribute(profile8, "domain", domain)) {
-		qCritical() << "cannot add domain:" << domain << mapiError();
+		error() << "cannot add domain:" << domain << mapiError();
 		return false;
 	}
 // What is seal for? Seams to have something to do with Exchange 2010
@@ -739,14 +931,14 @@ bool MapiProfiles::add(QString profile, QString username, QString password, QStr
 // 	const char* locale = (const char *) (language) ? mapi_get_locale_from_language(language) : mapi_get_system_locale();
 	const char *locale = mapi_get_system_locale();
 	if (!locale) {
-		qCritical() << "cannot find system locale:" << mapiError();
+		error() << "cannot find system locale:" << mapiError();
 		return false;
 	}
 
 	uint32_t cpid = mapi_get_cpid_from_locale(locale);
 	uint32_t lcid = mapi_get_lcid_from_locale(locale);
 	if (!cpid || !lcid) {
-		qCritical() << "Invalid Locale supplied or unknown system locale" << locale << ", deleting profile..." << mapiError();
+		error() << "invalid Locale supplied or unknown system locale" << locale << ", deleting profile..." << mapiError();
 		if (!remove(profile)) {
 			return false;
 		}
@@ -754,22 +946,21 @@ bool MapiProfiles::add(QString profile, QString username, QString password, QStr
 	}
 
 	if (!addAttribute(profile8, "codepage", QString::number(cpid))) {
-		qCritical() << "cannot add codepage:" << cpid << mapiError();
+		error() << "cannot add codepage:" << cpid << mapiError();
 		return false;
 	}
 	if (!addAttribute(profile8, "language", QString::number(lcid))) {
-		qCritical() << "cannot add codepage:" << cpid << mapiError();
+		error() << "cannot language:" << lcid << mapiError();
 		return false;
 	}
 	if (!addAttribute(profile8, "method", QString::number(lcid))) {
-		qCritical() << "cannot add codepage:" << cpid << mapiError();
+		error() << "cannot method:" << lcid << mapiError();
 		return false;
 	}
 
-
 	struct mapi_session *session = NULL;
 	if (MAPI_E_SUCCESS != MapiLogonProvider(m_context, &session, profile8, password.toUtf8(), PROVIDER_ID_NSPI)) {
-		qCritical() << "cannot get logon provider, deleting profile..." << mapiError();
+		error() << "cannot get logon provider, deleting profile..." << mapiError();
 		if (!remove(profile)) {
 			return false;
 		}
@@ -778,7 +969,7 @@ bool MapiProfiles::add(QString profile, QString username, QString password, QStr
 
 	int retval = ProcessNetworkProfile(session, username.toUtf8().constData(), profileSelectCallback, NULL);
 	if (retval != MAPI_E_SUCCESS && retval != 0x1) {
-		qCritical() << "cannot process network profile, deleting profile..." << mapiError();
+		error() << "cannot process network profile, deleting profile..." << mapiError();
 		if (!remove(profile)) {
 			return false;
 		}
@@ -795,6 +986,12 @@ bool MapiProfiles::addAttribute(const char *profile, const char *attribute, QStr
 	return true;
 }
 
+QDebug MapiProfiles::debug() const
+{
+	static QString prefix = QString::fromAscii("MapiProfiles:");
+	return TallocContext::debug(prefix);
+}
+
 QString MapiProfiles::defaultGet()
 {
 	if (!init()) {
@@ -803,7 +1000,7 @@ QString MapiProfiles::defaultGet()
 
 	char *profname;
 	if (MAPI_E_SUCCESS != GetDefaultProfile(m_context, &profname)) {
-		qCritical() << "cannot get default profile:" << mapiError();
+		error() << "cannot get default profile:" << mapiError();
 		return QString();
 	}
 	return QString::fromLocal8Bit(profname);
@@ -816,10 +1013,16 @@ bool MapiProfiles::defaultSet(QString profile)
 	}
 
 	if (MAPI_E_SUCCESS != SetDefaultProfile(m_context, profile.toUtf8())) {
-		qCritical() << "cannot set default profile:" << profile << mapiError();
+		error() << "cannot set default profile:" << profile << mapiError();
 		return false;
 	}
 	return true;
+}
+
+QDebug MapiProfiles::error() const
+{
+	static QString prefix = QString::fromAscii("MapiProfiles:");
+	return TallocContext::error(prefix);
 }
 
 bool MapiProfiles::init()
@@ -837,18 +1040,18 @@ bool MapiProfiles::init()
 	QDir path(profilePath);
 	if (!path.exists()) {
 		if (path.mkpath(profilePath)) {
-			qCritical() << "cannot make profile path:" << profilePath;
+			error() << "cannot make profile path:" << profilePath;
 			return false;
 		}
 	}
 	if (!QFile::exists(profileFile)) {
 		if (MAPI_E_SUCCESS != CreateProfileStore(profileFile.toUtf8(), mapi_profile_get_ldif_path())) {
-			qCritical() << "cannot create profile store:" << profileFile << mapiError();
+			error() << "cannot create profile store:" << profileFile << mapiError();
 			return false;
 		}
 	}
 	if (MAPI_E_SUCCESS != MAPIInitialize(&m_context, profileFile.toLatin1())) {
-		qCritical() << "cannot init profile store:" << profileFile << mapiError();
+		error() << "cannot init profile store:" << profileFile << mapiError();
 		return false;
 	}
 	m_initialised = true;
@@ -864,11 +1067,11 @@ QStringList MapiProfiles::list()
 	struct SRowSet proftable;
 
 	if (MAPI_E_SUCCESS != GetProfileTable(m_context, &proftable)) {
-		qCritical() << "cannot get profile table" << mapiError();
+		error() << "cannot get profile table" << mapiError();
 		return QStringList();
 	}
 
-	// qDebug() << "Profiles in the database:" << proftable.cRows;
+	// debug() << "Profiles in the database:" << proftable.cRows;
 	QStringList profiles;
 	for (unsigned count = 0; count < proftable.cRows; count++) {
 		const char *name = proftable.aRow[count].lpProps[0].value.lpszA;
@@ -876,7 +1079,7 @@ QStringList MapiProfiles::list()
 
 		profiles.append(QString::fromLocal8Bit(name));
 		if (dflt) {
-			qCritical() << "default profile:" << name;
+			debug() << "default profile:" << name;
 		}
 	}
 	return profiles;
@@ -889,7 +1092,7 @@ bool MapiProfiles::remove(QString profile)
 	}
 
 	if (MAPI_E_SUCCESS != DeleteProfile(m_context, profile.toUtf8())) {
-		qCritical() << "cannot delete profile:" << profile << mapiError();
+		error() << "cannot delete profile:" << profile << mapiError();
 		return false;
 	}
 	return true;
@@ -910,6 +1113,18 @@ MapiConnector2::~MapiConnector2()
 	mapi_object_release(&m_store);
 }
 
+QDebug MapiConnector2::debug() const
+{
+	static QString prefix = QString::fromAscii("MapiConnector2:");
+	return TallocContext::debug(prefix);
+}
+
+QDebug MapiConnector2::error() const
+{
+	static QString prefix = QString::fromAscii("MapiConnector2:");
+	return TallocContext::error(prefix);
+}
+
 bool MapiConnector2::login(QString profile)
 {
 	if (!init()) {
@@ -925,18 +1140,18 @@ bool MapiConnector2::login(QString profile)
 		profile = defaultGet();
 		if (profile.isEmpty()) {
 			// there seams to be no default profile
-			qCritical() << "no default profile";
+			error() << "no default profile";
 			return false;
 		}
 	}
 
 	// Log on
 	if (MAPI_E_SUCCESS != MapiLogonEx(m_context, &m_session, profile.toUtf8(), NULL)) {
-		qCritical() << "cannot logon using profile" << profile << mapiError();
+		error() << "cannot logon using profile" << profile << mapiError();
 		return false;
 	}
 	if (MAPI_E_SUCCESS != OpenMsgStore(m_session, &m_store)) {
-		qCritical() << "cannot open message store" << mapiError();
+		error() << "cannot open message store" << mapiError();
 		return false;
 	}
 	return true;
@@ -945,8 +1160,8 @@ bool MapiConnector2::login(QString profile)
 bool MapiConnector2::resolveNames(const char *names[], SPropTagArray *tags,
 				  SRowSet **results, PropertyTagArray_r **statuses)
 {
-	if (MAPI_E_SUCCESS != ResolveNames(m_session, names, tags, results, statuses, 0x0)) {
-		qCritical() << "cannot resolve names" << mapiError();
+	if (MAPI_E_SUCCESS != ResolveNames(m_session, names, tags, results, statuses, MAPI_UNICODE)) {
+		error() << "cannot resolve names" << mapiError();
 		return false;
 	}
 	return true;
@@ -967,16 +1182,42 @@ TALLOC_CTX *TallocContext::ctx()
 	return m_ctx;
 }
 
+QDebug TallocContext::debug(const QString &caller) const
+{
+	static QString prefix = QString::fromAscii("%1.%2:");
+	QString talloc = QString::fromAscii(talloc_get_name(m_ctx));
+	return qDebug() << prefix.arg(talloc).arg(caller);
+}
+
+QDebug TallocContext::error(const QString &caller) const
+{
+	static QString prefix = QString::fromAscii("%1.%2:");
+	QString talloc = QString::fromAscii(talloc_get_name(m_ctx));
+	return qCritical() << prefix.arg(talloc).arg(caller);
+}
+
 MapiMessage::MapiMessage(MapiConnector2 *connection, const char *tallocName, mapi_id_t id) :
 	MapiObject(connection, tallocName, id)
 {
 	m_recipients.cRows = 0;
 }
 
+QDebug MapiMessage::debug() const
+{
+	static QString prefix = QString::fromAscii("MapiMessage:");
+	return MapiObject::debug(prefix) << m_id;
+}
+
+QDebug MapiMessage::error() const
+{
+	static QString prefix = QString::fromAscii("MapiMessage:");
+	return MapiObject::error(prefix) << m_id;
+}
+
 bool MapiMessage::open(mapi_id_t folderId)
 {
 	if (MAPI_E_SUCCESS != OpenMessage(m_connection->d(), folderId, m_id, &m_object, 0x0)) {
-		qCritical() << "cannot open message:" << m_id << "in folder:" <<
+		error() << "cannot open message in folder:" <<
 			folderId << ", error:" << mapiError();
 		return false;
 	}
@@ -993,7 +1234,7 @@ bool MapiMessage::recipientsPull()
 	SPropTagArray propertyTagArray;
 
 	if (MAPI_E_SUCCESS != GetRecipientTable(&m_object, &m_recipients, &propertyTagArray)) {
-		qCritical() << "cannot GetRecipientTable:" << mapiError();
+		error() << "cannot get recipient table:" << mapiError();
 		return false;
 	}
 	return true;
@@ -1014,43 +1255,31 @@ Recipient MapiMessage::recipientAt(unsigned i) const
 		// Note that the set of properties fetched here must be aligned
 		// with those fetched in MapiConnector::resolveNames().
 		switch (property.tag()) {
-		case PR_7BIT_DISPLAY_NAME:
-		case PR_DISPLAY_NAME:
-		case PR_RECIPIENT_DISPLAY_NAME:
-			// We'd prefer a Unicode answer if there is one!
-			if (result.name.isEmpty()) {
-				result.name = property.value().toString(); 
-			}
-			break;
-		case PR_7BIT_DISPLAY_NAME_UNICODE:
-		case PR_DISPLAY_NAME_UNICODE:
-		case PR_RECIPIENT_DISPLAY_NAME_UNICODE:
-			result.name = property.value().toString(); 
-			break;
-		case PR_SMTP_ADDRESS:
-			// We'd prefer a Unicode answer if there is one!
+		CASE_PREFER_UNICODE(PidTag7BitDisplayName, result.name, property.value().toString())
+		CASE_PREFER_UNICODE(PidTagDisplayName, result.name, property.value().toString())
+		CASE_PREFER_UNICODE(PidTagRecipientDisplayName, result.name, property.value().toString())
+		CASE_PREFER_UNICODE(PidTagPrimarySmtpAddress, result.email, property.value().toString())
+		case 0x6001001e:
 			if (result.email.isEmpty()) {
-				result.email = property.value().toString(); 
+				result.email = property.value().toString();
 			}
 			break;
-		case PR_SMTP_ADDRESS_UNICODE:
 		case 0x6001001f:
 			result.email = property.value().toString(); 
 			break;
-		case PR_RECIPIENT_TRACKSTATUS:
+		case PidTagRecipientTrackStatus:
 			result.trackStatus = property.value().toInt();
 			break;
-		case PR_RECIPIENT_FLAGS:
+		case PidTagRecipientFlags:
 			result.flags = property.value().toInt();
 			break;
-		case PR_RECIPIENT_TYPE:
+		case PidTagRecipientType:
 			result.type = property.value().toInt();
 			break;
-		case PR_RECIPIENT_ORDER:
+		case PidTagRecipientOrder:
 			result.order = property.value().toInt();
 			break;
 		default:
-			//qCritical() << "ignoring recipient property name:" << tagName(property.tag()) << property.value();
 			break;
 		}
 	}
@@ -1091,7 +1320,7 @@ bool MapiObject::propertyWrite(int tag, void *data, bool idempotent)
 			if (m_properties[i].ulPropTag == tag) {
 				bool ok = set_SPropValue_proptag(&m_properties[i], (MAPITAGS)tag, data);
 				if (!ok) {
-					qCritical() << "cannot overwrite tag:" << tagName(tag) << "value:" << data;
+					error() << "cannot overwrite tag:" << tagName(tag) << "value:" << data;
 				}
 				return ok;
 			}
@@ -1101,7 +1330,7 @@ bool MapiObject::propertyWrite(int tag, void *data, bool idempotent)
 	// Add a new entry to the array.
 	m_properties = add_SPropValue(ctx(), m_properties, &m_propertyCount, (MAPITAGS)tag, data);
 	if (!m_properties) {
-		qCritical() << "cannot write tag:" << tagName(tag) << "value:" << data;
+		error() << "cannot write tag:" << tagName(tag) << "value:" << data;
 		return false;
 	}
 	return true;
@@ -1117,7 +1346,7 @@ bool MapiObject::propertyWrite(int tag, QString &data, bool idempotent)
 	char *copy = talloc_strdup(ctx(), data.toUtf8().data());
 
 	if (!copy) {
-		qCritical() << "cannot talloc:" << data;
+		error() << "cannot talloc:" << data;
 		return false;
 	}
 
@@ -1129,7 +1358,7 @@ bool MapiObject::propertyWrite(int tag, QDateTime &data, bool idempotent)
 	FILETIME *copy = talloc(ctx(), FILETIME);
 
 	if (!copy) {
-		qCritical() << "cannot talloc:" << data;
+		error() << "cannot talloc:" << data;
 		return false;
 	}
 
@@ -1144,7 +1373,7 @@ bool MapiObject::propertyWrite(int tag, QDateTime &data, bool idempotent)
 bool MapiObject::propertiesPush()
 {
 	if (MAPI_E_SUCCESS != SetProps(&m_object, MAPI_PROPS_SKIP_NAMEDID_CHECK, m_properties, m_propertyCount)) {
-		qCritical() << "cannot push:" << m_propertyCount << "properties:" << mapiError();
+		error() << "cannot push:" << m_propertyCount << "properties:" << mapiError();
 		return false;
 	}
 	m_properties = 0;
@@ -1162,19 +1391,19 @@ bool MapiObject::propertiesPull(QVector<int> &tags)
 		if (!tagArray) {
 			tagArray = set_SPropTagArray(ctx(), 1, (MAPITAGS)tag);
 			if (!tagArray) {
-				qCritical() << "cannot allocate tags:" << mapiError();
+				error() << "cannot allocate tags:" << mapiError();
 				return false;
 			}
 		} else {
 			if (MAPI_E_SUCCESS != SPropTagArray_add(ctx(), tagArray, (MAPITAGS)tag)) {
-				qCritical() << "cannot extend tags:" << mapiError();
+				error() << "cannot extend tags:" << mapiError();
 				MAPIFreeBuffer(tagArray);
 				return false;
 			}
 		}
 	}
 	if (MAPI_E_SUCCESS != GetProps(&m_object, MAPI_UNICODE, tagArray, &m_properties, &m_propertyCount)) {
-		qCritical() << "cannot pull properties:" << mapiError();
+		error() << "cannot pull properties:" << mapiError();
 		MAPIFreeBuffer(tagArray);
 		return false;
 	}
@@ -1189,7 +1418,7 @@ bool MapiObject::propertiesPull()
 	m_properties = 0;
 	m_propertyCount = 0;
 	if (MAPI_E_SUCCESS != GetPropsAll(&m_object, MAPI_UNICODE, &mapiProperties)) {
-		qCritical() << "cannot pull all properties:" << mapiError();
+		error() << "cannot pull all properties:" << mapiError();
 		return false;
 	}
 
@@ -1201,7 +1430,7 @@ bool MapiObject::propertiesPull()
 					&m_properties[m_propertyCount]);
 		}
 	} else {
-		qCritical() << "cannot copy properties:" << mapiError();
+		error() << "cannot copy properties:" << mapiError();
 	}
 	return true;
 }
@@ -1585,7 +1814,7 @@ bool MapiRecurrencyPattern::setData(RecurrencePattern* pattern)
 		this->mRecurrencyType = Yearly;
 		this->mPeriod = pattern->Period;
 	} else {
-		qDebug() << "unsupported frequency:"<<pattern->RecurFrequency;
+		qCritical() << "unsupported frequency:"<<pattern->RecurFrequency;
 		return false;
 	}
 
@@ -1604,7 +1833,7 @@ bool MapiRecurrencyPattern::setData(RecurrencePattern* pattern)
 			this->mEndType = Never;
 			break;
 		default:
-			qDebug() << "unsupported endtype:"<<pattern->EndType;
+			qCritical() << "unsupported endtype:"<<pattern->EndType;
 			return false;
 	}
 
