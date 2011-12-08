@@ -264,7 +264,7 @@ public:
 
 	mapi_id_t id() const;
 
-	virtual bool open(mapi_id_t folderId) = 0;
+	virtual bool open() = 0;
 
 	/**
 	 * Add a property with the given int.
@@ -363,25 +363,41 @@ private:
 class MapiItem
 {
 public:
-	/**
-	 * The folder containing the full item.
-	 */
-	QString fid;
+	MapiItem(mapi_id_t id, QString &name, QDateTime &modified) :
+		m_id(id),
+		m_name(name),
+		m_modified(modified)
+	{
+	}
 
 	/**
 	 * The id of the full item.
 	 */
-	QString id;
+	QString id() const
+	{
+		return QString::number(m_id);
+	}
 
 	/**
-	 * The title of this item.
+	 * The name of this item.
 	 */
-	QString title;
+	QString name() const
+	{
+		return m_name;
+	}
 
 	/**
 	 * The last-modified date time of the full item.
 	 */
-	QDateTime modified;
+	QDateTime modified() const
+	{
+		return m_modified;
+	}
+
+private:
+	const mapi_id_t m_id;
+	const QString m_name;
+	const QDateTime m_modified;
 };
 
 /**
@@ -396,10 +412,7 @@ public:
 
 	virtual ~MapiFolder();
 
-	bool open()
-	{
-		return open(0);
-	}
+	virtual bool open();
 
 	QString id() const;
 
@@ -429,11 +442,6 @@ public:
 protected:
 	mapi_object_t m_contents;
 
-	/**
-	 * Hide the version with the unused argment.
-	 */
-	virtual bool open(mapi_id_t unused);
-
 private:
 	virtual QDebug debug() const;
 	virtual QDebug error() const;
@@ -445,9 +453,9 @@ private:
 class MapiMessage : public MapiObject
 {
 public:
-	MapiMessage(MapiConnector2 *connection, const char *tallocName, mapi_id_t id);
+	MapiMessage(MapiConnector2 *connection, const char *tallocName, mapi_id_t folderId, mapi_id_t id);
 
-	virtual bool open(mapi_id_t folderId);
+	virtual bool open();
 
 	/**
 	 * How many recipients do we have?
@@ -465,6 +473,7 @@ public:
 	Recipient recipientAt(unsigned i) const;
 
 protected:
+	const mapi_id_t m_folderId;
 	SRowSet m_recipients;
 
 private:
@@ -478,9 +487,9 @@ private:
 class MapiAppointment : public MapiMessage
 {
 public:
-	MapiAppointment(MapiConnector2 *connection, const char *tallocName, mapi_id_t id);
+	MapiAppointment(MapiConnector2 *connection, const char *tallocName, mapi_id_t folderId, mapi_id_t id);
 
-	virtual bool open(mapi_id_t folderId);
+	virtual bool open();
 
 	/**
 	 * Fetch all calendar properties.
@@ -492,8 +501,6 @@ public:
 	 */
 	virtual bool propertiesPush();
 
-	QString fid;
-	QString id;
 	QString title;
 	QString text;
 	QString location;
@@ -517,6 +524,7 @@ private:
 	bool debugRecurrencyPattern(RecurrencePattern *pattern);
 
 	void addUniqueAttendee(Attendee candidate);
+
 	static unsigned isGoodEmailAddress(QString &email);
 
 	virtual QDebug debug() const;

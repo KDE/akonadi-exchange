@@ -141,8 +141,8 @@ static int profileSelectCallback(struct SRowSet *rowset, const void* /*private_v
 	return rowset->cRows;
 }
 
-MapiAppointment::MapiAppointment(MapiConnector2 *connector, const char *tallocName, mapi_id_t id) :
-	MapiMessage(connector, tallocName, id)
+MapiAppointment::MapiAppointment(MapiConnector2 *connector, const char *tallocName, mapi_id_t folderId, mapi_id_t id) :
+	MapiMessage(connector, tallocName, folderId, id)
 {
 }
 
@@ -255,6 +255,19 @@ unsigned MapiAppointment::isGoodEmailAddress(QString &email)
 	}
 }
 
+/**
+ * Add an attendee to the list. We:
+ *
+ *  1. Check whether the name has an embedded email address, and if it does
+ *     use it (if it is better than the one we have).
+ *
+ *  2. If the name matches an existing entry in the list, just pick the
+ *     better email address.
+ *
+ *  3. If the email matches, just pick the better name.
+ *
+ * Otherwise, we have a new entry.
+ */
 void MapiAppointment::addUniqueAttendee(Attendee candidate)
 {
 	// See if we can deduce a better email address from the name than we 
@@ -291,7 +304,7 @@ void MapiAppointment::addUniqueAttendee(Attendee candidate)
 
 		// If we find an email match, fill in a missing name if we can.
 		if (!candidate.email.isEmpty() && (entry.email == candidate.email)) {
-			if (entry.name.isEmpty() && !candidate.name.isEmpty()) {
+			if (entry.name.length() < candidate.name.length()) {
 				entry.name = candidate.name;
 				return;
 			}
@@ -302,9 +315,9 @@ void MapiAppointment::addUniqueAttendee(Attendee candidate)
 	attendees.append(candidate);
 }
 
-bool MapiAppointment::open(mapi_id_t folderId)
+bool MapiAppointment::open()
 {
-	if (!MapiMessage::open(folderId)) {
+	if (!MapiMessage::open()) {
 		return false;
 	}
 
@@ -319,8 +332,6 @@ bool MapiAppointment::open(mapi_id_t folderId)
 		// this one is not an appointment
 		return false;
 	}
-	fid = QString::number(folderId);
-	id = QString::number(m_id);
 	reminderActive = false;
 	return true;
 }
@@ -328,7 +339,30 @@ bool MapiAppointment::open(mapi_id_t folderId)
 /**
  * We collect recipients as well as properties. The recipients are pulled from
  * multiple sources, but need to go through a resolution process to fix them up.
- * The duplicates will disappear as part of the resolution process.
+ * The duplicates will disappear as part of the resolution process. The logic
+ * looks like this:
+ *
+ *  1. Read the RecipientsTable.
+ *
+ *  2. Add in the contents of the DisplayTo tag (Exchange can return records
+ *     from Step 1 with no name or email).
+ *
+ *  3. Add in the sent-representing values (also not in Step 1, and not clear
+ *     if it is guaranteed to be in step 2 as well).
+ *
+ * That results in a whole lot of duplication as well as bringing in the missing
+ * items. So then, there is a whole lot of work to resolve things:
+ *
+ *  - For anything we get from 1, 2 and 3 (mostly 2 and 3, but also 1) try hard
+ *    to get an email address. Whenever I find one, I compare the "quality" of
+ *    the address against what we already have, and keep the best one.
+ *
+ *  - For all but the best quality addresses, call ResolveNames. Again, keep
+ *    the best value seen.
+ *
+ *  - For those that are left, wing-it.
+ *
+ * There is also a load of cruft data elimination along the way.
  */
 bool MapiAppointment::propertiesPull()
 {
@@ -677,15 +711,13 @@ bool MapiAppointment::propertiesPush()
 #endif
 	debug() << "************  SubmitMessage";
 	if (MAPI_E_SUCCESS != SubmitMessage(&m_object)) {
-		error() << "cannot submit message in folder" << fid
-			<< ", error:" << mapiError();
+		error() << "cannot submit message, error:" << mapiError();
 		return false;
 	}
 	struct mapi_SPropValue_array replyProperties;
 	debug() << "************  TransportSend";
 	if (MAPI_E_SUCCESS != TransportSend(&m_object, &replyProperties)) {
-		error() << "cannot send message in folder" << fid
-			<< ", error:" << mapiError();
+		error() << "cannot send message, error:" << mapiError();
 		return false;
 	}
 	return true;
@@ -801,7 +833,7 @@ bool MapiFolder::childrenPull(QList<MapiItem *> &children)
 	}
 
 	// Create the MAPI table view
-	SPropTagArray* tags = set_SPropTagArray(ctx(), 0x4, PidTagFolderId, PidTagMid, PidTagConversationTopic, PidTagLastModificationTime);
+	SPropTagArray* tags = set_SPropTagArray(ctx(), 0x3, PidTagMid, PidTagConversationTopic, PidTagLastModificationTime);
 	if (!tags) {
 		error() << "cannot set content table tags" << mapiError();
 		return false;
@@ -825,7 +857,9 @@ bool MapiFolder::childrenPull(QList<MapiItem *> &children)
 	while ((QueryRows(&m_contents, cursor, TBL_ADVANCE, &rowset) == MAPI_E_SUCCESS) && rowset.cRows) {
 		for (unsigned i = 0; i < rowset.cRows; i++) {
 			SRow &row = rowset.aRow[i];
-			MapiItem *data = new MapiItem();
+			mapi_id_t id;
+			QString name;
+			QDateTime modified;
 
 			for (unsigned j = 0; j < row.cValues; j++) {
 				MapiProperty property(row.lpProps[j]); 
@@ -833,17 +867,14 @@ bool MapiFolder::childrenPull(QList<MapiItem *> &children)
 				// Note that the set of properties fetched here must be aligned
 				// with those set above.
 				switch (property.tag()) {
-				case PidTagFolderId:
-					data->fid = QString::number(property.value().toULongLong()); 
-					break;
 				case PidTagMid:
-					data->id = QString::number(property.value().toULongLong()); 
+					id = property.value().toULongLong(); 
 					break;
 				case PidTagConversationTopic:
-					data->title = property.value().toString(); 
+					name = property.value().toString(); 
 					break;
 				case PidTagLastModificationTime:
-					data->modified = property.value().toDateTime(); 
+					modified = property.value().toDateTime(); 
 					break;
 				default:
 					//debug() << "ignoring item property name:" << tagName(property.tag()) << property.value();
@@ -852,6 +883,7 @@ bool MapiFolder::childrenPull(QList<MapiItem *> &children)
 			}
 
 			// Add the entry to the output list!
+			MapiItem *data = new MapiItem(id, name, modified);
 			children.append(data);
 			//TODO Just for debugging (in case the content list ist very long)
 			//if (i >= 10) break;
@@ -860,9 +892,8 @@ bool MapiFolder::childrenPull(QList<MapiItem *> &children)
 	return true;
 }
 
-bool MapiFolder::open(mapi_id_t unused)
+bool MapiFolder::open()
 {
-	Q_UNUSED(unused);
 	mapi_id_t id = m_id;
 
 	// Get the toplevel folder id if needed.
@@ -1196,8 +1227,9 @@ QDebug TallocContext::error(const QString &caller) const
 	return qCritical() << prefix.arg(talloc).arg(caller);
 }
 
-MapiMessage::MapiMessage(MapiConnector2 *connection, const char *tallocName, mapi_id_t id) :
-	MapiObject(connection, tallocName, id)
+MapiMessage::MapiMessage(MapiConnector2 *connection, const char *tallocName, mapi_id_t folderId, mapi_id_t id) :
+	MapiObject(connection, tallocName, id),
+	m_folderId(folderId)
 {
 	m_recipients.cRows = 0;
 }
@@ -1214,11 +1246,10 @@ QDebug MapiMessage::error() const
 	return MapiObject::error(prefix) << m_id;
 }
 
-bool MapiMessage::open(mapi_id_t folderId)
+bool MapiMessage::open()
 {
-	if (MAPI_E_SUCCESS != OpenMessage(m_connection->d(), folderId, m_id, &m_object, 0x0)) {
-		error() << "cannot open message in folder:" <<
-			folderId << ", error:" << mapiError();
+	if (MAPI_E_SUCCESS != OpenMessage(m_connection->d(), m_folderId, m_id, &m_object, 0x0)) {
+		error() << "cannot open message, error:" << mapiError();
 		return false;
 	}
 	return true;

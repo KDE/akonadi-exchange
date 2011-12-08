@@ -136,11 +136,11 @@ void mapibrowser::itemDoubleClicked(QTreeWidgetItem* clickedItem, int )
 	int row=0;
 	foreach (const MapiItem *data, list) {
 		QTableWidgetItem *newItem;
-		newItem = new QTableWidgetItem(data->id);
+		newItem = new QTableWidgetItem(data->id());
 		main->tableWidget->setItem(row, 0, newItem);
-		newItem = new QTableWidgetItem(data->title);
+		newItem = new QTableWidgetItem(data->name());
 		main->tableWidget->setItem(row, 1, newItem);
-		newItem = new QTableWidgetItem(data->modified.toString());
+		newItem = new QTableWidgetItem(data->modified().toString());
 		main->tableWidget->setItem(row, 2, newItem);
 		delete data;
 		row++;
@@ -173,8 +173,8 @@ void mapibrowser::itemDoubleClicked(QTableWidgetItem* clickedItem)
 	// JUST FOR DEBUG --END--
 #endif
 
-	MapiMessage message(&con, "mapibrowser::itemDoubleClicked", messageId.toULongLong());
-	if (!message.open(folderId.toULongLong())) {
+	MapiMessage message(&con, "mapibrowser::itemDoubleClicked", folderId.toULongLong(), messageId.toULongLong());
+	if (!message.open()) {
 		QMessageBox::warning(this, QString::fromLocal8Bit("Error"), QString::fromLocal8Bit("open failed!\n")+folderId+QString::fromLocal8Bit(":")+messageId);
 		return;
 	}

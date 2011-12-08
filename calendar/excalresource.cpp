@@ -159,21 +159,21 @@ void ExCalResource::retrieveItems( const Akonadi::Collection &collection )
 	// run though all the found data...
 	foreach (const MapiItem *data, list) {
 
-		checkedRemoteIds << data->id; // store for later use
+		checkedRemoteIds << data->id(); // store for later use
 
-		if (!knownRemoteIds.contains(data->id)) {
+		if (!knownRemoteIds.contains(data->id())) {
 			// we do not know this remoteID -> create a new empty item for it
 			Item item(QString::fromAscii("text/calendar"));
 			item.setParentCollection(collection);
-			item.setRemoteId(data->id);
+			item.setRemoteId(data->id());
 			item.setRemoteRevision(QString::number(1));
 			items << item;
 		} else {
 			// this item is already known, check if it was update in the meanwhile
-			Item& existingItem = knownItems.find(data->id).value();
+			Item& existingItem = knownItems.find(data->id()).value();
 // 				kDebug() << "Item("<<existingItem.id()<<":"<<data.id<<":"<<existingItem.revision()<<") is already known [Cache-ModTime:"<<existingItem.modificationTime()
 // 						<<" Server-ModTime:"<<data.modified<<"] Flags:"<<existingItem.flags()<<"Attrib:"<<existingItem.attributes();
-			if (existingItem.modificationTime() < data->modified) {
+			if (existingItem.modificationTime() < data->modified()) {
 				kDebug() << existingItem.id()<<"=> this item has changed";
 
 				// force akonadi to call retrieveItem() for this item in order to get updated data
@@ -222,8 +222,8 @@ bool ExCalResource::retrieveItem( const Akonadi::Item &itemOrig, const QSet<QByt
 
 	qulonglong messageId = itemOrig.remoteId().toULongLong();
 	qulonglong folderId = currentCollection().remoteId().toULongLong();
-	MapiAppointment message(m_connection, "ExCalResource::retrieveItem", messageId);
-	if (!message.open(folderId)) {
+	MapiAppointment message(m_connection, "ExCalResource::retrieveItem", folderId, messageId);
+	if (!message.open()) {
 		kError() << "open failed!";
 		emit status(Broken, i18n("Unable to open item: { %1, %2 }", currentCollection().name(), messageId));
 		return false;
@@ -239,7 +239,7 @@ bool ExCalResource::retrieveItem( const Akonadi::Item &itemOrig, const QSet<QByt
 		emit status(Broken, i18n("Unable to fetch item: { %1, %2 }", currentCollection().name(), messageId));
 		return false;
 	}
-	kDebug() << "got message; item:"<<message.id<<":"<<message.title;
+	kDebug() << "got message; item:"<<message.id()<<":"<<message.title;
 
 	// Create a clone of the passed in Item and fill it with the payload
 	Akonadi::Item item(itemOrig);
@@ -364,8 +364,8 @@ void ExCalResource::itemChangedContinue(KJob* job)
 
 	qulonglong messageId = item.remoteId().toULongLong();
 	qulonglong folderId = currentCollection().remoteId().toULongLong();
-	MapiAppointment message(m_connection, "ExCalResource::itemChangedContinue", messageId);
-	if (!message.open(folderId)) {
+	MapiAppointment message(m_connection, "ExCalResource::itemChangedContinue", folderId, messageId);
+	if (!message.open()) {
 		kError() << "open failed!";
 		emit status(Broken, i18n("Unable to open item: { %1, %2 }", currentCollection().name(), messageId));
 		return;
@@ -381,7 +381,7 @@ void ExCalResource::itemChangedContinue(KJob* job)
 		emit status(Broken, i18n("Unable to fetch item: { %1, %2 }", currentCollection().name(), messageId));
 		return;
 	}
-        kWarning() << "got item data:" << message.id << ":" << message.title;
+        kWarning() << "got item data:" << message.id() << ":" << message.title;
 
 	// Extract the event from the item.
 	KCal::Event::Ptr event = item.payload<KCal::Event::Ptr>();
