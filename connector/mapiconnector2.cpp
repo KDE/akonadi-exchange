@@ -227,34 +227,6 @@ bool MapiAppointment::debugRecurrencyPattern(RecurrencePattern *pattern)
 	return true;
 }
 
-unsigned MapiAppointment::isGoodEmailAddress(QString &email)
-{
-	static QChar at(QChar::fromAscii('@'));
-	static QChar x500Prefix(QChar::fromAscii('/'));
-
-	// Anything is better than an empty address!
-	if (email.isEmpty()) {
-		return 0;
-	}
-
-	// KDEPIM does not currently handle anything like this:
-	//
-	// "/O=CISCO SYSTEMS/OU=FIRST ADMINISTRATIVE GROUP/CN=RECIPIENTS/CN=name"
-	//
-	// but for the user, it is still better than nothing, so we give it a
-	// low priority.
-	if (email[0] == x500Prefix) {
-		return 1;
-	}
-
-	// An @ sign is better than no @ sign.
-	if (!email.contains(at)) {
-		return 2;
-	} else {
-		return 3;
-	}
-}
-
 /**
  * Add an attendee to the list. We:
  *
@@ -313,6 +285,34 @@ void MapiAppointment::addUniqueAttendee(Attendee candidate)
 
 	// Add the entry if it did not match.
 	attendees.append(candidate);
+}
+
+unsigned MapiAppointment::isGoodEmailAddress(QString &email)
+{
+	static QChar at(QChar::fromAscii('@'));
+	static QChar x500Prefix(QChar::fromAscii('/'));
+
+	// Anything is better than an empty address!
+	if (email.isEmpty()) {
+		return 0;
+	}
+
+	// KDEPIM does not currently handle anything like this:
+	//
+	// "/O=CISCO SYSTEMS/OU=FIRST ADMINISTRATIVE GROUP/CN=RECIPIENTS/CN=name"
+	//
+	// but for the user, it is still better than nothing, so we give it a
+	// low priority.
+	if (email[0] == x500Prefix) {
+		return 1;
+	}
+
+	// An @ sign is better than no @ sign.
+	if (!email.contains(at)) {
+		return 2;
+	} else {
+		return 3;
+	}
 }
 
 bool MapiAppointment::open()
@@ -723,6 +723,177 @@ bool MapiAppointment::propertiesPush()
 	return true;
 }
 
+MapiConnector2::MapiConnector2() :
+	MapiProfiles(),
+	m_session(0)
+{
+	mapi_object_init(&m_store);
+}
+
+MapiConnector2::~MapiConnector2()
+{
+	if (m_session) {
+		Logoff(&m_store);
+	}
+	mapi_object_release(&m_store);
+}
+
+QDebug MapiConnector2::debug() const
+{
+	static QString prefix = QString::fromAscii("MapiConnector2:");
+	return TallocContext::debug(prefix);
+}
+
+QDebug MapiConnector2::error() const
+{
+	static QString prefix = QString::fromAscii("MapiConnector2:");
+	return TallocContext::error(prefix);
+}
+
+bool MapiConnector2::fetchGAL(QList< GalMember >& list)
+{
+	struct SPropTagArray    *SPropTagArray;
+	struct SRowSet      *SRowSet;
+	enum MAPISTATUS     retval;
+	uint32_t        i;
+	uint32_t        count;
+	uint8_t         ulFlags;
+	uint32_t        rowsFetched = 0;
+	uint32_t        totalRecs = 0;
+
+	retval = GetGALTableCount(m_session, &totalRecs);
+	if (retval != MAPI_E_SUCCESS) {
+		return false;
+	}
+	qDebug() << "Total Number of entries in GAL:" << totalRecs;
+
+	TALLOC_CTX *mem_ctx;
+	mem_ctx = talloc_named(NULL, 0, "MapiGalConnector::fetchGAL");
+
+	SPropTagArray = set_SPropTagArray(mem_ctx, 0xe,
+						PR_INSTANCE_KEY,
+						PR_ENTRYID,
+						PR_DISPLAY_NAME_UNICODE,
+						PR_EMAIL_ADDRESS_UNICODE,
+						PR_DISPLAY_TYPE,
+						PR_OBJECT_TYPE,
+						PR_ADDRTYPE_UNICODE,
+						PR_OFFICE_TELEPHONE_NUMBER_UNICODE,
+						PR_OFFICE_LOCATION_UNICODE,
+						PR_TITLE_UNICODE,
+						PR_COMPANY_NAME_UNICODE,
+						PR_ACCOUNT_UNICODE,
+						PR_SMTP_ADDRESS_UNICODE,
+						PR_SMTP_ADDRESS
+ 						);
+
+	count = 0x7;
+	ulFlags = TABLE_START;
+	do {
+		count += 0x2;
+		retval = GetGALTable(m_session, SPropTagArray, &SRowSet, count, ulFlags);
+		if ((!SRowSet) || (!(SRowSet->aRow))) {
+			return false;
+		}
+		rowsFetched = SRowSet->cRows;
+		if (rowsFetched) {
+			for (i = 0; i < rowsFetched; i++) {
+				GalMember data;
+
+				for (unsigned int j = 0; j < SRowSet->aRow[i].cValues; ++j) {
+					switch ( SRowSet->aRow[i].lpProps[j].ulPropTag ) {
+						case PR_ENTRYID:
+							data.id = QString::number( SRowSet->aRow[i].lpProps[j].value.l );
+							break;
+						case PR_DISPLAY_NAME_UNICODE:
+							data.name = QString::fromUtf8( SRowSet->aRow[i].lpProps[j].value.lpszA );
+							break;
+						case PR_SMTP_ADDRESS_UNICODE:
+							data.email = QString::fromUtf8( SRowSet->aRow[i].lpProps[j].value.lpszA );
+							break;
+						case PR_TITLE_UNICODE:
+							data.title = QString::fromUtf8( SRowSet->aRow[i].lpProps[j].value.lpszA );
+							break;
+						case PR_COMPANY_NAME_UNICODE:
+							data.organization = QString::fromUtf8( SRowSet->aRow[i].lpProps[j].value.lpszA );
+							break;
+						case PR_ACCOUNT_UNICODE:
+							data.nick = QString::fromUtf8( SRowSet->aRow[i].lpProps[j].value.lpszA );
+							break;
+						default:
+							break;
+					}
+
+					// If PR_ADDRTYPE_UNICODE == "EX" it's a NSPI address book entry (whatever that means?)
+					// in that case the PR_EMAIL_ADDRESS_UNICODE contains a cryptic string. 
+					// PR_SMTP_ADDRESS_UNICODE seams to work better
+
+// 					TODO just for debugging
+// 					QString tagStr;
+// 					tagStr.sprintf("0x%X", SRowSet->aRow[i].lpProps[j].ulPropTag);
+// 					qDebug() << tagStr << mapiValueToQString(&SRowSet->aRow[i].lpProps[j]);
+				}
+
+				if (data.id.isEmpty()) continue;
+
+				qDebug() << "GLA:"<<data.id<<data.name<<data.email;
+				list << data;
+			}
+		}
+		ulFlags = TABLE_CUR;
+		MAPIFreeBuffer(SRowSet);
+
+// TODO for debugging
+// 		break;
+	} while (rowsFetched == count);
+
+	MAPIFreeBuffer(SPropTagArray);
+
+	return true;
+}
+
+bool MapiConnector2::login(QString profile)
+{
+	if (!init()) {
+		return false;
+	}
+	if (m_session) {
+		// already logged in...
+		return true;
+	}
+
+	if (profile.isEmpty()) {
+		// use the default profile if none was specified by the caller
+		profile = defaultGet();
+		if (profile.isEmpty()) {
+			// there seams to be no default profile
+			error() << "no default profile";
+			return false;
+		}
+	}
+
+	// Log on
+	if (MAPI_E_SUCCESS != MapiLogonEx(m_context, &m_session, profile.toUtf8(), NULL)) {
+		error() << "cannot logon using profile" << profile << mapiError();
+		return false;
+	}
+	if (MAPI_E_SUCCESS != OpenMsgStore(m_session, &m_store)) {
+		error() << "cannot open message store" << mapiError();
+		return false;
+	}
+	return true;
+}
+
+bool MapiConnector2::resolveNames(const char *names[], SPropTagArray *tags,
+				  SRowSet **results, PropertyTagArray_r **statuses)
+{
+	if (MAPI_E_SUCCESS != ResolveNames(m_session, names, tags, results, statuses, MAPI_UNICODE)) {
+		error() << "cannot resolve names" << mapiError();
+		return false;
+	}
+	return true;
+}
+
 MapiFolder::MapiFolder(MapiConnector2 *connection, const char *tallocName, mapi_id_t id) :
 	MapiObject(connection, tallocName, id)
 {
@@ -908,6 +1079,328 @@ bool MapiFolder::open()
 		return false;
 	}
 	return true;
+}
+
+MapiMessage::MapiMessage(MapiConnector2 *connection, const char *tallocName, mapi_id_t folderId, mapi_id_t id) :
+	MapiObject(connection, tallocName, id),
+	m_folderId(folderId)
+{
+	m_recipients.cRows = 0;
+}
+
+QDebug MapiMessage::debug() const
+{
+	static QString prefix = QString::fromAscii("MapiMessage:");
+	return MapiObject::debug(prefix) << m_id;
+}
+
+QDebug MapiMessage::error() const
+{
+	static QString prefix = QString::fromAscii("MapiMessage:");
+	return MapiObject::error(prefix) << m_id;
+}
+
+bool MapiMessage::open()
+{
+	if (MAPI_E_SUCCESS != OpenMessage(m_connection->d(), m_folderId, m_id, &m_object, 0x0)) {
+		error() << "cannot open message, error:" << mapiError();
+		return false;
+	}
+	return true;
+}
+
+Recipient MapiMessage::recipientAt(unsigned i) const
+{
+	Recipient result;
+
+	if (i > m_recipients.cRows) {
+		return Recipient();
+	}
+
+	struct SRow &recipient = m_recipients.aRow[i];
+	for (unsigned j = 0; j < recipient.cValues; j++) {
+		MapiProperty property(recipient.lpProps[j]);
+
+		// Note that the set of properties fetched here must be aligned
+		// with those fetched in MapiConnector::resolveNames().
+		switch (property.tag()) {
+		CASE_PREFER_UNICODE(PidTag7BitDisplayName, result.name, property.value().toString())
+		CASE_PREFER_UNICODE(PidTagDisplayName, result.name, property.value().toString())
+		CASE_PREFER_UNICODE(PidTagRecipientDisplayName, result.name, property.value().toString())
+		CASE_PREFER_UNICODE(PidTagPrimarySmtpAddress, result.email, property.value().toString())
+		case 0x6001001e:
+			if (result.email.isEmpty()) {
+				result.email = property.value().toString();
+			}
+			break;
+		case 0x6001001f:
+			result.email = property.value().toString(); 
+			break;
+		case PidTagRecipientTrackStatus:
+			result.trackStatus = property.value().toInt();
+			break;
+		case PidTagRecipientFlags:
+			result.flags = property.value().toInt();
+			break;
+		case PidTagRecipientType:
+			result.type = property.value().toInt();
+			break;
+		case PidTagRecipientOrder:
+			result.order = property.value().toInt();
+			break;
+		default:
+			break;
+		}
+	}
+	return result;
+}
+
+unsigned MapiMessage::recipientCount() const
+{
+	return m_recipients.cRows;
+}
+
+bool MapiMessage::recipientsPull()
+{
+	SPropTagArray propertyTagArray;
+
+	if (MAPI_E_SUCCESS != GetRecipientTable(&m_object, &m_recipients, &propertyTagArray)) {
+		error() << "cannot get recipient table:" << mapiError();
+		return false;
+	}
+	return true;
+}
+
+MapiObject::MapiObject(MapiConnector2 *connection, const char *tallocName, mapi_id_t id) :
+	TallocContext(tallocName),
+	m_connection(connection),
+	m_id(id),
+	m_properties(0),
+	m_propertyCount(0)
+{
+	mapi_object_init(&m_object);
+}
+
+MapiObject::~MapiObject()
+{
+	mapi_object_release(&m_object);
+}
+
+mapi_object_t *MapiObject::d() const
+{
+	return &m_object;
+}
+
+mapi_id_t MapiObject::id() const
+{
+	return m_id;
+}
+
+bool MapiObject::propertiesPush()
+{
+	if (MAPI_E_SUCCESS != SetProps(&m_object, MAPI_PROPS_SKIP_NAMEDID_CHECK, m_properties, m_propertyCount)) {
+		error() << "cannot push:" << m_propertyCount << "properties:" << mapiError();
+		return false;
+	}
+	m_properties = 0;
+	m_propertyCount = 0;
+	return true;
+}
+
+bool MapiObject::propertiesPull(QVector<int> &tags)
+{
+	struct SPropTagArray *tagArray = NULL;
+
+	m_properties = 0;
+	m_propertyCount = 0;
+	foreach (int tag, tags) {
+		if (!tagArray) {
+			tagArray = set_SPropTagArray(ctx(), 1, (MAPITAGS)tag);
+			if (!tagArray) {
+				error() << "cannot allocate tags:" << mapiError();
+				return false;
+			}
+		} else {
+			if (MAPI_E_SUCCESS != SPropTagArray_add(ctx(), tagArray, (MAPITAGS)tag)) {
+				error() << "cannot extend tags:" << mapiError();
+				MAPIFreeBuffer(tagArray);
+				return false;
+			}
+		}
+	}
+	if (MAPI_E_SUCCESS != GetProps(&m_object, MAPI_UNICODE, tagArray, &m_properties, &m_propertyCount)) {
+		error() << "cannot pull properties:" << mapiError();
+		MAPIFreeBuffer(tagArray);
+		return false;
+	}
+	MAPIFreeBuffer(tagArray);
+	return true;
+}
+
+bool MapiObject::propertiesPull()
+{
+	struct mapi_SPropValue_array mapiProperties;
+
+	m_properties = 0;
+	m_propertyCount = 0;
+	if (MAPI_E_SUCCESS != GetPropsAll(&m_object, MAPI_UNICODE, &mapiProperties)) {
+		error() << "cannot pull all properties:" << mapiError();
+		return false;
+	}
+
+	// Copy results from MAPI array to our array.
+	m_properties = talloc_array(ctx(), SPropValue, mapiProperties.cValues);
+	if (m_properties) {
+		for (m_propertyCount = 0; m_propertyCount < mapiProperties.cValues; m_propertyCount++) {
+			cast_SPropValue(ctx(), &mapiProperties.lpProps[m_propertyCount], 
+					&m_properties[m_propertyCount]);
+		}
+	} else {
+		error() << "cannot copy properties:" << mapiError();
+	}
+	return true;
+}
+
+QVariant MapiObject::property(int tag) const
+{
+	return propertyAt(propertyFind(tag));
+}
+
+QVariant MapiObject::propertyAt(unsigned i) const
+{
+	if (!m_propertyCount || ((m_propertyCount - 1) < i)) {
+		return QVariant();
+	}
+	return MapiProperty(m_properties[i]).value();
+}
+
+unsigned MapiObject::propertyCount() const
+{
+	return m_propertyCount;
+}
+
+unsigned MapiObject::propertyFind(int tag) const
+{
+	for (unsigned i = 0; i < m_propertyCount; i++) {
+		if (m_properties[i].ulPropTag == tag) {
+			return i;
+		}
+	}
+	return UINT_MAX;
+}
+
+QString MapiObject::propertyString(unsigned i) const
+{
+	if (!m_propertyCount || ((m_propertyCount - 1) < i)) {
+		return QString();
+	}
+	return MapiProperty(m_properties[i]).toString();
+}
+
+bool MapiObject::propertyWrite(int tag, void *data, bool idempotent)
+{
+	// If the assignment is idempotent, if an instance of the 
+	// property exists, it will be overwritten.
+	if (idempotent) {
+		for (unsigned i = 0; i < m_propertyCount; i++) {
+			if (m_properties[i].ulPropTag == tag) {
+				bool ok = set_SPropValue_proptag(&m_properties[i], (MAPITAGS)tag, data);
+				if (!ok) {
+					error() << "cannot overwrite tag:" << tagName(tag) << "value:" << data;
+				}
+				return ok;
+			}
+		}
+	}
+
+	// Add a new entry to the array.
+	m_properties = add_SPropValue(ctx(), m_properties, &m_propertyCount, (MAPITAGS)tag, data);
+	if (!m_properties) {
+		error() << "cannot write tag:" << tagName(tag) << "value:" << data;
+		return false;
+	}
+	return true;
+}
+
+bool MapiObject::propertyWrite(int tag, int data, bool idempotent)
+{
+	return propertyWrite(tag, &data, idempotent);
+}
+
+bool MapiObject::propertyWrite(int tag, QString &data, bool idempotent)
+{
+	char *copy = talloc_strdup(ctx(), data.toUtf8().data());
+
+	if (!copy) {
+		error() << "cannot talloc:" << data;
+		return false;
+	}
+
+	return propertyWrite(tag, copy, idempotent);
+}
+
+bool MapiObject::propertyWrite(int tag, QDateTime &data, bool idempotent)
+{
+	FILETIME *copy = talloc(ctx(), FILETIME);
+
+	if (!copy) {
+		error() << "cannot talloc:" << data;
+		return false;
+	}
+
+	// As per http://support.citrix.com/article/CTX109645.
+	time_t unixTime = data.toTime_t();
+	NTTIME ntTime = (unixTime + 11644473600L) * 10000000;
+	copy->dwHighDateTime = ntTime >> 32;
+	copy->dwLowDateTime = ntTime;
+	return propertyWrite(tag, copy, idempotent);
+}
+
+QString MapiObject::tagAt(unsigned i) const
+{
+	if (!m_propertyCount || ((m_propertyCount - 1) < i)) {
+		return QString();
+	}
+	return tagName(m_properties[i].ulPropTag);
+}
+
+QString MapiObject::tagName(int tag) const
+{
+	const char *str = get_proptag_name(tag);
+
+	if (str) {
+		return QString::fromLatin1(str);
+	} else {
+		struct MAPINAMEID *names;
+		uint16_t count;
+		int safeTag = (tag & 0xFFFF0000) | PT_NULL;
+
+		/*
+			* Try a lookup.
+			*/
+		if (MAPI_E_SUCCESS != GetNamesFromIDs(&m_object, (MAPITAGS)safeTag, &count, &names)) {
+			return QString::fromLatin1("Pid0x%1").arg(tag, 0, 16);
+		} else {
+			QByteArray strs;
+
+			/*
+				* Oh dear, a lookup can return multiple 
+				* names...
+				*/
+			for (unsigned i = 0; i < count; i++) {
+				if (i) {
+					strs.append(',');
+				}
+				if (MNID_STRING == names[i].ulKind) {
+					strs.append(&names[i].kind.lpwstr.Name[0], names[i].kind.lpwstr.NameSize);
+				} else {
+					strs.append(QString::fromLatin1("Id0x%1:%2").arg((unsigned)tag, 0, 16).
+							arg((unsigned)names[i].kind.lid, 0, 16).toLatin1());
+				}
+			}
+			return QString::fromLatin1(strs);
+		}
+	}
 }
 
 MapiProfiles::MapiProfiles() :
@@ -1129,429 +1622,51 @@ bool MapiProfiles::remove(QString profile)
 	return true;
 }
 
-MapiConnector2::MapiConnector2() :
-	MapiProfiles(),
-	m_session(0)
-{
-	mapi_object_init(&m_store);
-}
-
-MapiConnector2::~MapiConnector2()
-{
-	if (m_session) {
-		Logoff(&m_store);
-	}
-	mapi_object_release(&m_store);
-}
-
-QDebug MapiConnector2::debug() const
-{
-	static QString prefix = QString::fromAscii("MapiConnector2:");
-	return TallocContext::debug(prefix);
-}
-
-QDebug MapiConnector2::error() const
-{
-	static QString prefix = QString::fromAscii("MapiConnector2:");
-	return TallocContext::error(prefix);
-}
-
-bool MapiConnector2::login(QString profile)
-{
-	if (!init()) {
-		return false;
-	}
-	if (m_session) {
-		// already logged in...
-		return true;
-	}
-
-	if (profile.isEmpty()) {
-		// use the default profile if none was specified by the caller
-		profile = defaultGet();
-		if (profile.isEmpty()) {
-			// there seams to be no default profile
-			error() << "no default profile";
-			return false;
-		}
-	}
-
-	// Log on
-	if (MAPI_E_SUCCESS != MapiLogonEx(m_context, &m_session, profile.toUtf8(), NULL)) {
-		error() << "cannot logon using profile" << profile << mapiError();
-		return false;
-	}
-	if (MAPI_E_SUCCESS != OpenMsgStore(m_session, &m_store)) {
-		error() << "cannot open message store" << mapiError();
-		return false;
-	}
-	return true;
-}
-
-bool MapiConnector2::resolveNames(const char *names[], SPropTagArray *tags,
-				  SRowSet **results, PropertyTagArray_r **statuses)
-{
-	if (MAPI_E_SUCCESS != ResolveNames(m_session, names, tags, results, statuses, MAPI_UNICODE)) {
-		error() << "cannot resolve names" << mapiError();
-		return false;
-	}
-	return true;
-}
-
-TallocContext::TallocContext(const char *name)
-{
-	m_ctx = talloc_named(NULL, 0, "%s", name);
-}
-
-TallocContext::~TallocContext()
-{
-	talloc_free(m_ctx);
-}
-
-TALLOC_CTX *TallocContext::ctx()
-{
-	return m_ctx;
-}
-
-QDebug TallocContext::debug(const QString &caller) const
-{
-	static QString prefix = QString::fromAscii("%1.%2:");
-	QString talloc = QString::fromAscii(talloc_get_name(m_ctx));
-	return qDebug() << prefix.arg(talloc).arg(caller);
-}
-
-QDebug TallocContext::error(const QString &caller) const
-{
-	static QString prefix = QString::fromAscii("%1.%2:");
-	QString talloc = QString::fromAscii(talloc_get_name(m_ctx));
-	return qCritical() << prefix.arg(talloc).arg(caller);
-}
-
-MapiMessage::MapiMessage(MapiConnector2 *connection, const char *tallocName, mapi_id_t folderId, mapi_id_t id) :
-	MapiObject(connection, tallocName, id),
-	m_folderId(folderId)
-{
-	m_recipients.cRows = 0;
-}
-
-QDebug MapiMessage::debug() const
-{
-	static QString prefix = QString::fromAscii("MapiMessage:");
-	return MapiObject::debug(prefix) << m_id;
-}
-
-QDebug MapiMessage::error() const
-{
-	static QString prefix = QString::fromAscii("MapiMessage:");
-	return MapiObject::error(prefix) << m_id;
-}
-
-bool MapiMessage::open()
-{
-	if (MAPI_E_SUCCESS != OpenMessage(m_connection->d(), m_folderId, m_id, &m_object, 0x0)) {
-		error() << "cannot open message, error:" << mapiError();
-		return false;
-	}
-	return true;
-}
-
-unsigned MapiMessage::recipientCount() const
-{
-	return m_recipients.cRows;
-}
-
-bool MapiMessage::recipientsPull()
-{
-	SPropTagArray propertyTagArray;
-
-	if (MAPI_E_SUCCESS != GetRecipientTable(&m_object, &m_recipients, &propertyTagArray)) {
-		error() << "cannot get recipient table:" << mapiError();
-		return false;
-	}
-	return true;
-}
-
-Recipient MapiMessage::recipientAt(unsigned i) const
-{
-	Recipient result;
-
-	if (i > m_recipients.cRows) {
-		return Recipient();
-	}
-
-	struct SRow &recipient = m_recipients.aRow[i];
-	for (unsigned j = 0; j < recipient.cValues; j++) {
-		MapiProperty property(recipient.lpProps[j]);
-
-		// Note that the set of properties fetched here must be aligned
-		// with those fetched in MapiConnector::resolveNames().
-		switch (property.tag()) {
-		CASE_PREFER_UNICODE(PidTag7BitDisplayName, result.name, property.value().toString())
-		CASE_PREFER_UNICODE(PidTagDisplayName, result.name, property.value().toString())
-		CASE_PREFER_UNICODE(PidTagRecipientDisplayName, result.name, property.value().toString())
-		CASE_PREFER_UNICODE(PidTagPrimarySmtpAddress, result.email, property.value().toString())
-		case 0x6001001e:
-			if (result.email.isEmpty()) {
-				result.email = property.value().toString();
-			}
-			break;
-		case 0x6001001f:
-			result.email = property.value().toString(); 
-			break;
-		case PidTagRecipientTrackStatus:
-			result.trackStatus = property.value().toInt();
-			break;
-		case PidTagRecipientFlags:
-			result.flags = property.value().toInt();
-			break;
-		case PidTagRecipientType:
-			result.type = property.value().toInt();
-			break;
-		case PidTagRecipientOrder:
-			result.order = property.value().toInt();
-			break;
-		default:
-			break;
-		}
-	}
-	return result;
-}
-
-MapiObject::MapiObject(MapiConnector2 *connection, const char *tallocName, mapi_id_t id) :
-	TallocContext(tallocName),
-	m_connection(connection),
-	m_id(id),
-	m_properties(0),
-	m_propertyCount(0)
-{
-	mapi_object_init(&m_object);
-}
-
-MapiObject::~MapiObject()
-{
-	mapi_object_release(&m_object);
-}
-
-mapi_object_t *MapiObject::d() const
-{
-	return &m_object;
-}
-
-mapi_id_t MapiObject::id() const
-{
-	return m_id;
-}
-
-bool MapiObject::propertyWrite(int tag, void *data, bool idempotent)
-{
-	// If the assignment is idempotent, if an instance of the 
-	// property exists, it will be overwritten.
-	if (idempotent) {
-		for (unsigned i = 0; i < m_propertyCount; i++) {
-			if (m_properties[i].ulPropTag == tag) {
-				bool ok = set_SPropValue_proptag(&m_properties[i], (MAPITAGS)tag, data);
-				if (!ok) {
-					error() << "cannot overwrite tag:" << tagName(tag) << "value:" << data;
-				}
-				return ok;
-			}
-		}
-	}
-
-	// Add a new entry to the array.
-	m_properties = add_SPropValue(ctx(), m_properties, &m_propertyCount, (MAPITAGS)tag, data);
-	if (!m_properties) {
-		error() << "cannot write tag:" << tagName(tag) << "value:" << data;
-		return false;
-	}
-	return true;
-}
-
-bool MapiObject::propertyWrite(int tag, int data, bool idempotent)
-{
-	return propertyWrite(tag, &data, idempotent);
-}
-
-bool MapiObject::propertyWrite(int tag, QString &data, bool idempotent)
-{
-	char *copy = talloc_strdup(ctx(), data.toUtf8().data());
-
-	if (!copy) {
-		error() << "cannot talloc:" << data;
-		return false;
-	}
-
-	return propertyWrite(tag, copy, idempotent);
-}
-
-bool MapiObject::propertyWrite(int tag, QDateTime &data, bool idempotent)
-{
-	FILETIME *copy = talloc(ctx(), FILETIME);
-
-	if (!copy) {
-		error() << "cannot talloc:" << data;
-		return false;
-	}
-
-	// As per http://support.citrix.com/article/CTX109645.
-	time_t unixTime = data.toTime_t();
-	NTTIME ntTime = (unixTime + 11644473600L) * 10000000;
-	copy->dwHighDateTime = ntTime >> 32;
-	copy->dwLowDateTime = ntTime;
-	return propertyWrite(tag, copy, idempotent);
-}
-
-bool MapiObject::propertiesPush()
-{
-	if (MAPI_E_SUCCESS != SetProps(&m_object, MAPI_PROPS_SKIP_NAMEDID_CHECK, m_properties, m_propertyCount)) {
-		error() << "cannot push:" << m_propertyCount << "properties:" << mapiError();
-		return false;
-	}
-	m_properties = 0;
-	m_propertyCount = 0;
-	return true;
-}
-
-bool MapiObject::propertiesPull(QVector<int> &tags)
-{
-	struct SPropTagArray *tagArray = NULL;
-
-	m_properties = 0;
-	m_propertyCount = 0;
-	foreach (int tag, tags) {
-		if (!tagArray) {
-			tagArray = set_SPropTagArray(ctx(), 1, (MAPITAGS)tag);
-			if (!tagArray) {
-				error() << "cannot allocate tags:" << mapiError();
-				return false;
-			}
-		} else {
-			if (MAPI_E_SUCCESS != SPropTagArray_add(ctx(), tagArray, (MAPITAGS)tag)) {
-				error() << "cannot extend tags:" << mapiError();
-				MAPIFreeBuffer(tagArray);
-				return false;
-			}
-		}
-	}
-	if (MAPI_E_SUCCESS != GetProps(&m_object, MAPI_UNICODE, tagArray, &m_properties, &m_propertyCount)) {
-		error() << "cannot pull properties:" << mapiError();
-		MAPIFreeBuffer(tagArray);
-		return false;
-	}
-	MAPIFreeBuffer(tagArray);
-	return true;
-}
-
-bool MapiObject::propertiesPull()
-{
-	struct mapi_SPropValue_array mapiProperties;
-
-	m_properties = 0;
-	m_propertyCount = 0;
-	if (MAPI_E_SUCCESS != GetPropsAll(&m_object, MAPI_UNICODE, &mapiProperties)) {
-		error() << "cannot pull all properties:" << mapiError();
-		return false;
-	}
-
-	// Copy results from MAPI array to our array.
-	m_properties = talloc_array(ctx(), SPropValue, mapiProperties.cValues);
-	if (m_properties) {
-		for (m_propertyCount = 0; m_propertyCount < mapiProperties.cValues; m_propertyCount++) {
-			cast_SPropValue(ctx(), &mapiProperties.lpProps[m_propertyCount], 
-					&m_properties[m_propertyCount]);
-		}
-	} else {
-		error() << "cannot copy properties:" << mapiError();
-	}
-	return true;
-}
-
-unsigned MapiObject::propertyFind(int tag) const
-{
-	for (unsigned i = 0; i < m_propertyCount; i++) {
-		if (m_properties[i].ulPropTag == tag) {
-			return i;
-		}
-	}
-	return UINT_MAX;
-}
-
-QVariant MapiObject::property(int tag) const
-{
-	return propertyAt(propertyFind(tag));
-}
-
-QVariant MapiObject::propertyAt(unsigned i) const
-{
-	if (!m_propertyCount || ((m_propertyCount - 1) < i)) {
-		return QVariant();
-	}
-	return MapiProperty(m_properties[i]).value();
-}
-
-unsigned MapiObject::propertyCount() const
-{
-	return m_propertyCount;
-}
-
-QString MapiObject::tagAt(unsigned i) const
-{
-	if (!m_propertyCount || ((m_propertyCount - 1) < i)) {
-		return QString();
-	}
-	return tagName(m_properties[i].ulPropTag);
-}
-
-QString MapiObject::propertyString(unsigned i) const
-{
-	if (!m_propertyCount || ((m_propertyCount - 1) < i)) {
-		return QString();
-	}
-	return MapiProperty(m_properties[i]).toString();
-}
-
-QString MapiObject::tagName(int tag) const
-{
-	const char *str = get_proptag_name(tag);
-
-	if (str) {
-		return QString::fromLatin1(str);
-	} else {
-		struct MAPINAMEID *names;
-		uint16_t count;
-		int safeTag = (tag & 0xFFFF0000) | PT_NULL;
-
-		/*
-			* Try a lookup.
-			*/
-		if (MAPI_E_SUCCESS != GetNamesFromIDs(&m_object, (MAPITAGS)safeTag, &count, &names)) {
-			return QString::fromLatin1("Pid0x%1").arg(tag, 0, 16);
-		} else {
-			QByteArray strs;
-
-			/*
-				* Oh dear, a lookup can return multiple 
-				* names...
-				*/
-			for (unsigned i = 0; i < count; i++) {
-				if (i) {
-					strs.append(',');
-				}
-				if (MNID_STRING == names[i].ulKind) {
-					strs.append(&names[i].kind.lpwstr.Name[0], names[i].kind.lpwstr.NameSize);
-				} else {
-					strs.append(QString::fromLatin1("Id0x%1:%2").arg((unsigned)tag, 0, 16).
-							arg((unsigned)names[i].kind.lid, 0, 16).toLatin1());
-				}
-			}
-			return QString::fromLatin1(strs);
-		}
-	}
-}
-
 MapiProperty::MapiProperty(SPropValue &property) :
 	m_property(property)
 {
+}
+
+int MapiProperty::tag() const
+{
+	return m_property.ulPropTag;
+}
+
+/**
+ * Get the string equivalent of a property, e.g. for display purposes.
+ * We take care to hex-ify GUIDs and other byte arrays, and lists of
+ * the same.
+ */
+QString MapiProperty::toString() const
+{
+	// Use the default stringification whenever we can.
+	QVariant tmp(value());
+	switch (tmp.type()) {
+	case QVariant::ByteArray:
+		// Convert to a hex string.
+		return QString::fromLatin1(tmp.toByteArray().toHex());
+	case QVariant::List:
+	{
+		QList<QVariant> list(tmp.toList());
+		QList<QVariant>::iterator i;
+		QStringList result;
+
+		for (i = list.begin(); i != list.end(); ++i) {
+			switch ((*i).type()) {
+			case QVariant::ByteArray:
+				// Convert to a hex string.
+				result.append(QString::fromLatin1((*i).toByteArray().toHex()));
+				break;
+			default:
+				result.append((*i).toString());
+				break;
+			}
+		}
+		return result.join(QString::fromLatin1(","));
+	}
+	default:
+		return tmp.toString();
+	}
 }
 
 /**
@@ -1669,151 +1784,6 @@ QVariant MapiProperty::value() const
 	}
 }
 
-/**
- * Get the string equivalent of a property, e.g. for display purposes.
- * We take care to hex-ify GUIDs and other byte arrays, and lists of
- * the same.
- */
-QString MapiProperty::toString() const
-{
-	// Use the default stringification whenever we can.
-	QVariant tmp(value());
-	switch (tmp.type()) {
-	case QVariant::ByteArray:
-		// Convert to a hex string.
-		return QString::fromLatin1(tmp.toByteArray().toHex());
-	case QVariant::List:
-	{
-		QList<QVariant> list(tmp.toList());
-		QList<QVariant>::iterator i;
-		QStringList result;
-
-		for (i = list.begin(); i != list.end(); ++i) {
-			switch ((*i).type()) {
-			case QVariant::ByteArray:
-				// Convert to a hex string.
-				result.append(QString::fromLatin1((*i).toByteArray().toHex()));
-				break;
-			default:
-				result.append((*i).toString());
-				break;
-			}
-		}
-		return result.join(QString::fromLatin1(","));
-	}
-	default:
-		return tmp.toString();
-	}
-}
-
-int MapiProperty::tag() const
-{
-	return m_property.ulPropTag;
-}
-
-bool MapiConnector2::fetchGAL(QList< GalMember >& list)
-{
-	struct SPropTagArray    *SPropTagArray;
-	struct SRowSet      *SRowSet;
-	enum MAPISTATUS     retval;
-	uint32_t        i;
-	uint32_t        count;
-	uint8_t         ulFlags;
-	uint32_t        rowsFetched = 0;
-	uint32_t        totalRecs = 0;
-
-	retval = GetGALTableCount(m_session, &totalRecs);
-	if (retval != MAPI_E_SUCCESS) {
-		return false;
-	}
-	qDebug() << "Total Number of entries in GAL:" << totalRecs;
-
-	TALLOC_CTX *mem_ctx;
-	mem_ctx = talloc_named(NULL, 0, "MapiGalConnector::fetchGAL");
-
-	SPropTagArray = set_SPropTagArray(mem_ctx, 0xe,
-						PR_INSTANCE_KEY,
-						PR_ENTRYID,
-						PR_DISPLAY_NAME_UNICODE,
-						PR_EMAIL_ADDRESS_UNICODE,
-						PR_DISPLAY_TYPE,
-						PR_OBJECT_TYPE,
-						PR_ADDRTYPE_UNICODE,
-						PR_OFFICE_TELEPHONE_NUMBER_UNICODE,
-						PR_OFFICE_LOCATION_UNICODE,
-						PR_TITLE_UNICODE,
-						PR_COMPANY_NAME_UNICODE,
-						PR_ACCOUNT_UNICODE,
-						PR_SMTP_ADDRESS_UNICODE,
-						PR_SMTP_ADDRESS
- 						);
-
-	count = 0x7;
-	ulFlags = TABLE_START;
-	do {
-		count += 0x2;
-		retval = GetGALTable(m_session, SPropTagArray, &SRowSet, count, ulFlags);
-		if ((!SRowSet) || (!(SRowSet->aRow))) {
-			return false;
-		}
-		rowsFetched = SRowSet->cRows;
-		if (rowsFetched) {
-			for (i = 0; i < rowsFetched; i++) {
-				GalMember data;
-
-				for (unsigned int j = 0; j < SRowSet->aRow[i].cValues; ++j) {
-					switch ( SRowSet->aRow[i].lpProps[j].ulPropTag ) {
-						case PR_ENTRYID:
-							data.id = QString::number( SRowSet->aRow[i].lpProps[j].value.l );
-							break;
-						case PR_DISPLAY_NAME_UNICODE:
-							data.name = QString::fromUtf8( SRowSet->aRow[i].lpProps[j].value.lpszA );
-							break;
-						case PR_SMTP_ADDRESS_UNICODE:
-							data.email = QString::fromUtf8( SRowSet->aRow[i].lpProps[j].value.lpszA );
-							break;
-						case PR_TITLE_UNICODE:
-							data.title = QString::fromUtf8( SRowSet->aRow[i].lpProps[j].value.lpszA );
-							break;
-						case PR_COMPANY_NAME_UNICODE:
-							data.organization = QString::fromUtf8( SRowSet->aRow[i].lpProps[j].value.lpszA );
-							break;
-						case PR_ACCOUNT_UNICODE:
-							data.nick = QString::fromUtf8( SRowSet->aRow[i].lpProps[j].value.lpszA );
-							break;
-						default:
-							break;
-					}
-
-					// If PR_ADDRTYPE_UNICODE == "EX" it's a NSPI address book entry (whatever that means?)
-					// in that case the PR_EMAIL_ADDRESS_UNICODE contains a cryptic string. 
-					// PR_SMTP_ADDRESS_UNICODE seams to work better
-
-// 					TODO just for debugging
-// 					QString tagStr;
-// 					tagStr.sprintf("0x%X", SRowSet->aRow[i].lpProps[j].ulPropTag);
-// 					qDebug() << tagStr << mapiValueToQString(&SRowSet->aRow[i].lpProps[j]);
-				}
-
-				if (data.id.isEmpty()) continue;
-
-				qDebug() << "GLA:"<<data.id<<data.name<<data.email;
-				list << data;
-			}
-		}
-		ulFlags = TABLE_CUR;
-		MAPIFreeBuffer(SRowSet);
-
-// TODO for debugging
-// 		break;
-	} while (rowsFetched == count);
-
-	MAPIFreeBuffer(SPropTagArray);
-
-	return true;
-}
-
-
 bool MapiRecurrencyPattern::setData(RecurrencePattern* pattern)
 {
 	if (pattern->RecurFrequency == RecurFrequency_Daily && pattern->PatternType == PatternType_Day) {
@@ -1911,4 +1881,33 @@ QDateTime MapiRecurrencyPattern::convertExchangeTimes(const uint32_t exchangeMin
 	int days = exchangeMinutes / 60 / 24;
 	int secs = exchangeMinutes - (days*24*60);
 	return calc.addDays(days).addSecs(secs);
+}
+
+TallocContext::TallocContext(const char *name)
+{
+	m_ctx = talloc_named(NULL, 0, "%s", name);
+}
+
+TallocContext::~TallocContext()
+{
+	talloc_free(m_ctx);
+}
+
+TALLOC_CTX *TallocContext::ctx()
+{
+	return m_ctx;
+}
+
+QDebug TallocContext::debug(const QString &caller) const
+{
+	static QString prefix = QString::fromAscii("%1.%2:");
+	QString talloc = QString::fromAscii(talloc_get_name(m_ctx));
+	return qDebug() << prefix.arg(talloc).arg(caller);
+}
+
+QDebug TallocContext::error(const QString &caller) const
+{
+	static QString prefix = QString::fromAscii("%1.%2:");
+	QString talloc = QString::fromAscii(talloc_get_name(m_ctx));
+	return qCritical() << prefix.arg(talloc).arg(caller);
 }
