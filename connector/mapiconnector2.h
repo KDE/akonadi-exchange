@@ -531,35 +531,4 @@ private:
 	virtual QDebug error() const;
 };
 
-/**
- * A very simple wrapper around a property.
- */
-class MapiProperty : private SPropValue
-{
-public:
-	MapiProperty(SPropValue &property);
-
-	/**
-	 * Get the value of the property in a nice typesafe wrapper.
-	 */
-	QVariant value() const;
-
-	/**
-	 * Get the string equivalent of a property, e.g. for display purposes.
-	 * We take care to hex-ify GUIDs and other byte arrays, and lists of
-	 * the same.
-	 */
-	QString toString() const;
-
-	/**
-	 * Return the integer tag.
-	 * 
-	 * To convert this into a name, @ref MapiObject::tagName().
-	 */
-	int tag() const;
-
-private:
-	SPropValue &m_property;
-};
-
 #endif // MAPICONNECTOR2_H

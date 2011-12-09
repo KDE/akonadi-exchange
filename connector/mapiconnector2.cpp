@@ -37,6 +37,12 @@ case unicode: \
 	break;
 
 /**
+ * Set this to 1 to pull all the properties for an appointment, e.g. to see
+ * what a server has available.
+ */
+#define DEBUG_APPOINTMENT_PROPERTIES 0
+
+/**
  * Map all MAPI errors to strings. Note that all MAPI error handling 
  * assumes that MAPI_E_SUCCESS == 0!
  */
@@ -140,6 +146,37 @@ static int profileSelectCallback(struct SRowSet *rowset, const void* /*private_v
 	//  TODO Some sort of handling would be needed here
 	return rowset->cRows;
 }
+
+/**
+ * A very simple wrapper around a property.
+ */
+class MapiProperty : private SPropValue
+{
+public:
+	MapiProperty(SPropValue &property);
+
+	/**
+	 * Get the value of the property in a nice typesafe wrapper.
+	 */
+	QVariant value() const;
+
+	/**
+	 * Get the string equivalent of a property, e.g. for display purposes.
+	 * We take care to hex-ify GUIDs and other byte arrays, and lists of
+	 * the same.
+	 */
+	QString toString() const;
+
+	/**
+	 * Return the integer tag.
+	 * 
+	 * To convert this into a name, @ref MapiObject::tagName().
+	 */
+	int tag() const;
+
+private:
+	SPropValue &m_property;
+};
 
 MapiAppointment::MapiAppointment(MapiConnector2 *connector, const char *tallocName, mapi_id_t folderId, mapi_id_t id) :
 	MapiMessage(connector, tallocName, folderId, id)
@@ -376,6 +413,44 @@ bool MapiAppointment::propertiesPull()
 	for (unsigned i = 0; i < recipientCount(); i++) {
 		addUniqueAttendee(Attendee(recipientAt(i)));
 	}
+#if (DEBUG_APPOINTMENT_PROPERTIES)
+	if (!MapiMessage::propertiesPull()) {
+		return false;
+	}
+#else
+	QVector<int> readTags;
+	readTags.append(PidTagDisplayTo);
+	readTags.append(PidTagConversationTopic);
+	readTags.append(PidTagBody);
+	readTags.append(PidTagLastModificationTime);
+	readTags.append(PidTagCreationTime);
+	readTags.append(PidTagStartDate);
+	readTags.append(PidTagEndDate);
+	readTags.append(PidLidLocation);
+	readTags.append(PidLidReminderSet);
+	readTags.append(PidLidReminderSignalTime);
+	readTags.append(PidLidReminderDelta);
+	readTags.append(PidLidRecurrenceType);
+	readTags.append(PidLidAppointmentRecur);
+
+	readTags.append(PidTagSentRepresentingEmailAddress);
+	readTags.append(PidTagSentRepresentingEmailAddress_string8);
+
+	readTags.append(PidTagSentRepresentingName);
+	readTags.append(PidTagSentRepresentingName_string8);
+
+	readTags.append(PidTagSentRepresentingSimpleDisplayName);
+	readTags.append(PidTagSentRepresentingSimpleDisplayName_string8);
+
+	readTags.append(PidTagOriginalSentRepresentingEmailAddress);
+	readTags.append(PidTagOriginalSentRepresentingEmailAddress_string8);
+
+	readTags.append(PidTagOriginalSentRepresentingName);
+	readTags.append(PidTagOriginalSentRepresentingName_string8);
+	if (!MapiMessage::propertiesPull(readTags)) {
+		return false;
+	}
+#endif
 
 	QStringList displayTo;
 	Attendee displayed;
@@ -384,10 +459,8 @@ bool MapiAppointment::propertiesPull()
 	Attendee sentRepresenting;
 	Attendee originalSentRepresenting;
 
-	// Walk through the properties and extract the values of interest.
-	if (!MapiMessage::propertiesPull()) {
-		return false;
-	}
+	// Walk through the properties and extract the values of interest. The
+	// properties here should be aligned with the list pulled above.
 	for (unsigned i = 0; i < m_propertyCount; i++) {
 		MapiProperty property(m_properties[i]);
 
@@ -447,7 +520,9 @@ bool MapiAppointment::propertiesPull()
 		CASE_PREFER_UNICODE(PidTagOriginalSentRepresentingEmailAddress, originalSentRepresenting.email, property.value().toString())
 		CASE_PREFER_UNICODE(PidTagOriginalSentRepresentingName, originalSentRepresenting.name, property.value().toString())
 		default:
-			//debug() << "ignoring appointment property name:" << tagName(property.tag()) << property.value();
+#if (DEBUG_APPOINTMENT_PROPERTIES)
+			debug() << "ignoring appointment property name:" << tagName(property.tag()) << property.value();
+#endif
 			break;
 		}
 	}
@@ -1672,6 +1747,7 @@ QString MapiProperty::toString() const
 /**
  * Get the value of the property in a nice typesafe wrapper.
  */
+inline
 QVariant MapiProperty::value() const
 {
 	switch (m_property.ulPropTag & 0xFFFF) {
