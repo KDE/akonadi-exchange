@@ -148,14 +148,14 @@ MapiAppointment::MapiAppointment(MapiConnector2 *connector, const char *tallocNa
 
 QDebug MapiAppointment::debug() const
 {
-	static QString prefix = QString::fromAscii("MapiAppointment:");
-	return MapiObject::debug(prefix) << m_id /*<< title*/;
+	static QString prefix = QString::fromAscii("MapiAppointment:%1:");
+	return MapiObject::debug(prefix.arg(m_id)) /*<< title*/;
 }
 
 QDebug MapiAppointment::error() const
 {
-	static QString prefix = QString::fromAscii("MapiAppointment:");
-	return MapiObject::error(prefix) << m_id /*<< title*/;
+	static QString prefix = QString::fromAscii("MapiAppointment:%1:");
+	return MapiObject::error(prefix.arg(m_id)) /*<< title*/;
 }
 
 bool MapiAppointment::debugRecurrencyPattern(RecurrencePattern *pattern)
@@ -909,14 +909,14 @@ MapiFolder::~MapiFolder()
 
 QDebug MapiFolder::debug() const
 {
-	static QString prefix = QString::fromAscii("MapiFolder:");
-	return MapiObject::debug(prefix) << m_id;
+	static QString prefix = QString::fromAscii("MapiFolder:%1:");
+	return MapiObject::debug(prefix.arg(m_id));
 }
 
 QDebug MapiFolder::error() const
 {
-	static QString prefix = QString::fromAscii("MapiFolder:");
-	return MapiObject::error(prefix) << m_id;
+	static QString prefix = QString::fromAscii("MapiFolder:%1:");
+	return MapiObject::error(prefix.arg(m_id));
 }
 
 QString MapiFolder::id() const
@@ -1090,14 +1090,14 @@ MapiMessage::MapiMessage(MapiConnector2 *connection, const char *tallocName, map
 
 QDebug MapiMessage::debug() const
 {
-	static QString prefix = QString::fromAscii("MapiMessage:");
-	return MapiObject::debug(prefix) << m_id;
+	static QString prefix = QString::fromAscii("MapiMessage:%1.%2:");
+	return MapiObject::debug(prefix.arg(m_folderId).arg(m_id));
 }
 
 QDebug MapiMessage::error() const
 {
-	static QString prefix = QString::fromAscii("MapiMessage:");
-	return MapiObject::error(prefix) << m_id;
+	static QString prefix = QString::fromAscii("MapiMessage:%1.%2:");
+	return MapiObject::error(prefix.arg(m_folderId).arg(m_id));
 }
 
 bool MapiMessage::open()
@@ -1900,14 +1900,14 @@ TALLOC_CTX *TallocContext::ctx()
 
 QDebug TallocContext::debug(const QString &caller) const
 {
-	static QString prefix = QString::fromAscii("%1.%2:");
+	static QString prefix = QString::fromAscii("%1.%2");
 	QString talloc = QString::fromAscii(talloc_get_name(m_ctx));
 	return qDebug() << prefix.arg(talloc).arg(caller);
 }
 
 QDebug TallocContext::error(const QString &caller) const
 {
-	static QString prefix = QString::fromAscii("%1.%2:");
+	static QString prefix = QString::fromAscii("%1.%2");
 	QString talloc = QString::fromAscii(talloc_get_name(m_ctx));
 	return qCritical() << prefix.arg(talloc).arg(caller);
 }
