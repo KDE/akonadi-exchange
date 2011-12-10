@@ -420,7 +420,7 @@ bool MapiAppointment::propertiesPull()
 				<< "name:" << recipientName
 				<< "email:" << recipientEmail;
 	}
-// TEST -START-
+// TEST -END-
 
 	// Start with a clean slate.
 	reminderActive = false;
