@@ -382,6 +382,46 @@ unsigned MapiAppointment::isGoodEmailAddress(QString &email)
  */
 bool MapiAppointment::propertiesPull()
 {
+// TEST -START-  Try an easier approach to find all the attendees
+	struct ReadRecipientRow * recipientTable = 0x0;
+	uint8_t recCount;
+	ReadRecipients(d(), 0, &recCount, &recipientTable);
+	qDebug()<< "number of recipients:"<<recCount;
+	for (int x=0; x<recCount; x++) {
+		struct ReadRecipientRow * recipient = &recipientTable[x];
+
+		QString recipientName;
+		QString recipientEmail;
+		
+		// Found this "intel" in MS-OXCDATA 2.8.3.1
+		bool hasDisplayName = (recipient->RecipientRow.RecipientFlags&0x0010)==0x0010;
+		if (hasDisplayName) {
+			recipientName = QString::fromUtf8(recipient->RecipientRow.DisplayName.lpszW);
+		}
+		bool hasEmailAddress = (recipient->RecipientRow.RecipientFlags&0x0008)==0x0008;
+		if (hasEmailAddress) {
+			recipientEmail = QString::fromUtf8(recipient->RecipientRow.EmailAddress.lpszW);
+		}
+
+		uint16_t type = recipient->RecipientRow.RecipientFlags&0x0007;
+		switch (type) {
+			case 0x1: // => X500DN
+				// we need to resolve this recipient's data
+				// TODO for now we just copy the user's account name to the recipientEmail
+				recipientEmail = QString::fromLocal8Bit(recipient->RecipientRow.X500DN.recipient_x500name);
+				break;
+			default:
+				// don't see any need to evaluate anything but the "X500DN" case
+				break;
+		}
+
+		qDebug()<< "recipient["<<x<<"] type:"<< recipient->RecipientType
+				<< "flags:" << recipient->RecipientRow.RecipientFlags
+				<< "name:" << recipientName
+				<< "email:" << recipientEmail;
+	}
+// TEST -START-
+
 	// Start with a clean slate.
 	reminderActive = false;
 	attendees.clear();
