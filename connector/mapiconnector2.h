@@ -489,8 +489,6 @@ class MapiAppointment : public MapiMessage
 public:
 	MapiAppointment(MapiConnector2 *connection, const char *tallocName, mapi_id_t folderId, mapi_id_t id);
 
-	virtual bool open();
-
 	/**
 	 * Fetch all calendar properties.
 	 */

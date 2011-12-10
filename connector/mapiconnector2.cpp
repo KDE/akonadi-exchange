@@ -352,27 +352,6 @@ unsigned MapiAppointment::isGoodEmailAddress(QString &email)
 	}
 }
 
-bool MapiAppointment::open()
-{
-	if (!MapiMessage::open()) {
-		return false;
-	}
-
-	// Sanity check the message class.
-	QVector<int> readTags;
-	readTags.append(PidTagMessageClass);
-	if (!MapiMessage::propertiesPull(readTags)) {
-		return false;
-	}
-	QString messageClass = property(PidTagMessageClass).toString();
-	if (QString::fromLatin1("IPM.Appointment").compare(messageClass)) {
-		// this one is not an appointment
-		return false;
-	}
-	reminderActive = false;
-	return true;
-}
-
 /**
  * We collect recipients as well as properties. The recipients are pulled from
  * multiple sources, but need to go through a resolution process to fix them up.
@@ -403,7 +382,8 @@ bool MapiAppointment::open()
  */
 bool MapiAppointment::propertiesPull()
 {
-	// Now gather the set of attendees. Start with a clean slate.
+	// Start with a clean slate.
+	reminderActive = false;
 	attendees.clear();
 
 	// Step 1. Add all the recipients from the actual table.
@@ -419,6 +399,7 @@ bool MapiAppointment::propertiesPull()
 	}
 #else
 	QVector<int> readTags;
+	readTags.append(PidTagMessageClass);
 	readTags.append(PidTagDisplayTo);
 	readTags.append(PidTagConversationTopic);
 	readTags.append(PidTagBody);
@@ -465,7 +446,12 @@ bool MapiAppointment::propertiesPull()
 		MapiProperty property(m_properties[i]);
 
 		switch (property.tag()) {
-		case PidTagDisplayTo:
+			// Sanity check the message class.
+			if (QLatin1String("IPM.Appointment") != property.value().toString()) {
+				// this one is not an appointment
+				return false;
+			}
+			case PidTagDisplayTo:
 			// Step 2. Add the DisplayTo items.
 			//
 			// Astonishingly, when we call recipientsPull() later,

@@ -45,6 +45,9 @@ ExCalResource::ExCalResource( const QString &id )
 	new SettingsAdaptor( Settings::self() );
 	QDBusConnection::sessionBus().registerObject( QLatin1String( "/Settings" ),
 							Settings::self(), QDBusConnection::ExportAdaptors );
+	// Exchange requires the folder id as well as the item id, suggesting
+	// that this is needed.
+	setHierarchicalRemoteIdentifiersEnabled(true);
 }
 
 ExCalResource::~ExCalResource()
@@ -77,12 +80,7 @@ void ExCalResource::retrieveCollections()
 	QList<MapiFolder *> list;
 	emit status(Running, i18n("Fetching folder list from Exchange"));
 	if (!rootFolder.childrenPull(list, QString::fromAscii(IPF_APPOINTMENT))) {
-		kError() << "cannot open root folder";
-		return;
-	}
-	if (list.size() == 0) {
-		kError() << "no calendar folders found";
-		emit status(Broken, i18n("No calendar folders in Exchange"));
+		emit status(Broken, i18n("Cannot fetch folder list from Exchange"));
 		return;
 	}
 
@@ -93,18 +91,21 @@ void ExCalResource::retrieveCollections()
 		if (!done) {
 			root.setRemoteId(data->id());
 			root.setName(i18n("Exchange: ") + data->name);
+			collections.append(root);
 			done = true;
 		}
-		kError() << "delete " << data;
 		delete data;
 	}
-	collections.append(root);
+	if (collections.size() == 0) {
+		emit status(Broken, i18n("No calendar folders in Exchange"));
+		return;
+	}
 
 	// notify akonadi about the new calendar collection
 	collectionsRetrieved(collections);
 }
 
-void ExCalResource::retrieveItems( const Akonadi::Collection &collection )
+void ExCalResource::retrieveItems(const Akonadi::Collection &collection)
 {
 	kDebug() << "retrieveItems() called for collection "<< collection.id();
 
