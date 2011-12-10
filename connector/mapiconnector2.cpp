@@ -185,14 +185,14 @@ MapiAppointment::MapiAppointment(MapiConnector2 *connector, const char *tallocNa
 
 QDebug MapiAppointment::debug() const
 {
-	static QString prefix = QString::fromAscii("MapiAppointment:%1:");
-	return MapiObject::debug(prefix.arg(m_id)) /*<< title*/;
+	static QString prefix = QString::fromAscii("MapiAppointment:%1.%2:");
+	return MapiObject::debug(prefix.arg(m_folderId).arg(m_id)) /*<< title*/;
 }
 
 QDebug MapiAppointment::error() const
 {
-	static QString prefix = QString::fromAscii("MapiAppointment:%1:");
-	return MapiObject::error(prefix.arg(m_id)) /*<< title*/;
+	static QString prefix = QString::fromAscii("MapiAppointment:%1:%2");
+	return MapiObject::error(prefix.arg(m_folderId).arg(m_id)) /*<< title*/;
 }
 
 bool MapiAppointment::debugRecurrencyPattern(RecurrencePattern *pattern)
@@ -1042,8 +1042,8 @@ bool MapiFolder::childrenPull(QList<MapiFolder *> &children, const QString &filt
 					break;
 				}
 			}
-			if (!filter.isEmpty() && !(folderClass).startsWith(filter)) {
-				debug() << "folder" << name << "does not match filter" << filter;
+			if (!filter.isEmpty() && !folderClass.isEmpty() && !folderClass.startsWith(filter)) {
+				debug() << "folder" << name << ", class" << folderClass << "does not match filter" << filter;
 				continue;
 			}
 
