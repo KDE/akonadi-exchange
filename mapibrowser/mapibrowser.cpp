@@ -164,15 +164,16 @@ void mapibrowser::itemDoubleClicked(QTableWidgetItem* clickedItem)
 	}
 
 #if 0
-	// JUST FOR DEBUG --BEGIN--
-	CalendarData message;
-	if (!con.fetchCalendarData(folderId.toULongLong(), messageId.toULongLong(), message)) {
-		QMessageBox::warning(this, "DEBUG NOTE", "fetchCalendarData failed!\n"+folderId+":"+messageId);
+// JUST FOR DEBUG --BEGIN--
+	MapiAppointment appoint(&con, "itemDoubleClicked-DEBUG",folderId.toULongLong(), messageId.toULongLong());
+	if (!appoint.open()) {
+		QMessageBox::warning(this, QString::fromLocal8Bit("Error"), QString::fromLocal8Bit("open failed!\n")+folderId+QString::fromLocal8Bit(":")+messageId);
+		return;
 	}
-	int debugStop = 0;
-	// JUST FOR DEBUG --END--
+	appoint.propertiesPull();
+// JUST FOR DEBUG --END--
 #endif
-
+	
 	MapiMessage message(&con, "mapibrowser::itemDoubleClicked", folderId.toULongLong(), messageId.toULongLong());
 	if (!message.open()) {
 		QMessageBox::warning(this, QString::fromLocal8Bit("Error"), QString::fromLocal8Bit("open failed!\n")+folderId+QString::fromLocal8Bit(":")+messageId);
