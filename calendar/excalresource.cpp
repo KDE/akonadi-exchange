@@ -69,11 +69,46 @@ ExCalResource::~ExCalResource()
 	delete m_connection;
 }
 
+void ExCalResource::error(const MapiFolder &folder, const QString &body)
+{
+	static QString prefix = QString::fromAscii("Error %1: %2");
+	QString message = prefix.arg(toStringId(folder.id())).arg(body);
+
+	kError() << message;
+	emit status(Broken, message);
+	cancelTask(message);
+}
+
+void ExCalResource::error(const Akonadi::Collection &collection, const QString &body)
+{
+	static QString prefix = QString::fromAscii("Error %1(%2): %3");
+	QString message = prefix.arg(collection.remoteId()).arg(collection.name()).arg(body);
+
+	kError() << message;
+	emit status(Broken, message);
+	cancelTask(message);
+}
+
+void ExCalResource::error(const MapiMessage &msg, const QString &body)
+{
+	// Ignore the folderId, since we don't currently use multiple folders.
+	//static QString prefix = QString::fromAscii("Error %1/%2: %3");
+	//QString message = prefix.arg(toStringId(msg.folderId())).arg(toStringId(msg.id())).arg(body);
+	static QString prefix = QString::fromAscii("Error %1: %2");
+	QString message = prefix.arg(toStringId(msg.id())).arg(body);
+
+	kError() << message;
+	emit status(Broken, message);
+	cancelTask(message);
+}
+
 void ExCalResource::retrieveCollections()
 {
 	kDebug() << "retrieveCollections() called";
 
 	if (!logon()) {
+		// Come back later.
+		deferTask();
 		return;
 	}
 
@@ -87,13 +122,14 @@ void ExCalResource::retrieveCollections()
 
 	MapiFolder rootFolder(m_connection, "ExCalResource::retrieveCollections", 0);
 	if (!rootFolder.open()) {
+		error(rootFolder, i18n("cannot open Exchange folder list"));
 		return;
 	}
 
 	QList<MapiFolder *> list;
-	emit status(Running, i18n("Fetching folder list from Exchange"));
+	emit status(Running, i18n("fetching folder list from Exchange"));
 	if (!rootFolder.childrenPull(list, QString::fromAscii(IPF_APPOINTMENT))) {
-		emit status(Broken, i18n("Cannot fetch folder list from Exchange"));
+		error(rootFolder, i18n("cannot fetch folder list from Exchange"));
 		return;
 	}
 
@@ -110,7 +146,7 @@ void ExCalResource::retrieveCollections()
 		delete data;
 	}
 	if (collections.size() == 0) {
-		emit status(Broken, i18n("No calendar folders in Exchange"));
+		error(rootFolder, i18n("no calendar folders in Exchange"));
 		return;
 	}
 
@@ -123,6 +159,8 @@ void ExCalResource::retrieveItems(const Akonadi::Collection &collection)
 	kDebug() << "retrieveItems() called for collection "<< collection.id();
 
 	if (!logon()) {
+		// Come back later.
+		deferTask();
 		return;
 	}
 
@@ -140,7 +178,7 @@ void ExCalResource::retrieveItems(const Akonadi::Collection &collection)
 		scope.fetchFullPayload(false);
 		fetch->setFetchScope(scope);
 		if ( !fetch->exec() ) {
-			emit status(Broken, i18n("Unable to fetch listing of collection '%1': %2" , collection.name() ,fetch->errorString()) );
+			error(collection, i18n("unable to fetch listing of collection: %1", fetch->errorString()));
 			return;
 		}
 		Item::List existingItems = fetch->items();
@@ -154,8 +192,7 @@ void ExCalResource::retrieveItems(const Akonadi::Collection &collection)
 
 	MapiFolder parentFolder(m_connection, "ExCalResource::retrieveItems", fromStringId(collection.remoteId()));
 	if (!parentFolder.open()) {
-		kError() << "open failed!";
-		emit status(Broken, i18n("Unable to open collection: %1", collection.name()));
+		error(collection, i18n("unable to open collection"));
 		return;
 	}
 
@@ -164,8 +201,7 @@ void ExCalResource::retrieveItems(const Akonadi::Collection &collection)
 	QList<MapiItem *> list;
 	emit status(Running, i18n("Fetching collection: %1", collection.name()));
 	if (!parentFolder.childrenPull(list)) {
-		kError() << "childrenPull failed!";
-		emit status(Broken, i18n("Unable to fetch collection: %1", collection.name()));
+		error(collection, i18n("unable to fetch collection"));
 		return;
 	}
 	kDebug() << "size of collection" << collection.id() << "is" << list.size();
@@ -232,6 +268,8 @@ bool ExCalResource::retrieveItem( const Akonadi::Item &itemOrig, const QSet<QByt
 	kDebug() << "retrieveItem() called for item "<< itemOrig.id() << "remoteId:" << itemOrig.remoteId();
 
 	if (!logon()) {
+		// Come back later.
+		deferTask();
 		return false;
 	}
 
@@ -239,8 +277,7 @@ bool ExCalResource::retrieveItem( const Akonadi::Item &itemOrig, const QSet<QByt
 	qulonglong folderId = fromStringId(currentCollection().remoteId());
 	MapiAppointment message(m_connection, "ExCalResource::retrieveItem", folderId, messageId);
 	if (!message.open()) {
-		kError() << "open failed!";
-		emit status(Broken, i18n("Unable to open item: { %1, %2 }", currentCollection().name(), messageId));
+		error(message, i18n("unable to open item"));
 		return false;
 	}
 
@@ -250,8 +287,7 @@ bool ExCalResource::retrieveItem( const Akonadi::Item &itemOrig, const QSet<QByt
 		folderId << "," << messageId << "}";
 	emit status(Running, i18n("Fetching item: { %1, %2 }", currentCollection().name(), messageId));
 	if (!message.propertiesPull()) {
-		kError() << "propertiesPull failed!";
-		emit status(Broken, i18n("Unable to fetch item: { %1, %2 }", currentCollection().name(), messageId));
+		error(message, i18n("unable to fetch item"));
 		return false;
 	}
 	kDebug() << "got message; item:"<<message.id()<<":"<<message.title;
@@ -374,6 +410,8 @@ void ExCalResource::itemChangedContinue(KJob* job)
         const Akonadi::Item item = fetchJob->items().first();
 
 	if (!logon()) {
+		// Come back later.
+		deferTask();
 		return;
 	}
 
@@ -381,8 +419,7 @@ void ExCalResource::itemChangedContinue(KJob* job)
 	qulonglong folderId = currentCollection().remoteId().toULongLong();
 	MapiAppointment message(m_connection, "ExCalResource::itemChangedContinue", folderId, messageId);
 	if (!message.open()) {
-		kError() << "open failed!";
-		emit status(Broken, i18n("Unable to open item: { %1, %2 }", currentCollection().name(), messageId));
+		error(message, i18n("unable to open item"));
 		return;
 	}
 
@@ -392,8 +429,7 @@ void ExCalResource::itemChangedContinue(KJob* job)
 		folderId << "," << messageId << "}";
 	emit status(Running, i18n("Fetching item: { %1, %2 }", currentCollection().name(), messageId));
 	if (!message.propertiesPull()) {
-		kError() << "propertiesPull failed!";
-		emit status(Broken, i18n("Unable to fetch item: { %1, %2 }", currentCollection().name(), messageId));
+		error(message, i18n("unable to fetch item"));
 		return;
 	}
         kWarning() << "got item data:" << message.id() << ":" << message.title;
@@ -456,8 +492,7 @@ void ExCalResource::itemChangedContinue(KJob* job)
 		folderId << "," << messageId << "}";
 	emit status(Running, i18n("Updating item: { %1, %2 }", currentCollection().name(), messageId));
 	if (!message.propertiesPush()) {
-		kError() << "propertiesPush failed!";
-		emit status(Running, i18n("Failed to update: { %1, %2 }", currentCollection().name(), messageId));
+		error(message, i18n("unable to update item"));
 		return;
 	}
 	changeCommitted(item);

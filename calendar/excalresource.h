@@ -24,6 +24,8 @@
 #include <KCal/Recurrence>
 
 class MapiConnector2;
+class MapiFolder;
+class MapiMessage;
 class MapiRecurrencyPattern;
 
 class ExCalResource : public Akonadi::ResourceBase,
@@ -67,6 +69,13 @@ private:
 
 	MapiConnector2 *m_connection;
 	bool m_connected;
+
+	/**
+	 * Consistent error handling for task-based routines.
+	 */
+	void error(const MapiFolder &folder, const QString &body);
+	void error(const Akonadi::Collection &collection, const QString &body);
+	void error(const MapiMessage &msg, const QString &body);
 
 private Q_SLOTS:
 	/**
