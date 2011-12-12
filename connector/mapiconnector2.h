@@ -363,36 +363,22 @@ private:
 class MapiItem
 {
 public:
-	MapiItem(mapi_id_t id, QString &name, QDateTime &modified) :
-		m_id(id),
-		m_name(name),
-		m_modified(modified)
-	{
-	}
+	MapiItem(mapi_id_t id, QString &name, QDateTime &modified);
 
 	/**
 	 * The id of the full item.
 	 */
-	QString id() const
-	{
-		return QString::number(m_id);
-	}
+	mapi_id_t id() const;
 
 	/**
 	 * The name of this item.
 	 */
-	QString name() const
-	{
-		return m_name;
-	}
+	QString name() const;
 
 	/**
 	 * The last-modified date time of the full item.
 	 */
-	QDateTime modified() const
-	{
-		return m_modified;
-	}
+	QDateTime modified() const;
 
 private:
 	const mapi_id_t m_id;
@@ -413,8 +399,6 @@ public:
 	virtual ~MapiFolder();
 
 	virtual bool open();
-
-	QString id() const;
 
 	QString name;
 

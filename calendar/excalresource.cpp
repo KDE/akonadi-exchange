@@ -37,6 +37,19 @@
 
 using namespace Akonadi;
 
+/**
+ * We store all objects in Akonadi using the densest string representation to hand.
+ */
+static QString toStringId(qulonglong id)
+{
+	return QString::number(id, 36);
+}
+
+static qulonglong fromStringId(const QString &id)
+{
+	return id.toULongLong(0, 36);
+}
+
 ExCalResource::ExCalResource( const QString &id )
   : ResourceBase( id ),
 	m_connection(new MapiConnector2()),
@@ -89,7 +102,7 @@ void ExCalResource::retrieveCollections()
 	foreach (MapiFolder *data, list) {
 		// TODO: take the first calender for now, but Exchange might have more calendar folders
 		if (!done) {
-			root.setRemoteId(data->id());
+			root.setRemoteId(toStringId(data->id()));
 			root.setName(i18n("Exchange: ") + data->name);
 			collections.append(root);
 			done = true;
@@ -114,8 +127,8 @@ void ExCalResource::retrieveItems(const Akonadi::Collection &collection)
 	}
 
 	// find all item that are already in this collection
-	QSet<QString> knownRemoteIds;
-	QMap<QString, Item> knownItems;
+	QSet<qulonglong> knownRemoteIds;
+	QMap<qulonglong, Item> knownItems;
 	{
 		emit status(Running, i18n("Feching items from Akonadi cache"));
 		ItemFetchJob *fetch = new ItemFetchJob( collection );
@@ -133,12 +146,13 @@ void ExCalResource::retrieveItems(const Akonadi::Collection &collection)
 		Item::List existingItems = fetch->items();
 		foreach (Item item, existingItems) {
 			// store all the items that we already know
-			knownRemoteIds.insert( item.remoteId() );
-			knownItems.insert(item.remoteId(), item);
+			qulonglong remoteId = fromStringId(item.remoteId());
+			knownRemoteIds.insert(remoteId);
+			knownItems.insert(remoteId, item);
 		}
 	}
 
-	MapiFolder parentFolder(m_connection, "ExCalResource::retrieveItems", collection.remoteId().toULongLong());
+	MapiFolder parentFolder(m_connection, "ExCalResource::retrieveItems", fromStringId(collection.remoteId()));
 	if (!parentFolder.open()) {
 		kError() << "open failed!";
 		emit status(Broken, i18n("Unable to open collection: %1", collection.name()));
@@ -156,7 +170,7 @@ void ExCalResource::retrieveItems(const Akonadi::Collection &collection)
 	}
 	kDebug() << "size of collection" << collection.id() << "is" << list.size();
 
-	QSet<QString> checkedRemoteIds;
+	QSet<qulonglong> checkedRemoteIds;
 	// run though all the found data...
 	foreach (const MapiItem *data, list) {
 
@@ -166,7 +180,7 @@ void ExCalResource::retrieveItems(const Akonadi::Collection &collection)
 			// we do not know this remoteID -> create a new empty item for it
 			Item item(QString::fromAscii("text/calendar"));
 			item.setParentCollection(collection);
-			item.setRemoteId(data->id());
+			item.setRemoteId(toStringId(data->id()));
 			item.setRemoteRevision(QString::number(1));
 			items << item;
 		} else {
@@ -195,7 +209,7 @@ void ExCalResource::retrieveItems(const Akonadi::Collection &collection)
 	knownRemoteIds.subtract(checkedRemoteIds);
 
 	Item::List deletedItems;
-	foreach (const QString &remoteId, knownRemoteIds) {
+	foreach (const qulonglong remoteId, knownRemoteIds) {
 		deletedItems << knownItems.value(remoteId);
 	}
 
@@ -221,8 +235,8 @@ bool ExCalResource::retrieveItem( const Akonadi::Item &itemOrig, const QSet<QByt
 		return false;
 	}
 
-	qulonglong messageId = itemOrig.remoteId().toULongLong();
-	qulonglong folderId = currentCollection().remoteId().toULongLong();
+	qulonglong messageId = fromStringId(itemOrig.remoteId());
+	qulonglong folderId = fromStringId(currentCollection().remoteId());
 	MapiAppointment message(m_connection, "ExCalResource::retrieveItem", folderId, messageId);
 	if (!message.open()) {
 		kError() << "open failed!";

@@ -31,6 +31,19 @@
 
 #include "mapiconnector2.h"
 
+/**
+ * We store all objects in Akonadi using the densest string representation to hand.
+ */
+static QString toStringId(qulonglong id)
+{
+	return QString::number(id, 36);
+}
+
+static qulonglong fromStringId(const QString &id)
+{
+	return id.toULongLong(0, 36);
+}
+
 mapibrowser::mapibrowser()
 {
 	main = new MainWindow(this);
@@ -100,7 +113,7 @@ void mapibrowser::onRefreshTree()
 	foreach (const MapiFolder *data, list) {
 		QTreeWidgetItem *item = new QTreeWidgetItem(root);
 		item->setText(0, data->name);
-		item->setText(1, data->id());
+		item->setText(1, toStringId(data->id()));
 		delete data;
 	}
 
@@ -118,7 +131,7 @@ void mapibrowser::itemDoubleClicked(QTreeWidgetItem* clickedItem, int )
 		return;
 	}
 
-	MapiFolder parentFolder(&con, "mapibrowser::itemDoubleClicked", remoteId.toULongLong());
+	MapiFolder parentFolder(&con, "mapibrowser::itemDoubleClicked", fromStringId(remoteId));
 	if (!parentFolder.open()) {
 		return;
 	}
@@ -136,7 +149,7 @@ void mapibrowser::itemDoubleClicked(QTreeWidgetItem* clickedItem, int )
 	int row=0;
 	foreach (const MapiItem *data, list) {
 		QTableWidgetItem *newItem;
-		newItem = new QTableWidgetItem(data->id());
+		newItem = new QTableWidgetItem(toStringId(data->id()));
 		main->tableWidget->setItem(row, 0, newItem);
 		newItem = new QTableWidgetItem(data->name());
 		main->tableWidget->setItem(row, 1, newItem);
@@ -174,7 +187,7 @@ void mapibrowser::itemDoubleClicked(QTableWidgetItem* clickedItem)
 // JUST FOR DEBUG --END--
 #endif
 	
-	MapiMessage message(&con, "mapibrowser::itemDoubleClicked", folderId.toULongLong(), messageId.toULongLong());
+	MapiMessage message(&con, "mapibrowser::itemDoubleClicked", fromStringId(folderId), fromStringId(messageId));
 	if (!message.open()) {
 		QMessageBox::warning(this, QString::fromLocal8Bit("Error"), QString::fromLocal8Bit("open failed!\n")+folderId+QString::fromLocal8Bit(":")+messageId);
 		return;

@@ -26,6 +26,11 @@
 #include <QRegExp>
 #include <QVariant>
 
+/**
+ * Display ids in the same format we use when stored in Akonadi.
+ */
+#define ID_FORMAT 0, 36
+
 #define CASE_PREFER_UNICODE(unicode, lvalue, rvalue) \
 case unicode ## _string8: \
 	if (lvalue.isEmpty()) { \
@@ -186,13 +191,13 @@ MapiAppointment::MapiAppointment(MapiConnector2 *connector, const char *tallocNa
 QDebug MapiAppointment::debug() const
 {
 	static QString prefix = QString::fromAscii("MapiAppointment:%1.%2:");
-	return MapiObject::debug(prefix.arg(m_folderId).arg(m_id)) /*<< title*/;
+	return MapiObject::debug(prefix.arg(m_folderId, ID_FORMAT).arg(m_id, ID_FORMAT)) /*<< title*/;
 }
 
 QDebug MapiAppointment::error() const
 {
 	static QString prefix = QString::fromAscii("MapiAppointment:%1:%2");
-	return MapiObject::error(prefix.arg(m_folderId).arg(m_id)) /*<< title*/;
+	return MapiObject::error(prefix.arg(m_folderId, ID_FORMAT).arg(m_id, ID_FORMAT)) /*<< title*/;
 }
 
 bool MapiAppointment::debugRecurrencyPattern(RecurrencePattern *pattern)
@@ -1000,7 +1005,7 @@ MapiFolder::MapiFolder(MapiConnector2 *connection, const char *tallocName, mapi_
 {
 	mapi_object_init(&m_contents);
 	// A temporary name.
-	name = this->id();
+	name = QString::number(id, 36);
 }
 
 MapiFolder::~MapiFolder()
@@ -1011,18 +1016,13 @@ MapiFolder::~MapiFolder()
 QDebug MapiFolder::debug() const
 {
 	static QString prefix = QString::fromAscii("MapiFolder:%1:");
-	return MapiObject::debug(prefix.arg(m_id));
+	return MapiObject::debug(prefix.arg(m_id, ID_FORMAT));
 }
 
 QDebug MapiFolder::error() const
 {
 	static QString prefix = QString::fromAscii("MapiFolder:%1:");
-	return MapiObject::error(prefix.arg(m_id));
-}
-
-QString MapiFolder::id() const
-{
-	return QString::number(m_id);
+	return MapiObject::error(prefix.arg(m_id, ID_FORMAT));
 }
 
 bool MapiFolder::childrenPull(QList<MapiFolder *> &children, const QString &filter)
@@ -1182,6 +1182,28 @@ bool MapiFolder::open()
 	return true;
 }
 
+MapiItem::MapiItem(mapi_id_t id, QString &name, QDateTime &modified) :
+	m_id(id),
+	m_name(name),
+	m_modified(modified)
+{
+}
+
+mapi_id_t MapiItem::id() const
+{
+	return m_id;
+}
+
+QString MapiItem::name() const
+{
+	return m_name;
+}
+
+QDateTime MapiItem::modified() const
+{
+	return m_modified;
+}
+
 MapiMessage::MapiMessage(MapiConnector2 *connection, const char *tallocName, mapi_id_t folderId, mapi_id_t id) :
 	MapiObject(connection, tallocName, id),
 	m_folderId(folderId)
@@ -1192,13 +1214,13 @@ MapiMessage::MapiMessage(MapiConnector2 *connection, const char *tallocName, map
 QDebug MapiMessage::debug() const
 {
 	static QString prefix = QString::fromAscii("MapiMessage:%1.%2:");
-	return MapiObject::debug(prefix.arg(m_folderId).arg(m_id));
+	return MapiObject::debug(prefix.arg(m_folderId, ID_FORMAT).arg(m_id, ID_FORMAT));
 }
 
 QDebug MapiMessage::error() const
 {
 	static QString prefix = QString::fromAscii("MapiMessage:%1.%2:");
-	return MapiObject::error(prefix.arg(m_folderId).arg(m_id));
+	return MapiObject::error(prefix.arg(m_folderId, ID_FORMAT).arg(m_id, ID_FORMAT));
 }
 
 bool MapiMessage::open()
