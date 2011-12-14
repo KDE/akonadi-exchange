@@ -69,14 +69,19 @@ ExCalResource::~ExCalResource()
 	delete m_connection;
 }
 
+void ExCalResource::error(const QString &message)
+{
+	kError() << message;
+	emit status(Broken, message);
+	cancelTask(message);
+}
+
 void ExCalResource::error(const MapiFolder &folder, const QString &body)
 {
 	static QString prefix = QString::fromAscii("Error %1: %2");
 	QString message = prefix.arg(toStringId(folder.id())).arg(body);
 
-	kError() << message;
-	emit status(Broken, message);
-	cancelTask(message);
+	error(message);
 }
 
 void ExCalResource::error(const Akonadi::Collection &collection, const QString &body)
@@ -84,9 +89,7 @@ void ExCalResource::error(const Akonadi::Collection &collection, const QString &
 	static QString prefix = QString::fromAscii("Error %1(%2): %3");
 	QString message = prefix.arg(collection.remoteId()).arg(collection.name()).arg(body);
 
-	kError() << message;
-	emit status(Broken, message);
-	cancelTask(message);
+	error(message);
 }
 
 void ExCalResource::error(const MapiMessage &msg, const QString &body)
@@ -97,14 +100,12 @@ void ExCalResource::error(const MapiMessage &msg, const QString &body)
 	static QString prefix = QString::fromAscii("Error %1: %2");
 	QString message = prefix.arg(toStringId(msg.id())).arg(body);
 
-	kError() << message;
-	emit status(Broken, message);
-	cancelTask(message);
+	error(message);
 }
 
 void ExCalResource::retrieveCollections()
 {
-	kDebug() << "retrieveCollections() called";
+	kDebug() << "fetch collections";
 
 	if (!logon()) {
 		// Come back later.
@@ -156,7 +157,7 @@ void ExCalResource::retrieveCollections()
 
 void ExCalResource::retrieveItems(const Akonadi::Collection &collection)
 {
-	kDebug() << "retrieveItems() called for collection "<< collection.id();
+	kDebug() << "fetch collection:" << collection.name();
 
 	if (!logon()) {
 		// Come back later.
@@ -168,7 +169,7 @@ void ExCalResource::retrieveItems(const Akonadi::Collection &collection)
 	QSet<qulonglong> knownRemoteIds;
 	QMap<qulonglong, Item> knownItems;
 	{
-		emit status(Running, i18n("Feching items from Akonadi cache"));
+		emit status(Running, i18n("Fetching items from Akonadi cache"));
 		ItemFetchJob *fetch = new ItemFetchJob( collection );
 
 		Akonadi::ItemFetchScope scope;
@@ -386,7 +387,6 @@ void ExCalResource::itemAdded( const Akonadi::Item &item, const Akonadi::Collect
 void ExCalResource::itemChanged(const Akonadi::Item &item, const QSet<QByteArray> &parts)
 {
         Q_UNUSED(parts);
-	return;
 
         // Get the payload for the item.
 	kWarning() << "fetch cached item: {" <<

@@ -73,6 +73,7 @@ private:
 	/**
 	 * Consistent error handling for task-based routines.
 	 */
+	void error(const QString &message);
 	void error(const MapiFolder &folder, const QString &body);
 	void error(const Akonadi::Collection &collection, const QString &body);
 	void error(const MapiMessage &msg, const QString &body);
