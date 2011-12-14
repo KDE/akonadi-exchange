@@ -387,6 +387,7 @@ void ExCalResource::itemAdded( const Akonadi::Item &item, const Akonadi::Collect
 void ExCalResource::itemChanged(const Akonadi::Item &item, const QSet<QByteArray> &parts)
 {
         Q_UNUSED(parts);
+	return;
 
         // Get the payload for the item.
 	kWarning() << "fetch cached item: {" <<

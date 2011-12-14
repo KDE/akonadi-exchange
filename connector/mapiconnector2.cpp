@@ -190,13 +190,13 @@ MapiAppointment::MapiAppointment(MapiConnector2 *connector, const char *tallocNa
 
 QDebug MapiAppointment::debug() const
 {
-	static QString prefix = QString::fromAscii("MapiAppointment:%1.%2:");
+	static QString prefix = QString::fromAscii("MapiAppointment: %1/%2:");
 	return MapiObject::debug(prefix.arg(m_folderId, ID_FORMAT).arg(m_id, ID_FORMAT)) /*<< title*/;
 }
 
 QDebug MapiAppointment::error() const
 {
-	static QString prefix = QString::fromAscii("MapiAppointment:%1:%2");
+	static QString prefix = QString::fromAscii("MapiAppointment: %1/%2:");
 	return MapiObject::error(prefix.arg(m_folderId, ID_FORMAT).arg(m_id, ID_FORMAT)) /*<< title*/;
 }
 
@@ -552,7 +552,7 @@ bool MapiAppointment::propertiesPull()
 		CASE_PREFER_UNICODE(PidTagOriginalSentRepresentingName, originalSentRepresenting.name, property.value().toString())
 		default:
 #if (DEBUG_APPOINTMENT_PROPERTIES)
-			debug() << "ignoring appointment property name:" << tagName(property.tag()) << property.value();
+			debug() << "ignoring appointment property:" << tagName(property.tag()) << property.value();
 #endif
 			break;
 		}
@@ -1015,13 +1015,13 @@ MapiFolder::~MapiFolder()
 
 QDebug MapiFolder::debug() const
 {
-	static QString prefix = QString::fromAscii("MapiFolder:%1:");
+	static QString prefix = QString::fromAscii("MapiFolder: %1:");
 	return MapiObject::debug(prefix.arg(m_id, ID_FORMAT));
 }
 
 QDebug MapiFolder::error() const
 {
-	static QString prefix = QString::fromAscii("MapiFolder:%1:");
+	static QString prefix = QString::fromAscii("MapiFolder: %1:");
 	return MapiObject::error(prefix.arg(m_id, ID_FORMAT));
 }
 
@@ -1213,14 +1213,19 @@ MapiMessage::MapiMessage(MapiConnector2 *connection, const char *tallocName, map
 
 QDebug MapiMessage::debug() const
 {
-	static QString prefix = QString::fromAscii("MapiMessage:%1.%2:");
+	static QString prefix = QString::fromAscii("MapiMessage: %1/%2:");
 	return MapiObject::debug(prefix.arg(m_folderId, ID_FORMAT).arg(m_id, ID_FORMAT));
 }
 
 QDebug MapiMessage::error() const
 {
-	static QString prefix = QString::fromAscii("MapiMessage:%1.%2:");
+	static QString prefix = QString::fromAscii("MapiMessage: %1/%2:");
 	return MapiObject::error(prefix.arg(m_folderId, ID_FORMAT).arg(m_id, ID_FORMAT));
+}
+
+mapi_id_t MapiMessage::folderId() const
+{
+	return m_folderId;
 }
 
 bool MapiMessage::open()

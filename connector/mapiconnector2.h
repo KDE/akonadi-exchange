@@ -442,6 +442,11 @@ public:
 	virtual bool open();
 
 	/**
+	 * The folderId of the item.
+	 */
+	mapi_id_t folderId() const;
+
+	/**
 	 * How many recipients do we have?
 	 */
 	unsigned recipientCount() const;
