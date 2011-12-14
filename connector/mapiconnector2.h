@@ -33,6 +33,43 @@ extern "C" {
 #include <libmapi/libmapi.h>
 }
 
+/**
+ * Enumerate all starting points in the MAPI store.
+ */
+typedef enum
+{
+	MailboxRoot             = olFolderMailboxRoot,		// To navigate the whole tree.
+	TopInformationStore     = olFolderTopInformationStore,	// All email note items.
+	DeletedItems            = olFolderDeletedItems,
+	Outbox                  = olFolderOutbox,
+	SentMail                = olFolderSentMail,
+	Inbox                   = olFolderInbox,
+	CommonView              = olFolderCommonView,
+	Calendar                = olFolderCalendar,		// All calendar items.
+	Contacts                = olFolderContacts,
+	Journal                 = olFolderJournal,
+	Notes                   = olFolderNotes,
+	Tasks                   = olFolderTasks,
+	Drafts                  = olFolderDrafts,
+	FoldersAllPublicFolders = olPublicFoldersAllPublicFolders,
+	Conflicts               = olFolderConflicts,
+	SyncIssues              = olFolderSyncIssues,
+	LocalFailures           = olFolderLocalFailures,
+	ServerFailures          = olFolderServerFailures,
+	Junk                    = olFolderJunk,
+	Finder                  = olFolderFinder,
+	PublicRoot              = olFolderPublicRoot,
+	PublicIPMSubtree        = olFolderPublicIPMSubtree,
+	PublicNonIPMSubtree     = olFolderPublicNonIPMSubtree,
+	PublicEFormsRoot        = olFolderPublicEFormsRoot,
+	PublicFreeBusyRoot      = olFolderPublicFreeBusyRoot,
+	PublicOfflineAB         = olFolderPublicOfflineAB,
+	PublicEFormsRegistry    = olFolderPublicEFormsRegistry,
+	PublicLocalFreeBusy     = olFolderPublicLocalFreeBusy,
+	PublicLocalOfflineAB    = olFolderPublicLocalOfflineAB,
+	PublicNNTPArticle       = olFolderPublicNNTPArticle,
+} MapiDefaultFolder;
+
 class Recipient
 {
 public:
@@ -222,6 +259,11 @@ public:
 	 * Connect to the server.
 	 */
 	bool login(QString profile);
+
+	/**
+	 * Factory for getting default folder ids.
+	 */
+	bool defaultFolder(MapiDefaultFolder folderType, mapi_id_t *id);
 
 	bool fetchGAL(QList<GalMember>& list);
 
@@ -514,6 +556,34 @@ private:
 
 	static unsigned isGoodEmailAddress(QString &email);
 
+	virtual QDebug debug() const;
+	virtual QDebug error() const;
+};
+
+/**
+ * An Email.
+ */
+class MapiNote : public MapiMessage
+{
+public:
+	MapiNote(MapiConnector2 *connection, const char *tallocName, mapi_id_t folderId, mapi_id_t id);
+
+	/**
+	 * Fetch all note properties.
+	 */
+	virtual bool propertiesPull();
+
+	/**
+	 * Update a note item.
+	 */
+	virtual bool propertiesPush();
+
+	QString title;
+	QString text;
+	QString sender;
+	QDateTime created;
+
+private:
 	virtual QDebug debug() const;
 	virtual QDebug error() const;
 };

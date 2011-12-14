@@ -42,10 +42,11 @@ case unicode: \
 	break;
 
 /**
- * Set this to 1 to pull all the properties for an appointment, e.g. to see
- * what a server has available.
+ * Set this to 1 to pull all the properties for an appointment or a note 
+ * respectively, e.g. to see what a server has available.
  */
 #define DEBUG_APPOINTMENT_PROPERTIES 0
+#define DEBUG_NOTE_PROPERTIES 1
 
 /**
  * Map all MAPI errors to strings. Note that all MAPI error handling 
@@ -848,6 +849,15 @@ QDebug MapiConnector2::debug() const
 {
 	static QString prefix = QString::fromAscii("MapiConnector2:");
 	return TallocContext::debug(prefix);
+}
+
+bool MapiConnector2::defaultFolder(MapiDefaultFolder folderType, mapi_id_t *id)
+{
+	if (MAPI_E_SUCCESS != GetDefaultFolder(&m_store, id, folderType)) {
+		error() << "cannot get default folder" << mapiError();
+		return false;
+	}
+	return true;
 }
 
 QDebug MapiConnector2::error() const
@@ -2039,4 +2049,131 @@ QDebug TallocContext::error(const QString &caller) const
 	static QString prefix = QString::fromAscii("%1.%2");
 	QString talloc = QString::fromAscii(talloc_get_name(m_ctx));
 	return qCritical() << prefix.arg(talloc).arg(caller);
+}
+
+MapiNote::MapiNote(MapiConnector2 *connector, const char *tallocName, mapi_id_t folderId, mapi_id_t id) :
+	MapiMessage(connector, tallocName, folderId, id)
+{
+}
+
+QDebug MapiNote::debug() const
+{
+	static QString prefix = QString::fromAscii("MapiNote: %1/%2:");
+	return MapiObject::debug(prefix.arg(m_folderId, ID_FORMAT).arg(m_id, ID_FORMAT)) /*<< title*/;
+}
+
+QDebug MapiNote::error() const
+{
+	static QString prefix = QString::fromAscii("MapiNote: %1/%2");
+	return MapiObject::error(prefix.arg(m_folderId, ID_FORMAT).arg(m_id, ID_FORMAT)) /*<< title*/;
+}
+
+bool MapiNote::propertiesPull()
+{
+#if (DEBUG_NOTE_PROPERTIES)
+	if (!MapiMessage::propertiesPull()) {
+		return false;
+	}
+#else
+	QVector<int> readTags;
+	readTags.append(PidTagMessageClass);
+	readTags.append(PidTagDisplayTo);
+	readTags.append(PidTagConversationTopic);
+	readTags.append(PidTagBody);
+	readTags.append(PidTagLastModificationTime);
+	readTags.append(PidTagCreationTime);
+	if (!MapiMessage::propertiesPull(readTags)) {
+		return false;
+	}
+#endif
+
+	QStringList displayTo;
+
+	// Walk through the properties and extract the values of interest. The
+	// properties here should be aligned with the list pulled above.
+	for (unsigned i = 0; i < m_propertyCount; i++) {
+		MapiProperty property(m_properties[i]);
+
+		switch (property.tag()) {
+			// Sanity check the message class.
+			if (QLatin1String("IPM.Note") != property.value().toString()) {
+				// this one is not an appointment
+				return false;
+			}
+			case PidTagDisplayTo:
+			// Step 2. Add the DisplayTo items.
+			//
+			// Astonishingly, when we call recipientsPull() later,
+			// the results can contain entries with missing name (!)
+			// and email values. Reading this property is a pathetic
+			// workaround.
+			displayTo = property.value().toString().split(QChar::fromAscii(';'));
+			foreach (QString name, displayTo) {
+			}
+			break;
+		case PidTagConversationTopic:
+			title = property.value().toString();
+			break;
+		case PidTagBody:
+			text = property.value().toString();
+			break;
+		case PidTagCreationTime:
+			created = property.value().toDateTime();
+			break;
+//		CASE_PREFER_UNICODE(PidTagSentRepresentingEmailAddress, sentRepresenting.email, property.value().toString())
+//		CASE_PREFER_UNICODE(PidTagSentRepresentingName, sentRepresenting.name, property.value().toString())
+//		CASE_PREFER_UNICODE(PidTagSentRepresentingSimpleDisplayName, sentRepresenting.name, property.value().toString())
+//		CASE_PREFER_UNICODE(PidTagOriginalSentRepresentingEmailAddress, originalSentRepresenting.email, property.value().toString())
+//		CASE_PREFER_UNICODE(PidTagOriginalSentRepresentingName, originalSentRepresenting.name, property.value().toString())
+		default:
+#if (DEBUG_NOTE_PROPERTIES)
+			debug() << "ignoring note property:" << tagName(property.tag()) << property.value();
+#endif
+			break;
+		}
+	}
+	return true;
+}
+
+bool MapiNote::propertiesPush()
+{
+	// Overwrite all the fields we know about.
+	if (!propertyWrite(PidTagConversationTopic, title)) {
+		return false;
+	}
+	if (!propertyWrite(PidTagBody, text)) {
+		return false;
+	}
+	if (!propertyWrite(PidTagCreationTime, created)) {
+		return false;
+	}
+	if (!MapiMessage::propertiesPush()) {
+		return false;
+	}
+#if 0
+	debug() << "************  OpenFolder";
+	if (!OpenFolder(&m_store, folder.id(), folder.d())) {
+		error() << "cannot open folder" << folderID
+			<< ", error:" << mapiError();
+		return false;
+        }
+	debug() << "************  SaveChangesMessage";
+	if (!SaveChangesMessage(folder.d(), message.d(), KeepOpenReadWrite)) {
+		error() << "cannot save message" << messageID << "in folder" << folderID
+			<< ", error:" << mapiError();
+		return false;
+	}
+#endif
+	debug() << "************  SubmitMessage";
+	if (MAPI_E_SUCCESS != SubmitMessage(&m_object)) {
+		error() << "cannot submit message, error:" << mapiError();
+		return false;
+	}
+	struct mapi_SPropValue_array replyProperties;
+	debug() << "************  TransportSend";
+	if (MAPI_E_SUCCESS != TransportSend(&m_object, &replyProperties)) {
+		error() << "cannot send message, error:" << mapiError();
+		return false;
+	}
+	return true;
 }

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=Exchange Mail
+Comment[x-test]=xxAkonadi resource that allows to access Exchange mailxx
+Type=AkonadiResource
+Exec=akonadi_exmail_resource
+Icon=message-rfc822
+
+X-Akonadi-MimeTypes=message/rfc822
+X-Akonadi-Capabilities=Resource
+X-Akonadi-Identifier=akonadi_exmail_resource

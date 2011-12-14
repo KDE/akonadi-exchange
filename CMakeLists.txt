@@ -74,4 +74,5 @@ set( RESOURCE_EXCHANGE_UI_FILES
 
 add_subdirectory(calendar)
 add_subdirectory(contacts)
+add_subdirectory(mail)
 add_subdirectory(mapibrowser)
