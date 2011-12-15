@@ -1,6 +1,7 @@
 /*
  * This file is part of the Akonadi Exchange Resource.
- * Copyright 2011 Robert Gruber <rgruber@users.sourceforge.net>
+ * Copyright 2011 Robert Gruber <rgruber@users.sourceforge.net>, Shaheed Haque
+ * <srhaque@theiet.org>.
  *
  * Akonadi Exchange Resource is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -26,7 +27,7 @@
 #include <QList>
 #include <QMap>
 #include <QString>
- 
+
 extern "C" {
 // libmapi is a C library and must therefore be included that way
 // otherwise we'll get linker errors due to C++ name mangling

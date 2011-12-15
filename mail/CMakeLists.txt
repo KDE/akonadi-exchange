@@ -4,6 +4,7 @@ set( exmailresource_SRCS
   exmailresource.cpp
   ${RESOURCE_EXCHANGE_CONNECTOR_SOURCES}
   ${RESOURCE_EXCHANGE_UI_SOURCES}
+  ${CMAKE_CURRENT_SOURCE_DIR}/../connector/mapiresource.cpp
 )
 
 kde4_add_ui_files( exmailresource_SRCS ${RESOURCE_EXCHANGE_UI_FILES} )

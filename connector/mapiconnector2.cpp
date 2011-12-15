@@ -1,6 +1,7 @@
 /*
  * This file is part of the Akonadi Exchange Resource.
- * Copyright 2011 Robert Gruber <rgruber@users.sourceforge.net>
+ * Copyright 2011 Robert Gruber <rgruber@users.sourceforge.net>, Shaheed Haque
+ * <srhaque@theiet.org>.
  *
  * Akonadi Exchange Resource is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -29,7 +30,7 @@
 /**
  * Display ids in the same format we use when stored in Akonadi.
  */
-#define ID_FORMAT 0, 36
+#define ID_BASE 36
 
 #define CASE_PREFER_UNICODE(unicode, lvalue, rvalue) \
 case unicode ## _string8: \
@@ -192,13 +193,13 @@ MapiAppointment::MapiAppointment(MapiConnector2 *connector, const char *tallocNa
 QDebug MapiAppointment::debug() const
 {
 	static QString prefix = QString::fromAscii("MapiAppointment: %1/%2:");
-	return MapiObject::debug(prefix.arg(m_folderId, ID_FORMAT).arg(m_id, ID_FORMAT)) /*<< title*/;
+	return MapiObject::debug(prefix.arg(m_folderId, 0, ID_BASE).arg(m_id, 0, ID_BASE)) /*<< title*/;
 }
 
 QDebug MapiAppointment::error() const
 {
 	static QString prefix = QString::fromAscii("MapiAppointment: %1/%2:");
-	return MapiObject::error(prefix.arg(m_folderId, ID_FORMAT).arg(m_id, ID_FORMAT)) /*<< title*/;
+	return MapiObject::error(prefix.arg(m_folderId, 0, ID_BASE).arg(m_id, 0, ID_BASE)) /*<< title*/;
 }
 
 bool MapiAppointment::debugRecurrencyPattern(RecurrencePattern *pattern)
@@ -737,6 +738,7 @@ bool MapiAppointment::propertiesPull()
 	attendees.clear();
 	foreach (Attendee attendee, uniqueResolvedAttendees) {
 		attendees.append(attendee);
+	error() << "attendee name:" << attendee.name << "email:" << attendee.email;
 	}
 	debug() << "attendees after resolution:" << attendees.size();
 	return true;
@@ -1015,7 +1017,7 @@ MapiFolder::MapiFolder(MapiConnector2 *connection, const char *tallocName, mapi_
 {
 	mapi_object_init(&m_contents);
 	// A temporary name.
-	name = QString::number(id, 36);
+	name = QString::number(id, ID_BASE);
 }
 
 MapiFolder::~MapiFolder()
@@ -1026,13 +1028,13 @@ MapiFolder::~MapiFolder()
 QDebug MapiFolder::debug() const
 {
 	static QString prefix = QString::fromAscii("MapiFolder: %1:");
-	return MapiObject::debug(prefix.arg(m_id, ID_FORMAT));
+	return MapiObject::debug(prefix.arg(m_id, 0, ID_BASE));
 }
 
 QDebug MapiFolder::error() const
 {
 	static QString prefix = QString::fromAscii("MapiFolder: %1:");
-	return MapiObject::error(prefix.arg(m_id, ID_FORMAT));
+	return MapiObject::error(prefix.arg(m_id, 0, ID_BASE));
 }
 
 bool MapiFolder::childrenPull(QList<MapiFolder *> &children, const QString &filter)
@@ -1224,13 +1226,13 @@ MapiMessage::MapiMessage(MapiConnector2 *connection, const char *tallocName, map
 QDebug MapiMessage::debug() const
 {
 	static QString prefix = QString::fromAscii("MapiMessage: %1/%2:");
-	return MapiObject::debug(prefix.arg(m_folderId, ID_FORMAT).arg(m_id, ID_FORMAT));
+	return MapiObject::debug(prefix.arg(m_folderId, 0, ID_BASE).arg(m_id, 0, ID_BASE));
 }
 
 QDebug MapiMessage::error() const
 {
 	static QString prefix = QString::fromAscii("MapiMessage: %1/%2:");
-	return MapiObject::error(prefix.arg(m_folderId, ID_FORMAT).arg(m_id, ID_FORMAT));
+	return MapiObject::error(prefix.arg(m_folderId, 0, ID_BASE).arg(m_id, 0, ID_BASE));
 }
 
 mapi_id_t MapiMessage::folderId() const
@@ -2059,13 +2061,13 @@ MapiNote::MapiNote(MapiConnector2 *connector, const char *tallocName, mapi_id_t 
 QDebug MapiNote::debug() const
 {
 	static QString prefix = QString::fromAscii("MapiNote: %1/%2:");
-	return MapiObject::debug(prefix.arg(m_folderId, ID_FORMAT).arg(m_id, ID_FORMAT)) /*<< title*/;
+	return MapiObject::debug(prefix.arg(m_folderId, 0, ID_BASE).arg(m_id, 0, ID_BASE)) /*<< title*/;
 }
 
 QDebug MapiNote::error() const
 {
 	static QString prefix = QString::fromAscii("MapiNote: %1/%2");
-	return MapiObject::error(prefix.arg(m_folderId, ID_FORMAT).arg(m_id, ID_FORMAT)) /*<< title*/;
+	return MapiObject::error(prefix.arg(m_folderId, 0, ID_BASE).arg(m_id, 0, ID_BASE)) /*<< title*/;
 }
 
 bool MapiNote::propertiesPull()
