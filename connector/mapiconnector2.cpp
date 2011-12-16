@@ -42,6 +42,15 @@ case unicode: \
 	lvalue = rvalue; \
 	break;
 
+#define CASE_PREFER_UNICODE2(base, lvalue, rvalue) \
+case base: \
+	if (lvalue.isEmpty()) { \
+		lvalue = rvalue; \
+	} \
+	break; \
+case base ## _UNICODE: \
+	lvalue = rvalue;
+
 /**
  * Set this to 1 to pull all the properties for an appointment or a note 
  * respectively, e.g. to see what a server has available.
@@ -622,6 +631,10 @@ bool MapiAppointment::propertiesPull()
 					PidTagPrimarySmtpAddress_string8,
 					0x6001001f,
 					0x60010018);
+		if (!tags) {
+			error() << "cannot set name resolution tags" << mapiError();
+			return false;
+		}
 
 		// Server round trip here!
 		if (!m_connection->resolveNames(names, tags, &results, &statuses)) {
@@ -661,6 +674,7 @@ bool MapiAppointment::propertiesPull()
 						email = property.value().toString();
 						break;
 					default:
+						//debug() << "ignoring attendee property:" << tagName(property.tag()) << property.value();
 						break;
 					}
 				}
@@ -868,105 +882,100 @@ QDebug MapiConnector2::error() const
 	return TallocContext::error(prefix);
 }
 
-bool MapiConnector2::fetchGAL(QList< GalMember >& list)
+bool MapiConnector2::fetchGALCount(unsigned *count)
 {
-	struct SPropTagArray    *SPropTagArray;
-	struct SRowSet      *SRowSet;
-	enum MAPISTATUS     retval;
-	uint32_t        i;
-	uint32_t        count;
-	uint8_t         ulFlags;
-	uint32_t        rowsFetched = 0;
-	uint32_t        totalRecs = 0;
-
-	retval = GetGALTableCount(m_session, &totalRecs);
-	if (retval != MAPI_E_SUCCESS) {
+	if (MAPI_E_SUCCESS != GetGALTableCount(m_session, count)) {
+		error() << "cannot get GAL count" << mapiError();
 		return false;
 	}
-	qDebug() << "Total Number of entries in GAL:" << totalRecs;
+	error() << "Total Number of entries in GAL:" << *count;
+	return true;
+}
 
-	TALLOC_CTX *mem_ctx;
-	mem_ctx = talloc_named(NULL, 0, "MapiGalConnector::fetchGAL");
+bool MapiConnector2::fetchGAL(bool begin, unsigned requestedCount, QList<GalMember> &list)
+{
+	struct SPropTagArray *tags;
+	struct SRowSet *results = NULL;
 
-	SPropTagArray = set_SPropTagArray(mem_ctx, 0xe,
-						PR_INSTANCE_KEY,
-						PR_ENTRYID,
-						PR_DISPLAY_NAME_UNICODE,
-						PR_EMAIL_ADDRESS_UNICODE,
-						PR_DISPLAY_TYPE,
-						PR_OBJECT_TYPE,
-						PR_ADDRTYPE_UNICODE,
-						PR_OFFICE_TELEPHONE_NUMBER_UNICODE,
-						PR_OFFICE_LOCATION_UNICODE,
-						PR_TITLE_UNICODE,
-						PR_COMPANY_NAME_UNICODE,
-						PR_ACCOUNT_UNICODE,
-						PR_SMTP_ADDRESS_UNICODE,
-						PR_SMTP_ADDRESS
- 						);
+	tags = set_SPropTagArray(ctx(), 14,
+			PR_INSTANCE_KEY,
+			PR_ENTRYID,
+			PR_DISPLAY_NAME_UNICODE,
+			PR_EMAIL_ADDRESS_UNICODE,
+			PR_DISPLAY_TYPE,
+			PR_OBJECT_TYPE,
+			PR_ADDRTYPE_UNICODE,
+			PR_OFFICE_TELEPHONE_NUMBER_UNICODE,
+			PR_OFFICE_LOCATION_UNICODE,
+			PR_TITLE_UNICODE,
+			PR_COMPANY_NAME_UNICODE,
+			PR_ACCOUNT_UNICODE,
+			PR_SMTP_ADDRESS_UNICODE,
+			PR_SMTP_ADDRESS
+			);
+	if (!tags) {
+		error() << "cannot set GAL tags" << mapiError();
+		return false;
+	}
+	error() << "fetch GAL:" << __LINE__ << begin;
+//return true;
+	uint8_t ulFlags = begin ? TABLE_START : TABLE_CUR;
+	if (MAPI_E_SUCCESS != GetGALTable(m_session, tags, &results, requestedCount, ulFlags)) {
+		error() << "cannot read GAL entries" << mapiError();
+		return false;
+	}
+	if (results) {
+		for (unsigned i = 0; i < results->cRows; i++) {
+			struct SRow &contact = results->aRow[i];
+			GalMember data;
 
-	count = 0x7;
-	ulFlags = TABLE_START;
-	do {
-		count += 0x2;
-		retval = GetGALTable(m_session, SPropTagArray, &SRowSet, count, ulFlags);
-		if ((!SRowSet) || (!(SRowSet->aRow))) {
-			return false;
-		}
-		rowsFetched = SRowSet->cRows;
-		if (rowsFetched) {
-			for (i = 0; i < rowsFetched; i++) {
-				GalMember data;
+			for (unsigned j = 0; j < contact.cValues; ++j) {
+				MapiProperty property(contact.lpProps[j]);
 
-				for (unsigned int j = 0; j < SRowSet->aRow[i].cValues; ++j) {
-					switch ( SRowSet->aRow[i].lpProps[j].ulPropTag ) {
-						case PR_ENTRYID:
-							data.id = QString::number( SRowSet->aRow[i].lpProps[j].value.l );
-							break;
-						case PR_DISPLAY_NAME_UNICODE:
-							data.name = QString::fromUtf8( SRowSet->aRow[i].lpProps[j].value.lpszA );
-							break;
-						case PR_SMTP_ADDRESS_UNICODE:
-							data.email = QString::fromUtf8( SRowSet->aRow[i].lpProps[j].value.lpszA );
-							break;
-						case PR_TITLE_UNICODE:
-							data.title = QString::fromUtf8( SRowSet->aRow[i].lpProps[j].value.lpszA );
-							break;
-						case PR_COMPANY_NAME_UNICODE:
-							data.organization = QString::fromUtf8( SRowSet->aRow[i].lpProps[j].value.lpszA );
-							break;
-						case PR_ACCOUNT_UNICODE:
-							data.nick = QString::fromUtf8( SRowSet->aRow[i].lpProps[j].value.lpszA );
-							break;
-						default:
-							break;
+				switch (property.tag()) {
+				case PR_ENTRYID:
+					// Get the id as a hex string.
+					data.id = property.toString();
+					break;
+				CASE_PREFER_UNICODE2(PR_DISPLAY_NAME, data.name, property.value().toString());
+					break;
+				CASE_PREFER_UNICODE2(PR_SMTP_ADDRESS, data.email, property.value().toString());
+					break;
+				CASE_PREFER_UNICODE2(PR_TITLE, data.title, property.value().toString());
+					break;
+				CASE_PREFER_UNICODE2(PR_COMPANY_NAME, data.organization, property.value().toString());
+					break;
+				CASE_PREFER_UNICODE2(PR_ACCOUNT, data.nick, property.value().toString());
+					break;
+				default:
+					{
+					const char *str = get_proptag_name(property.tag());
+
+					if (str) {
+						error() << "ignoring GAL property:" << str << property.value();
+					} else {
+						error() << "ignoring GAL property:" << QString::number(property.tag(), 0, 16) << property.value();
 					}
-
-					// If PR_ADDRTYPE_UNICODE == "EX" it's a NSPI address book entry (whatever that means?)
-					// in that case the PR_EMAIL_ADDRESS_UNICODE contains a cryptic string. 
-					// PR_SMTP_ADDRESS_UNICODE seams to work better
-
-// 					TODO just for debugging
-// 					QString tagStr;
-// 					tagStr.sprintf("0x%X", SRowSet->aRow[i].lpProps[j].ulPropTag);
-// 					qDebug() << tagStr << mapiValueToQString(&SRowSet->aRow[i].lpProps[j]);
+					}
+					break;
 				}
 
-				if (data.id.isEmpty()) continue;
-
-				qDebug() << "GLA:"<<data.id<<data.name<<data.email;
-				list << data;
+				// If PR_ADDRTYPE_UNICODE == "EX" it's a NSPI address book entry (whatever that means?)
+				// in that case the PR_EMAIL_ADDRESS_UNICODE contains a cryptic string. 
+				// PR_SMTP_ADDRESS_UNICODE seams to work better
 			}
+
+			if (data.id.isEmpty()) {
+				error() << "GLA entry with missing id:" << data.name << data.email;
+				continue;
+			}
+			error() << "GLA:"<<data.id<<data.name<<data.email;
+			list << data;
 		}
-		ulFlags = TABLE_CUR;
-		MAPIFreeBuffer(SRowSet);
-
-// TODO for debugging
-// 		break;
-	} while (rowsFetched == count);
-
-	MAPIFreeBuffer(SPropTagArray);
-
+	}
+	MAPIFreeBuffer(results);
+	MAPIFreeBuffer(tags);
+	error() << "fetch GAL entries:" << list.size();
 	return true;
 }
 
@@ -1090,7 +1099,7 @@ bool MapiFolder::childrenPull(QList<MapiFolder *> &children, const QString &filt
 					folderClass = property.value().toString(); 
 					break;
 				default:
-					//debug() << "ignoring folder property name:" << tagName(property.tag()) << property.value();
+					//debug() << "ignoring folder property:" << tagName(property.tag()) << property.value();
 					break;
 				}
 			}
@@ -1161,7 +1170,7 @@ bool MapiFolder::childrenPull(QList<MapiItem *> &children)
 					modified = property.value().toDateTime(); 
 					break;
 				default:
-					//debug() << "ignoring item property name:" << tagName(property.tag()) << property.value();
+					//debug() << "ignoring item property:" << tagName(property.tag()) << property.value();
 					break;
 				}
 			}
@@ -1280,6 +1289,7 @@ Recipient MapiMessage::recipientAt(unsigned i) const
 			result.order = property.value().toInt();
 			break;
 		default:
+			//debug() << "ignoring recipient property:" << tagName(property.tag()) << property.value();
 			break;
 		}
 	}

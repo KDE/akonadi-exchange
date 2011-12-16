@@ -266,7 +266,16 @@ public:
 	 */
 	bool defaultFolder(MapiDefaultFolder folderType, mapi_id_t *id);
 
-	bool fetchGAL(QList<GalMember>& list);
+	/**
+	 * How many entries does the GAL have?
+	 */
+	bool fetchGALCount(unsigned *count);
+
+	/**
+	 * Fetch upto the requested number of entries from the GAL. The start
+	 * point is either the beginning, or where we previously left off.
+	 */
+	bool fetchGAL(bool begin, unsigned requestedCount, QList<GalMember> &list);
 
 	mapi_object_t *d()
 	{
@@ -281,7 +290,7 @@ public:
 	 */
 	bool resolveNames(const char *names[], SPropTagArray *tags,
 			  SRowSet **results, PropertyTagArray_r **statuses);
-	
+
 private:
 	mapi_object_t openFolder(mapi_id_t folderID);
 

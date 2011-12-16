@@ -60,27 +60,23 @@ static qulonglong fromStringId(const QString &id)
 
 static QChar fidIdSeparator = QChar::fromAscii('/');
 
-class FullId : public QPair<qulonglong, qulonglong>
+FullId::FullId(qulonglong f, qulonglong s)
 {
-public:
-	FullId(qulonglong f, qulonglong s)
-	{
-		first = f;
-		second = s;
-	}
+	first = f;
+	second = s;
+}
 
-	FullId(const QString &id)
-	{
-		int separator = id.indexOf(fidIdSeparator);
-		first = fromStringId(id.left(separator));
-		second = fromStringId(id.mid(separator + 1));
-	}
+FullId::FullId(const QString &id)
+{
+	int separator = id.indexOf(fidIdSeparator);
+	first = fromStringId(id.left(separator));
+	second = fromStringId(id.mid(separator + 1));
+}
 
-	QString toString()
-	{
-		return toStringId(first).append(fidIdSeparator).append(toStringId(second));
-	}
-};
+QString FullId::toString()
+{
+	return toStringId(first).append(fidIdSeparator).append(toStringId(second));
+}
 
 MapiResource::MapiResource(const QString &id, const QString &desktopName, const char *mapiFolderFilter, const char *mapiMessageType, const QString &itemMimeType) :
 	ResourceBase(id),
@@ -164,11 +160,8 @@ void MapiResource::fetchCollections(MapiDefaultFolder rootFolder, Akonadi::Colle
 	root.setContentMimeTypes(contentTypes);
 	root.setRights(Akonadi::Collection::ReadOnly);
 	collections.append(root);
-	if (collections.size() == 0) {
-		error(i18n("no folders in Exchange matching filter %1").arg(m_mapiFolderFilter));
-		return;
-	}
 	fetchCollections(root.name(), root, collections);
+	emit status(Running, i18n("fetched collections: %1").arg(collections.size()));
 }
 
 void MapiResource::fetchCollections(const QString &path, const Collection &parent, Akonadi::Collection::List &collections)

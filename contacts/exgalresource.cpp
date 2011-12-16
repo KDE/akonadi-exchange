@@ -1,6 +1,7 @@
 /*
  * This file is part of the Akonadi Exchange Resource.
- * Copyright 2011 Robert Gruber <rgruber@users.sourceforge.net>
+ * Copyright 2011 Robert Gruber <rgruber@users.sourceforge.net>, Shaheed Haque
+ * <srhaque@theiet.org>.
  *
  * Akonadi Exchange Resource is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -17,10 +18,10 @@
  * If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "exgalresource.h"
-
 #include "settings.h"
 #include "settingsadaptor.h"
+
+#include "exgalresource.h"
 
 #include <QtDBus/QDBusConnection>
 
@@ -33,62 +34,76 @@
 
 using namespace Akonadi;
 
-exgalResource::exgalResource( const QString &id )
-  : ResourceBase( id ),
-  connector( 0 )
+ExGalResource::ExGalResource(const QString &id) : 
+	MapiResource(id, i18n("Exchange Contacts"), IPF_CONTACT, "IPM.Contact", QString::fromAscii("text/directory")),
+	m_galId(0, 0),
+	m_begin(true)
 {
-	new SettingsAdaptor( Settings::self() );
-	QDBusConnection::sessionBus().registerObject( QLatin1String( "/Settings" ),
-							Settings::self(), QDBusConnection::ExportAdaptors );
+	new SettingsAdaptor(Settings::self());
+	QDBusConnection::sessionBus().registerObject(QLatin1String("/Settings"),
+						     Settings::self(), 
+						     QDBusConnection::ExportAdaptors);
+	//setItemStreamingEnabled(true);
 }
 
-exgalResource::~exgalResource()
+ExGalResource::~ExGalResource()
 {
-	logoff();
 }
 
-void exgalResource::retrieveCollections()
+void ExGalResource::retrieveCollections()
 {
-	kDebug() << "retrieveCollections() called";
+	// First select who to log in as.
+	profileSet(Settings::self()->profileName());
 
+	// We are going to return both the user's contacts as well as the GAL.
+	// First, the GAL, then the user's contacts...
 	Collection::List collections;
+	Collection gal;
 
-	QStringList folderMimeType;
-	folderMimeType << QString::fromAscii("text/calendar");
-	folderMimeType << QString::fromAscii("application/x-vnd.kde.contactgroup");
+	gal.setName(i18n("Exchange Global Address List"));
+	gal.setRemoteId(m_galId.toString());
+	gal.setParentCollection(Collection::root());
+	gal.setContentMimeTypes(QStringList(m_itemMimeType));
+	gal.setRights(Akonadi::Collection::ReadOnly);
+	collections.append(gal);
+	fetchCollections(Contacts, collections);
 
-	// create the new collection
-	Collection root;
-	root.setParentCollection(Collection::root());
-	root.setContentMimeTypes(folderMimeType);
-	root.setRemoteId(QString::fromAscii("Exchange GAL"));
-	root.setName(i18n("Exchange Global Address List"));
-
-	collections.append(root);
-
-	// notify akonadi about the new collection
+	// Notify Akonadi about the new collections.
 	collectionsRetrieved(collections);
 }
 
-void exgalResource::retrieveItems( const Akonadi::Collection &collection )
+void ExGalResource::retrieveItems(const Akonadi::Collection &collection)
 {
-	Q_UNUSED( collection );
-
-	if (!logon()) {
-		return;
-	}
-
 	Item::List items;
+	Item::List deletedItems;
 
-	QList<GalMember> list;
-	emit status(Running, i18n("Fetching GAL from Exchange"));
-	if (connector->fetchGAL(list)) {
-		int idx = 1;
+	if (collection.remoteId() != m_galId.toString()) {
+		// This request is NOT for the GAL.
+		fetchItems(collection, items, deletedItems);
+		itemsRetrievedIncremental(items, deletedItems);
+		itemsRetrievalDone();
+	} else {
+		unsigned requestedCount = 100;
+
+		if (!m_begin) {
+			kError() << "TEMP DEBUG ONLY All done!!!!!!!!!!!!!!!!!!!!!!!";
+			itemsRetrievalDone();
+		}
+
+		QList<GalMember> list;
+		emit status(Running, i18n("Fetching GAL from Exchange"));
+		if (!m_connection->fetchGAL(m_begin, requestedCount, list)) {
+			// Error. Next time, start over.
+			error(i18n("cannot fetch GAL from Exchange"));
+			m_begin = true;
+			return;
+		}
 		foreach (GalMember data, list) {
-			Item item(QString::fromAscii("text/directory"));
+			Item item(m_itemMimeType);
 			item.setParentCollection(collection);
-			//item.setRemoteId(data.nick); // find a better remote id (but entryid seams to be binary)
-			item.setRemoteId(QString::number(idx++));
+			// find a better remote id (but entryid seams to be binary)
+			//item.setRemoteId(data.id);
+			item.setRemoteId(data.email);
 			item.setRemoteRevision(QString::number(1));
 
 			// prepare payload
@@ -101,19 +116,20 @@ void exgalResource::retrieveItems( const Akonadi::Collection &collection )
 			emails << data.email;
 			addressee.setEmails(emails);
 
-			item.setPayload<KABC::Addressee>( addressee );
+			item.setPayload<KABC::Addressee>(addressee);
 			items << item;
 		}
+		itemsRetrievedIncremental(items, deletedItems);
+		if ((unsigned)(items.size() + deletedItems.size()) < requestedCount) {
+			// All done. Next time, start over.
+			itemsRetrievalDone();
+			m_begin = true;
+		}
 	}
-
-	itemsRetrieved(items);
-
-	// This seems like a good place to force any subsequent activity
-	// to attempt the login.
-	logoff();
+	kError() << "new/changed items:" << items.size() << "deleted items:" << deletedItems.size();
 }
 
-bool exgalResource::retrieveItem( const Akonadi::Item &item, const QSet<QByteArray> &parts )
+bool ExGalResource::retrieveItem( const Akonadi::Item &item, const QSet<QByteArray> &parts )
 {
   Q_UNUSED( item );
   Q_UNUSED( parts );
@@ -125,13 +141,13 @@ bool exgalResource::retrieveItem( const Akonadi::Item &item, const QSet<QByteArr
   return true;
 }
 
-void exgalResource::aboutToQuit()
+void ExGalResource::aboutToQuit()
 {
   // TODO: any cleanup you need to do while there is still an active
   // event loop. The resource will terminate after this method returns
 }
 
-void exgalResource::configure( WId windowId )
+void ExGalResource::configure( WId windowId )
 {
 	ProfileDialog dlgConfig(Settings::self()->profileName());
   	if (windowId)
@@ -150,7 +166,7 @@ void exgalResource::configure( WId windowId )
 	}
 }
 
-void exgalResource::itemAdded( const Akonadi::Item &item, const Akonadi::Collection &collection )
+void ExGalResource::itemAdded( const Akonadi::Item &item, const Akonadi::Collection &collection )
 {
   Q_UNUSED( item );
   Q_UNUSED( collection );
@@ -162,7 +178,7 @@ void exgalResource::itemAdded( const Akonadi::Item &item, const Akonadi::Collect
   // of this template code to keep it simple
 }
 
-void exgalResource::itemChanged( const Akonadi::Item &item, const QSet<QByteArray> &parts )
+void ExGalResource::itemChanged( const Akonadi::Item &item, const QSet<QByteArray> &parts )
 {
   Q_UNUSED( item );
   Q_UNUSED( parts );
@@ -174,7 +190,7 @@ void exgalResource::itemChanged( const Akonadi::Item &item, const QSet<QByteArra
   // of this template code to keep it simple
 }
 
-void exgalResource::itemRemoved( const Akonadi::Item &item )
+void ExGalResource::itemRemoved( const Akonadi::Item &item )
 {
   Q_UNUSED( item );
 
@@ -185,26 +201,6 @@ void exgalResource::itemRemoved( const Akonadi::Item &item )
   // of this template code to keep it simple
 }
 
-bool exgalResource::logon(void)
-{
-	if (!connector) {
-		// logon to exchange (if needed)
-		emit status(Running, i18n("Logging in to Exchange"));
-		connector = new MapiConnector2;
-	}
-	bool ok = connector->login(Settings::self()->profileName());
-	if (!ok) {
-		emit status(Broken, i18n("Unable to login") );
-	}
-	return ok;
-}
-
-void exgalResource::logoff(void)
-{
-	delete connector;
-	connector = 0;
-}
-
-AKONADI_RESOURCE_MAIN( exgalResource )
+AKONADI_RESOURCE_MAIN(ExGalResource)
 
 #include "exgalresource.moc"

@@ -20,50 +20,47 @@
 #ifndef EXGALRESOURCE_H
 #define EXGALRESOURCE_H
 
-#include <akonadi/resourcebase.h>
+#include <mapiresource.h>
 
 class MapiConnector2;
 
-class exgalResource : public Akonadi::ResourceBase,
-                           public Akonadi::AgentBase::Observer
+/**
+ * This class gives acces both to the Global Address List (aka the GAL or the
+ * Public Address Book, or the PAB) as well as the user's own Contacts.
+ */
+class ExGalResource : public MapiResource
 {
-  Q_OBJECT
+Q_OBJECT
 
-  public:
-    exgalResource( const QString &id );
-    ~exgalResource();
+public:
+	ExGalResource(const QString &id);
+	virtual ~ExGalResource();
 
-  public Q_SLOTS:
-    virtual void configure( WId windowId );
+public Q_SLOTS:
+	virtual void configure(WId windowId);
 
-  protected Q_SLOTS:
-    void retrieveCollections();
-    void retrieveItems( const Akonadi::Collection &col );
-    bool retrieveItem( const Akonadi::Item &item, const QSet<QByteArray> &parts );
+protected Q_SLOTS:
+	void retrieveCollections();
+	void retrieveItems(const Akonadi::Collection &collection);
+	bool retrieveItem(const Akonadi::Item &item, const QSet<QByteArray> &parts);
 
-  protected:
-    virtual void aboutToQuit();
+protected:
+	virtual void aboutToQuit();
 
-    virtual void itemAdded( const Akonadi::Item &item, const Akonadi::Collection &collection );
-    virtual void itemChanged( const Akonadi::Item &item, const QSet<QByteArray> &parts );
-    virtual void itemRemoved( const Akonadi::Item &item );
+	virtual void itemAdded(const Akonadi::Item &item, const Akonadi::Collection &collection);
+	virtual void itemChanged(const Akonadi::Item &item, const QSet<QByteArray> &parts);
+	virtual void itemRemoved(const Akonadi::Item &item);
 
 private:
+	/**
+	 * A reserved id is used to represent the GAL.
+	 */
+	FullId m_galId;
 
 	/**
-	 * Logon to Exchange. A successful login is cached and subsequent calls
-	 * short-circuited.
-	 *
-	 * @return True if the login attempt succeeded.
+	 * We fetch the GAL incrementally.
 	 */
-	bool logon(void);
-
-	/**
-	 * Logout from Exchange.
-	 */
-	void logoff(void);
-
-	MapiConnector2* connector;
+	bool m_begin;
 };
 
 #endif

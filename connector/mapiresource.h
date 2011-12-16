@@ -28,6 +28,19 @@ class MapiFolder;
 class MapiMessage;
 
 /**
+ * Represent a "full", i.e. hierarchical id.
+ */
+class FullId : public QPair<qulonglong, qulonglong>
+{
+public:
+	FullId(qulonglong f, qulonglong s);
+
+	FullId(const QString &id);
+
+	QString toString();
+};
+
+/**
  * The purpose of this class is to actas a base for individual resources which
  * implement MAPI services. It hides the networking/logon and other details
  * as much as possible.

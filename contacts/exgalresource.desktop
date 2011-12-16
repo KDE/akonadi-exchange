@@ -1,18 +1,13 @@
 [Desktop Entry]
-Name=Exchange Global Address List
-Name[es]=Lista global de direcciones de Exchange
-Name[pt]=Lista de Endereços Global do Exchange
-Name[pt_BR]=Lista de endereço global do Exchange
-Name[sv]=Global Exchange-adresslista
+Name=Exchange Address Lists
+Name[es]=Lista direcciones de Exchange
+Name[pt]=Lista de Endereços do Exchange
+Name[pt_BR]=Lista de endereço do Exchange
+Name[sv]=Exchange-adresslista
 Name[uk]=Загальний список адрес Exchange
-Name[x-test]=xxExchange Global Address Listxx
-Comment=Akonadi resource that allows to access an Exchange Global Address List
-Comment[es]=Recurso de Akonadi que permite tener acceso a una lista global de direcciones de Exchange
-Comment[pt]=Recurso do Akonadi que permite aceder a uma lista de endereços global no Exchange
-Comment[pt_BR]=Recurso do Akonadi que permite acessar uma lista de endereço global do Exchange
-Comment[sv]=Akonadi-resurs som gör det möjligt att komma åt en global Exchange-adresslista
-Comment[uk]=Ресурс Akonadi, який надає змогу отримувати доступу до загального списку адрес Exchange
-Comment[x-test]=xxAkonadi resource that allows to access an Exchange Global Address Listxx
+Name[x-test]=xxExchange Address Listsxx
+Comment=Access to personal Contacts and the Global Address List on an Exchange server
+Comment[x-test]=xxAccess to personal Contacts and the Global Address List on an Exchange serverxx
 Type=AkonadiResource
 Exec=akonadi_exgal_resource
 Icon=text-directory

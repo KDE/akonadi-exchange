@@ -4,6 +4,7 @@ set( exgalresource_SRCS
   exgalresource.cpp
   ${RESOURCE_EXCHANGE_CONNECTOR_SOURCES}
   ${RESOURCE_EXCHANGE_UI_SOURCES}
+  ${CMAKE_CURRENT_SOURCE_DIR}/../connector/mapiresource.cpp
 )
 
 kde4_add_ui_files( exgalresource_SRCS ${RESOURCE_EXCHANGE_UI_FILES} )
@@ -20,6 +21,7 @@ kde4_add_executable(akonadi_exgal_resource RUN_UNINSTALLED ${exgalresource_SRCS}
 target_link_libraries(akonadi_exgal_resource 
 			${KDE4_AKONADI_LIBS} 
 			${KDEPIMLIBS_KABC_LIBS}
+			${KDEPIMLIBS_KMIME_LIBS}
 			${LIBMAPI_LIBRARY}
 			${LIBDCERPC_LIBRARY}
 			${QT_QTCORE_LIBRARY} 
