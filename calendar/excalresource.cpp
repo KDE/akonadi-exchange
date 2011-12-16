@@ -17,10 +17,10 @@
  * If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "excalresource.h"
-
 #include "settings.h"
 #include "settingsadaptor.h"
+
+#include "excalresource.h"
 
 #include <QtDBus/QDBusConnection>
 
@@ -37,287 +37,75 @@
 
 using namespace Akonadi;
 
-/**
- * We store all objects in Akonadi using the densest string representation to hand.
- */
-static QString toStringId(qulonglong id)
+ExCalResource::ExCalResource(const QString &id) :
+	MapiResource(id, i18n("Exchange Calendar"), IPF_APPOINTMENT, "IPM.Appointment", QString::fromAscii("text/calendar"))
 {
-	return QString::number(id, 36);
-}
-
-static qulonglong fromStringId(const QString &id)
-{
-	return id.toULongLong(0, 36);
-}
-
-ExCalResource::ExCalResource( const QString &id )
-  : ResourceBase( id ),
-	m_connection(new MapiConnector2()),
-	m_connected(false)
-{
-	new SettingsAdaptor( Settings::self() );
-	QDBusConnection::sessionBus().registerObject( QLatin1String( "/Settings" ),
-							Settings::self(), QDBusConnection::ExportAdaptors );
-	// Exchange requires the folder id as well as the item id, suggesting
-	// that this is needed.
-	setHierarchicalRemoteIdentifiersEnabled(true);
+	new SettingsAdaptor(Settings::self());
+	QDBusConnection::sessionBus().registerObject(QLatin1String("/Settings"),
+						     Settings::self(),
+						     QDBusConnection::ExportAdaptors);
 }
 
 ExCalResource::~ExCalResource()
 {
-	logoff();
-	delete m_connection;
-}
-
-void ExCalResource::error(const QString &message)
-{
-	kError() << message;
-	emit status(Broken, message);
-	cancelTask(message);
-}
-
-void ExCalResource::error(const MapiFolder &folder, const QString &body)
-{
-	static QString prefix = QString::fromAscii("Error %1: %2");
-	QString message = prefix.arg(toStringId(folder.id())).arg(body);
-
-	error(message);
-}
-
-void ExCalResource::error(const Akonadi::Collection &collection, const QString &body)
-{
-	static QString prefix = QString::fromAscii("Error %1(%2): %3");
-	QString message = prefix.arg(collection.remoteId()).arg(collection.name()).arg(body);
-
-	error(message);
-}
-
-void ExCalResource::error(const MapiMessage &msg, const QString &body)
-{
-	// Ignore the folderId, since we don't currently use multiple folders.
-	//static QString prefix = QString::fromAscii("Error %1/%2: %3");
-	//QString message = prefix.arg(toStringId(msg.folderId())).arg(toStringId(msg.id())).arg(body);
-	static QString prefix = QString::fromAscii("Error %1: %2");
-	QString message = prefix.arg(toStringId(msg.id())).arg(body);
-
-	error(message);
 }
 
 void ExCalResource::retrieveCollections()
 {
-	kDebug() << "fetch collections";
-
-	if (!logon()) {
-		// Come back later.
-		deferTask();
-		return;
-	}
-
-	QStringList folderMimeType;
-	folderMimeType << QString::fromAscii("text/calendar");
-
-	// create the new collection
-	Collection root;
-	root.setParentCollection(Collection::root());
-	root.setContentMimeTypes(folderMimeType);
-
-	MapiFolder rootFolder(m_connection, "ExCalResource::retrieveCollections", 0);
-	if (!rootFolder.open()) {
-		error(rootFolder, i18n("cannot open Exchange folder list"));
-		return;
-	}
-
-	QList<MapiFolder *> list;
-	emit status(Running, i18n("fetching folder list from Exchange"));
-	if (!rootFolder.childrenPull(list, QString::fromAscii(IPF_APPOINTMENT))) {
-		error(rootFolder, i18n("cannot fetch folder list from Exchange"));
-		return;
-	}
+	// First select who to log in as.
+	profileSet(Settings::self()->profileName());
 
 	Collection::List collections;
-	bool done = false;
-	foreach (MapiFolder *data, list) {
-		// TODO: take the first calender for now, but Exchange might have more calendar folders
-		if (!done) {
-			root.setRemoteId(toStringId(data->id()));
-			root.setName(i18n("Exchange: ") + data->name);
-			collections.append(root);
-			done = true;
-		}
-		delete data;
-	}
-	if (collections.size() == 0) {
-		error(rootFolder, i18n("no calendar folders in Exchange"));
-		return;
-	}
+	fetchCollections(Calendar, collections);
 
-	// notify akonadi about the new calendar collection
+	// Notify Akonadi about the new collections.
 	collectionsRetrieved(collections);
 }
 
 void ExCalResource::retrieveItems(const Akonadi::Collection &collection)
 {
-	kDebug() << "fetch collection:" << collection.name();
-
-	if (!logon()) {
-		// Come back later.
-		deferTask();
-		return;
-	}
-
-	// find all item that are already in this collection
-	QSet<qulonglong> knownRemoteIds;
-	QMap<qulonglong, Item> knownItems;
-	{
-		emit status(Running, i18n("Fetching items from Akonadi cache"));
-		ItemFetchJob *fetch = new ItemFetchJob( collection );
-
-		Akonadi::ItemFetchScope scope;
-		// we are only interested in the items from the cache
-		scope.setCacheOnly(true);
-		// we don't need the payload (we are mainly interested in the remoteID and the modification time)
-		scope.fetchFullPayload(false);
-		fetch->setFetchScope(scope);
-		if ( !fetch->exec() ) {
-			error(collection, i18n("unable to fetch listing of collection: %1", fetch->errorString()));
-			return;
-		}
-		Item::List existingItems = fetch->items();
-		foreach (Item item, existingItems) {
-			// store all the items that we already know
-			qulonglong remoteId = fromStringId(item.remoteId());
-			knownRemoteIds.insert(remoteId);
-			knownItems.insert(remoteId, item);
-		}
-	}
-
-	MapiFolder parentFolder(m_connection, "ExCalResource::retrieveItems", fromStringId(collection.remoteId()));
-	if (!parentFolder.open()) {
-		error(collection, i18n("unable to open collection"));
-		return;
-	}
-
-	// get the folder content for the collection
 	Item::List items;
-	QList<MapiItem *> list;
-	emit status(Running, i18n("Fetching collection: %1", collection.name()));
-	if (!parentFolder.childrenPull(list)) {
-		error(collection, i18n("unable to fetch collection"));
-		return;
-	}
-	kDebug() << "size of collection" << collection.id() << "is" << list.size();
-
-	QSet<qulonglong> checkedRemoteIds;
-	// run though all the found data...
-	foreach (const MapiItem *data, list) {
-
-		checkedRemoteIds << data->id(); // store for later use
-
-		if (!knownRemoteIds.contains(data->id())) {
-			// we do not know this remoteID -> create a new empty item for it
-			Item item(QString::fromAscii("text/calendar"));
-			item.setParentCollection(collection);
-			item.setRemoteId(toStringId(data->id()));
-			item.setRemoteRevision(QString::number(1));
-			items << item;
-		} else {
-			// this item is already known, check if it was update in the meanwhile
-			Item& existingItem = knownItems.find(data->id()).value();
-// 				kDebug() << "Item("<<existingItem.id()<<":"<<data.id<<":"<<existingItem.revision()<<") is already known [Cache-ModTime:"<<existingItem.modificationTime()
-// 						<<" Server-ModTime:"<<data.modified<<"] Flags:"<<existingItem.flags()<<"Attrib:"<<existingItem.attributes();
-			if (existingItem.modificationTime() < data->modified()) {
-				kDebug() << existingItem.id()<<"=> this item has changed";
-
-				// force akonadi to call retrieveItem() for this item in order to get updated data
-				int revision = existingItem.remoteRevision().toInt();
-				existingItem.clearPayload();
-				existingItem.setRemoteRevision( QString::number(++revision) );
-				items << existingItem;
-			}
-		}
-		delete data;
-		// TODO just for debugging...
-// 			if (items.size() > 3) {
-// 				break;
-// 			}
-	}
-
-	// now check if some of the items need to be removed
-	knownRemoteIds.subtract(checkedRemoteIds);
-
 	Item::List deletedItems;
-	foreach (const qulonglong remoteId, knownRemoteIds) {
-		deletedItems << knownItems.value(remoteId);
-	}
-
-	kDebug() << "itemsRetrievedIncremental(): fetched"<<items.size()<<"new/changed items; delete"<<deletedItems.size()<<"items";
+	
+	fetchItems(collection, items, deletedItems);
+	kError() << "new/changed items:" << items.size() << "deleted items:" << deletedItems.size();
 	itemsRetrievedIncremental(items, deletedItems);
-
-	foreach(Item item, items) {
-		kDebug() << "[Item-Dump] ID:"<<item.id()<<"RemoteId:"<<item.remoteId()<<"Revision:"<<item.revision()<<"ModTime:"<<item.modificationTime();
-	}
-
-	// We fetched a load of stuff. This seems like a good place to force 
-	// any subsequent activity to re-attempt the login.
-	logoff();
 }
 
 bool ExCalResource::retrieveItem( const Akonadi::Item &itemOrig, const QSet<QByteArray> &parts )
 {
-	Q_UNUSED( parts );
+	Q_UNUSED(parts);
 
-	kDebug() << "retrieveItem() called for item "<< itemOrig.id() << "remoteId:" << itemOrig.remoteId();
-
-	if (!logon()) {
-		// Come back later.
-		deferTask();
+	MapiAppointment *message = fetchItem<MapiAppointment>(itemOrig);
+	if (!message) {
 		return false;
 	}
-
-	qulonglong messageId = fromStringId(itemOrig.remoteId());
-	qulonglong folderId = fromStringId(currentCollection().remoteId());
-	MapiAppointment message(m_connection, "ExCalResource::retrieveItem", folderId, messageId);
-	if (!message.open()) {
-		error(message, i18n("unable to open item"));
-		return false;
-	}
-
-	// find the remoteId of the item and the collection and try to fetch the needed data from the server
-	kWarning() << "fetching item: {" <<
-		currentCollection().name() << "," << itemOrig.id() << "} = {" <<
-		folderId << "," << messageId << "}";
-	emit status(Running, i18n("Fetching item: { %1, %2 }", currentCollection().name(), messageId));
-	if (!message.propertiesPull()) {
-		error(message, i18n("unable to fetch item"));
-		return false;
-	}
-	kDebug() << "got message; item:"<<message.id()<<":"<<message.title;
 
 	// Create a clone of the passed in Item and fill it with the payload
 	Akonadi::Item item(itemOrig);
 
 	KCal::Event* event = new KCal::Event;
 	event->setUid(item.remoteId());
-	event->setSummary( message.title );
-	event->setDtStart( KDateTime(message.begin) );
-	event->setDtEnd( KDateTime(message.end) );
-	event->setCreated( KDateTime(message.created) );
-	event->setLastModified( KDateTime(message.modified) );
-	event->setDescription( message.text );
-	event->setOrganizer( message.sender );
-	event->setLocation( message.location );
-	if (message.reminderActive) {
-		KCal::Alarm* alarm = new KCal::Alarm( dynamic_cast<KCal::Incidence*>( event ) );
+	event->setSummary(message->title);
+	event->setDtStart(KDateTime(message->begin));
+	event->setDtEnd(KDateTime(message->end));
+	event->setCreated(KDateTime(message->created));
+	event->setLastModified(KDateTime(message->modified));
+	event->setDescription(message->text);
+	event->setOrganizer(message->sender);
+	event->setLocation(message->location);
+	if (message->reminderActive) {
+		KCal::Alarm* alarm = new KCal::Alarm(dynamic_cast<KCal::Incidence*>(event));
 		// TODO Maybe we should check which one is set and then use either the time or the delte
-		// KDateTime reminder(message.reminderTime);
-		// reminder.setTimeSpec( KDateTime::Spec(KDateTime::UTC) );
-		// alarm->setTime( reminder );
-		alarm->setStartOffset(KCal::Duration(message.reminderMinutes * -60));
-		alarm->setEnabled( true );
-		event->addAlarm( alarm );
+		// KDateTime reminder(message->reminderTime);
+		// reminder.setTimeSpec(KDateTime::Spec(KDateTime::UTC));
+		// alarm->setTime(reminder);
+		alarm->setStartOffset(KCal::Duration(message->reminderMinutes * -60));
+		alarm->setEnabled(true);
+		event->addAlarm(alarm);
 	}
 
-	foreach (Attendee att, message.attendees) {
+	foreach (Attendee att, message->attendees) {
 		if (att.isOrganizer()) {
 			KCal::Person person(att.name, att.email);
 			event->setOrganizer(person);
@@ -327,18 +115,17 @@ bool ExCalResource::retrieveItem( const Akonadi::Item &itemOrig, const QSet<QByt
 		}
 	}
 
-	if (message.recurrency.isRecurring()) {
+	if (message->recurrency.isRecurring()) {
 		// if this event is a recurring event create the recurrency
-		createKCalRecurrency(event->recurrence(), message.recurrency);
+		createKCalRecurrency(event->recurrence(), message->recurrency);
 	}
+	item.setPayload(KCal::Incidence::Ptr(event));
 
-	// TODO add further message
+	// TODO add further message properties.
+	item.setModificationTime(message->modified);
+	delete message;
 
-	item.setPayload( KCal::Incidence::Ptr(event) );
-
-	item.setModificationTime( message.modified );
-
-	// notify akonadi about the new data
+	// Notify Akonadi about the new data.
 	itemRetrieved(item);
 	return true;
 }
@@ -410,90 +197,70 @@ void ExCalResource::itemChangedContinue(KJob* job)
         Akonadi::ItemFetchJob *fetchJob = qobject_cast<Akonadi::ItemFetchJob*>(job);
         const Akonadi::Item item = fetchJob->items().first();
 
-	if (!logon()) {
-		// Come back later.
-		deferTask();
+	MapiAppointment *message = fetchItem<MapiAppointment>(item);
+	if (!message) {
 		return;
 	}
-
-	qulonglong messageId = item.remoteId().toULongLong();
-	qulonglong folderId = currentCollection().remoteId().toULongLong();
-	MapiAppointment message(m_connection, "ExCalResource::itemChangedContinue", folderId, messageId);
-	if (!message.open()) {
-		error(message, i18n("unable to open item"));
-		return;
-	}
-
-	// find the remoteId of the item and the collection and try to fetch the needed data from the server
-	kWarning() << "fetching item: {" << 
-		currentCollection().name() << "," << item.id() << "} = {" << 
-		folderId << "," << messageId << "}";
-	emit status(Running, i18n("Fetching item: { %1, %2 }", currentCollection().name(), messageId));
-	if (!message.propertiesPull()) {
-		error(message, i18n("unable to fetch item"));
-		return;
-	}
-        kWarning() << "got item data:" << message.id() << ":" << message.title;
 
 	// Extract the event from the item.
 	KCal::Event::Ptr event = item.payload<KCal::Event::Ptr>();
 	Q_ASSERT(event->setUid == item.remoteId());
-	message.title = event->summary();
-	message.begin.setTime_t(event->dtStart().toTime_t());
-	message.end.setTime_t(event->dtEnd().toTime_t());
-	Q_ASSERT(message.created == event->created());
+	message->title = event->summary();
+	message->begin.setTime_t(event->dtStart().toTime_t());
+	message->end.setTime_t(event->dtEnd().toTime_t());
+	Q_ASSERT(message->created == event->created());
 
 	// Check that between the item being modified, and this update attempt
 	// that no conflicting update happened on the server.
-	if (event->lastModified() < KDateTime(message.modified)) {
+	if (event->lastModified() < KDateTime(message->modified)) {
 		kWarning() << "Exchange data modified more recently" << event->lastModified()
-			<< "than cached data" << KDateTime(message.modified);
+			<< "than cached data" << KDateTime(message->modified);
 		// TBD: Update cache with data from Exchange.
 		return;
 	}
-	message.modified = item.modificationTime();
-	message.text = event->description();
-	message.sender = event->organizer().name();
-	message.location = event->location();
+	message->modified = item.modificationTime();
+	message->text = event->description();
+	message->sender = event->organizer().name();
+	message->location = event->location();
 	if (event->alarms().count()) {
 		KCal::Alarm* alarm = event->alarms().first();
-		message.reminderActive = true;
+		message->reminderActive = true;
 		// TODO Maybe we should check which one is set and then use either the time or the delte
-		// KDateTime reminder(message.reminderTime);
+		// KDateTime reminder(message->reminderTime);
 		// reminder.setTimeSpec( KDateTime::Spec(KDateTime::UTC) );
 		// alarm->setTime( reminder );
-		message.reminderMinutes = alarm->startOffset() / -60;
+		message->reminderMinutes = alarm->startOffset() / -60;
 	} else {
-		message.reminderActive = false;
+		message->reminderActive = false;
 	}
 
-	message.attendees.clear();
+	message->attendees.clear();
 	Attendee att;
 	att.name = event->organizer().name();
 	att.email = event->organizer().email();
 	att.setOrganizer(true);
-	message.attendees.append(att);
+	message->attendees.append(att);
 	att.setOrganizer(false);
 	foreach (KCal::Attendee *person, event->attendees()) {
 	att.name = person->name();
 	att.email = person->email();
-	message.attendees.append(att);
+	message->attendees.append(att);
 	}
 
-	if (message.recurrency.isRecurring()) {
+	if (message->recurrency.isRecurring()) {
 		// if this event is a recurring event create the recurrency
-//                createKCalRecurrency(event->recurrence(), message.recurrency);
+//                createKCalRecurrency(event->recurrence(), message->recurrency);
 	}
 
 	// TODO add further data
 
-	// Update exchange with the new message.
+	// Update exchange with the new message->
 	kWarning() << "updating item: {" << 
 		currentCollection().name() << "," << item.id() << "} = {" << 
-		folderId << "," << messageId << "}";
-	emit status(Running, i18n("Updating item: { %1, %2 }", currentCollection().name(), messageId));
-	if (!message.propertiesPush()) {
-		error(message, i18n("unable to update item"));
+		currentCollection().remoteId() << "," << item.remoteId() << "}";
+	emit status(Running, i18n("Updating item: { %1, %2 }", currentCollection().name(), item.id()));
+	if (!message->propertiesPush()) {
+		error(*message, i18n("unable to update item"));
 		return;
 	}
 	changeCommitted(item);
@@ -540,26 +307,6 @@ void ExCalResource::createKCalRecurrency(KCal::Recurrence* rec, const MapiRecurr
 	} else if (pattern.mEndType == MapiRecurrencyPattern::Date) {
 		rec->setEndDateTime(KDateTime(pattern.mEndDate));
 	} 
-}
-
-bool ExCalResource::logon(void)
-{
-	if (!m_connected) {
-		// logon to exchange (if needed)
-		emit status(Running, i18n("Logging in to Exchange"));
-		m_connected = m_connection->login(Settings::self()->profileName());
-	}
-	if (!m_connected) {
-		emit status(Broken, i18n("Unable to login as %1").arg(Settings::self()->profileName()));
-	}
-	return m_connected;
-}
-
-void ExCalResource::logoff(void)
-{
-	// There is no logoff operation. We just want to make sure we retry the
-	// logon next time.
-	m_connected = false;
 }
 
 AKONADI_RESOURCE_MAIN( ExCalResource )

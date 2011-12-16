@@ -41,7 +41,7 @@
 using namespace Akonadi;
 
 ExMailResource::ExMailResource(const QString &id) :
-	MapiResource(id)
+	MapiResource(id, i18n("Exchange Mail"), IPF_NOTE, "IPM.Note", KMime::Message::mimeType())
 {
 	new SettingsAdaptor(Settings::self());
 	QDBusConnection::sessionBus().registerObject(QLatin1String("/Settings"),
@@ -59,7 +59,7 @@ void ExMailResource::retrieveCollections()
 	profileSet(Settings::self()->profileName());
 
 	Collection::List collections;
-	fetchCollections(TopInformationStore, QString::fromAscii(IPF_NOTE), collections);
+	fetchCollections(TopInformationStore, collections);
 
 	// Notify Akonadi about the new collections.
 	collectionsRetrieved(collections);
@@ -71,7 +71,7 @@ void ExMailResource::retrieveItems(const Akonadi::Collection &collection)
 	Item::List deletedItems;
 	
 	fetchItems(collection, items, deletedItems);
-	kError() << "new/changed items fetched:" << items.size() << "items deleted:" << deletedItems.size();
+	kError() << "new/changed items:" << items.size() << "deleted items:" << deletedItems.size();
 	itemsRetrievedIncremental(items, deletedItems);
 }
 
@@ -103,9 +103,10 @@ bool ExMailResource::retrieveItem(const Akonadi::Item &itemOrig, const QSet<QByt
 	if (KMime::hasAttachment(message.get())) {
 		item.setFlag(Akonadi::MessageFlags::HasAttachment);
 	}
-	item.setModificationTime(message->created);
 */
 	// TODO add further message properties.
+//	item.setModificationTime(message->modified);
+	delete message;
 
 	// Notify Akonadi about the new data.
 	itemRetrieved(item);

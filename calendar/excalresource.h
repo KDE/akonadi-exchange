@@ -20,63 +20,35 @@
 #ifndef EXCALRESOURCE_H
 #define EXCALRESOURCE_H
 
-#include <akonadi/resourcebase.h>
+#include <mapiresource.h>
 #include <KCal/Recurrence>
 
-class MapiConnector2;
-class MapiFolder;
-class MapiMessage;
 class MapiRecurrencyPattern;
 
-class ExCalResource : public Akonadi::ResourceBase,
-                           public Akonadi::AgentBase::Observer
+class ExCalResource : public MapiResource
 {
 Q_OBJECT
 
 public:
-	ExCalResource( const QString &id );
-	~ExCalResource();
+	ExCalResource(const QString &id);
+	virtual ~ExCalResource();
 
 public Q_SLOTS:
-	virtual void configure( WId windowId );
+	virtual void configure(WId windowId);
 
 protected Q_SLOTS:
 	void retrieveCollections();
-	void retrieveItems( const Akonadi::Collection &col );
-	bool retrieveItem( const Akonadi::Item &item, const QSet<QByteArray> &parts );
+	void retrieveItems(const Akonadi::Collection &col);
+	bool retrieveItem(const Akonadi::Item &item, const QSet<QByteArray> &parts);
 
 protected:
 	virtual void aboutToQuit();
-	virtual void itemAdded( const Akonadi::Item &item, const Akonadi::Collection &collection );
-	virtual void itemChanged( const Akonadi::Item &item, const QSet<QByteArray> &parts );
-	virtual void itemRemoved( const Akonadi::Item &item );
+	virtual void itemAdded(const Akonadi::Item &item, const Akonadi::Collection &collection);
+	virtual void itemChanged(const Akonadi::Item &item, const QSet<QByteArray> &parts);
+	virtual void itemRemoved(const Akonadi::Item &item);
 
 private:
 	void createKCalRecurrency(KCal::Recurrence* rec, const MapiRecurrencyPattern& pattern);
-
-	/**
-	 * Logon to Exchange. A successful login is cached and subsequent calls
-	 * short-circuited.
-	 *
-	 * @return True if the login attempt succeeded.
-	 */
-	bool logon(void);
-
-	/**
-	 * Logout from Exchange.
-	 */
-	void logoff(void);
-
-	MapiConnector2 *m_connection;
-	bool m_connected;
-
-	/**
-	 * Consistent error handling for task-based routines.
-	 */
-	void error(const QString &message);
-	void error(const MapiFolder &folder, const QString &body);
-	void error(const Akonadi::Collection &collection, const QString &body);
-	void error(const MapiMessage &msg, const QString &body);
 
 private Q_SLOTS:
 	/**

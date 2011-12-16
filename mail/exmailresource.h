@@ -23,10 +23,6 @@
 
 #include <mapiresource.h>
 
-class MapiConnector2;
-class MapiFolder;
-class MapiMessage;
-
 class ExMailResource : public MapiResource
 {
 Q_OBJECT

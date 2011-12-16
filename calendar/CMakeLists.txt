@@ -4,6 +4,7 @@ set( excalresource_SRCS
   excalresource.cpp
   ${RESOURCE_EXCHANGE_CONNECTOR_SOURCES}
   ${RESOURCE_EXCHANGE_UI_SOURCES}
+  ${CMAKE_CURRENT_SOURCE_DIR}/../connector/mapiresource.cpp
 )
 
 kde4_add_ui_files( excalresource_SRCS ${RESOURCE_EXCHANGE_UI_FILES} )
@@ -20,6 +21,7 @@ kde4_add_executable(akonadi_excal_resource RUN_UNINSTALLED ${excalresource_SRCS}
 target_link_libraries(akonadi_excal_resource 
 					${KDE4_AKONADI_LIBS} 
 					${KDEPIMLIBS_KCAL_LIBS}
+					${KDEPIMLIBS_KMIME_LIBS}
 					${LIBMAPI_LIBRARY}
 					${LIBDCERPC_LIBRARY}
 					${QT_QTCORE_LIBRARY} 

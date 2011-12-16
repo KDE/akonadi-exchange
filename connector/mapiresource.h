@@ -39,7 +39,7 @@ class MapiResource :
 Q_OBJECT
 
 public:
-	MapiResource(const QString &id);
+	MapiResource(const QString &id, const QString &desktopName, const char *mapiFolderFilter, const char *mapiMessageType, const QString &itemMimeType);
 	virtual ~MapiResource();
 
 protected:
@@ -59,7 +59,7 @@ protected:
 	 * 			if no filtering is needed.
 	 * @param collections	List to which any matches are to be appended.
 	 */
-	void fetchCollections(MapiDefaultFolder rootFolder, const QString &filter, Akonadi::Collection::List &collections);
+	void fetchCollections(MapiDefaultFolder rootFolder, Akonadi::Collection::List &collections);
 
 	/**
 	 * Find all the items in the given collection.
@@ -87,7 +87,7 @@ protected:
 	 * Recurse through a hierarchy of Exchange folders which match the
 	 * given filter.
 	 */
-	void fetchCollections(const QString &path, const Akonadi::Collection &parent, const QString &filter, Akonadi::Collection::List &collections);
+	void fetchCollections(const QString &path, const Akonadi::Collection &parent, Akonadi::Collection::List &collections);
 
 	/**
 	 * Consistent error handling for task-based routines.
@@ -97,6 +97,9 @@ protected:
 	void error(const Akonadi::Collection &collection, const QString &body);
 	void error(const MapiMessage &msg, const QString &body);
 
+	QString m_mapiFolderFilter;
+	QString m_mapiMessageType;
+	QString m_itemMimeType;
 	MapiConnector2 *m_connection;
 	bool m_connected;
 

@@ -1178,17 +1178,8 @@ bool MapiFolder::childrenPull(QList<MapiItem *> &children)
 
 bool MapiFolder::open()
 {
-	mapi_id_t id = m_id;
-
-	// Get the toplevel folder id if needed.
-	if (id == 0) {
-		if (MAPI_E_SUCCESS != GetDefaultFolder(m_connection->d(), &id, olFolderTopInformationStore)) {
-			error() << "cannot get default folder" << mapiError();
-			return false;
-		}
-	}
-	if (MAPI_E_SUCCESS != OpenFolder(m_connection->d(), id, &m_object)) {
-		error() << "cannot open folder" << id << mapiError();
+	if (MAPI_E_SUCCESS != OpenFolder(m_connection->d(), m_id, &m_object)) {
+		error() << "cannot open folder" << m_id << mapiError();
 		return false;
 	}
 	return true;

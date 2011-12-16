@@ -21,6 +21,7 @@
 
 #include <QtDBus/QDBusConnection>
 
+#include <KConfigGroup>
 #include <KLocalizedString>
 #include <KWindowSystem>
 #include <KStandardDirs>
@@ -81,13 +82,16 @@ public:
 	}
 };
 
-MapiResource::MapiResource(const QString &id) :
+MapiResource::MapiResource(const QString &id, const QString &desktopName, const char *mapiFolderFilter, const char *mapiMessageType, const QString &itemMimeType) :
 	ResourceBase(id),
+	m_mapiFolderFilter(QString::fromAscii(mapiFolderFilter)),
+	m_mapiMessageType(QString::fromAscii(mapiMessageType)),
+	m_itemMimeType(itemMimeType),
 	m_connection(new MapiConnector2()),
 	m_connected(false)
 {
 	if (name() == identifier()) {
-		setName(i18n("Exchange"));
+		setName(desktopName);
 	}
 
 	setHierarchicalRemoteIdentifiersEnabled(true);
@@ -132,7 +136,7 @@ void MapiResource::error(const MapiMessage &msg, const QString &body)
 	error(message);
 }
 
-void MapiResource::fetchCollections(MapiDefaultFolder rootFolder, const QString &filter, Akonadi::Collection::List &collections)
+void MapiResource::fetchCollections(MapiDefaultFolder rootFolder, Akonadi::Collection::List &collections)
 {
 	kDebug() << "fetch all collections";
 
@@ -151,26 +155,25 @@ void MapiResource::fetchCollections(MapiDefaultFolder rootFolder, const QString 
 	}
 	Collection root;
 	FullId remoteId(0, rootId);
+	QStringList contentTypes;
 
+	contentTypes << m_itemMimeType << Akonadi::Collection::mimeType();
 	root.setName(name());
 	root.setRemoteId(remoteId.toString());
 	root.setParentCollection(Collection::root());
-	root.setContentMimeTypes(QStringList(Akonadi::Collection::mimeType()));
+	root.setContentMimeTypes(contentTypes);
 	root.setRights(Akonadi::Collection::ReadOnly);
 	collections.append(root);
 	if (collections.size() == 0) {
-		error(i18n("no folders in Exchange matching filter %1").arg(filter));
+		error(i18n("no folders in Exchange matching filter %1").arg(m_mapiFolderFilter));
 		return;
 	}
-	fetchCollections(root.name(), root, filter, collections);
+	fetchCollections(root.name(), root, collections);
 }
 
-void MapiResource::fetchCollections(const QString &path, const Collection &parent, const QString &filter, Akonadi::Collection::List &collections)
+void MapiResource::fetchCollections(const QString &path, const Collection &parent, Akonadi::Collection::List &collections)
 {
 	kDebug() << "fetch collections in:" << path;
-
-	QStringList contentTypes;
-	contentTypes << KMime::Message::mimeType() << Akonadi::Collection::mimeType();
 
 	FullId parentRemoteId(parent.remoteId());
 	MapiFolder parentFolder(m_connection, "MapiResource::retrieveCollection", parentRemoteId.second);
@@ -181,12 +184,15 @@ void MapiResource::fetchCollections(const QString &path, const Collection &paren
 
 	QList<MapiFolder *> list;
 	emit status(Running, i18n("fetching folder list from Exchange: %1").arg(path));
-	if (!parentFolder.childrenPull(list, filter)) {
+	if (!parentFolder.childrenPull(list, m_mapiFolderFilter)) {
 		error(parentFolder, i18n("cannot fetch folder list from Exchange"));
 		return;
 	}
 
 	QChar separator = QChar::fromAscii('/');
+	QStringList contentTypes;
+
+	contentTypes << m_itemMimeType << Akonadi::Collection::mimeType();
 	foreach (MapiFolder *data, list) {
 		Collection child;
 		FullId remoteId(parentRemoteId.second, data->id());
@@ -199,7 +205,7 @@ void MapiResource::fetchCollections(const QString &path, const Collection &paren
 
 		// Recurse down...
 		QString currentPath = path + separator + child.name();
-		fetchCollections(currentPath, child, filter, collections);
+		fetchCollections(currentPath, child, collections);
 		delete data;
 	}
 }
@@ -265,10 +271,11 @@ void MapiResource::fetchItems(const Akonadi::Collection &collection, Item::List 
 
 		if (!knownRemoteIds.contains(remoteId)) {
 			// we do not know this remoteID -> create a new empty item for it
-			Item item(KMime::Message::mimeType());
+			Item item(m_itemMimeType);
 			item.setParentCollection(collection);
 			item.setRemoteId(remoteId.toString());
 			item.setRemoteRevision(QString::number(1));
+			//item.setModificationTime(data->modified());
 			items << item;
 		} else {
 			// this item is already known, check if it was update in the meanwhile
@@ -288,7 +295,7 @@ void MapiResource::fetchItems(const Akonadi::Collection &collection, Item::List 
 		delete data;
 		// TODO just for debugging...
 		if (items.size() > 3) {
-			break;
+			//break;
 		}
 	}
 
@@ -337,6 +344,7 @@ Message *MapiResource::fetchItem(const Akonadi::Item &itemOrig)
 }
 
 template MapiNote *MapiResource::fetchItem<MapiNote>(const Akonadi::Item &itemOrig);
+template MapiAppointment *MapiResource::fetchItem<MapiAppointment>(const Akonadi::Item &itemOrig);
 
 bool MapiResource::logon(void)
 {
