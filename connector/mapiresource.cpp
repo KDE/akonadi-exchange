@@ -73,7 +73,7 @@ FullId::FullId(const QString &id)
 	second = fromStringId(id.mid(separator + 1));
 }
 
-QString FullId::toString()
+QString FullId::toString() const
 {
 	return toStringId(first).append(fidIdSeparator).append(toStringId(second));
 }

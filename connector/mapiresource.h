@@ -37,7 +37,7 @@ public:
 
 	FullId(const QString &id);
 
-	QString toString();
+	QString toString() const;
 };
 
 /**

@@ -55,12 +55,19 @@ private:
 	/**
 	 * A reserved id is used to represent the GAL.
 	 */
-	FullId m_galId;
+	const FullId m_galId;
 
 	/**
-	 * We fetch the GAL incrementally.
+	 * A copy of the collection used for the GAL.
 	 */
-	bool m_begin;
+	Akonadi::Collection m_galCollection;
+
+private Q_SLOTS:
+
+	/**
+	 * Incremental fetch of GAL.
+	 */
+	void retrieveGALItems(const QVariant &countVariant);
 };
 
 #endif

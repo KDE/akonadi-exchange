@@ -36,14 +36,12 @@ using namespace Akonadi;
 
 ExGalResource::ExGalResource(const QString &id) : 
 	MapiResource(id, i18n("Exchange Contacts"), IPF_CONTACT, "IPM.Contact", QString::fromAscii("text/directory")),
-	m_galId(0, 0),
-	m_begin(true)
+	m_galId(0, 0)
 {
 	new SettingsAdaptor(Settings::self());
 	QDBusConnection::sessionBus().registerObject(QLatin1String("/Settings"),
 						     Settings::self(), 
 						     QDBusConnection::ExportAdaptors);
-	//setItemStreamingEnabled(true);
 }
 
 ExGalResource::~ExGalResource()
@@ -77,56 +75,73 @@ void ExGalResource::retrieveItems(const Akonadi::Collection &collection)
 	Item::List items;
 	Item::List deletedItems;
 
-	if (collection.remoteId() != m_galId.toString()) {
-		// This request is NOT for the GAL.
+	if (collection.remoteId() == m_galId.toString()) {
+		// Assume the GAL is going to take a while to fetch, so use
+		// streaming mode.
+		kDebug() << "fetch items from collection:" << collection.name();
+		setItemStreamingEnabled(true);
+		m_galCollection = collection;
+		scheduleCustomTask(this, "retrieveGALItems", QVariant((qulonglong)0), ResourceBase::Append);
+		cancelTask();
+	} else {
+		// This request is NOT for the GAL. We don't bother with 
+		// streaming mode.
 		fetchItems(collection, items, deletedItems);
 		itemsRetrievedIncremental(items, deletedItems);
+		kError() << "new/changed items:" << items.size() << "deleted items:" << deletedItems.size();
+	}
+}
+
+void ExGalResource::retrieveGALItems(const QVariant &countVariant)
+{
+	qulonglong count = countVariant.toULongLong();
+	unsigned requestedCount = 100;
+	Item::List items;
+	Item::List deletedItems;
+
+	QList<GalMember> list;
+	emit status(Running, i18n("Fetching GAL from Exchange"));
+	if (!m_connection->fetchGAL(count == 0, requestedCount, list)) {
+		error(i18n("cannot fetch GAL from Exchange"));
+		return;
+	}
+	foreach (GalMember data, list) {
+		Item item(m_itemMimeType);
+		item.setParentCollection(m_galCollection);
+		item.setRemoteId(data.id);
+		item.setRemoteRevision(QString::number(1));
+
+		// prepare payload
+		KABC::Addressee addressee;
+		addressee.setName(data.name);
+		addressee.setNickName(data.nick);
+		addressee.insertEmail(data.email, true);
+		addressee.setTitle(data.title);
+		addressee.setOrganization(data.organization);
+		addressee.insertPhoneNumber(KABC::PhoneNumber(data.phone, KABC::PhoneNumber::Work));
+		KABC::Address address(KABC::Address::Work);
+		address.setLocality(data.location);
+		addressee.insertAddress(address);
+		if (!data.displayType.isEmpty()) {
+			addressee.insertCategory(data.displayType);
+		}
+		if (!data.objectType.isEmpty()) {
+			addressee.insertCategory(data.objectType);
+		}
+
+		item.setPayload<KABC::Addressee>(addressee);
+		items << item;
+	}
+	count += items.size();
+	kError() << "new items:" << count;
+	itemsRetrievedIncremental(items, deletedItems);
+	if ((unsigned)items.size() < requestedCount) {
+		// All done!
 		itemsRetrievalDone();
 	} else {
-		unsigned requestedCount = 100;
-
-		if (!m_begin) {
-			kError() << "TEMP DEBUG ONLY All done!!!!!!!!!!!!!!!!!!!!!!!";
-			itemsRetrievalDone();
-		}
-
-		QList<GalMember> list;
-		emit status(Running, i18n("Fetching GAL from Exchange"));
-		if (!m_connection->fetchGAL(m_begin, requestedCount, list)) {
-			// Error. Next time, start over.
-			error(i18n("cannot fetch GAL from Exchange"));
-			m_begin = true;
-			return;
-		}
-		foreach (GalMember data, list) {
-			Item item(m_itemMimeType);
-			item.setParentCollection(collection);
-			// find a better remote id (but entryid seams to be binary)
-			//item.setRemoteId(data.id);
-			item.setRemoteId(data.email);
-			item.setRemoteRevision(QString::number(1));
-
-			// prepare payload
-			KABC::Addressee addressee;
-			addressee.setName(data.name);
-			addressee.setNickName(data.nick);
-			addressee.setOrganization(data.organization);
-
-			QStringList emails;
-			emails << data.email;
-			addressee.setEmails(emails);
-
-			item.setPayload<KABC::Addressee>(addressee);
-			items << item;
-		}
-		itemsRetrievedIncremental(items, deletedItems);
-		if ((unsigned)(items.size() + deletedItems.size()) < requestedCount) {
-			// All done. Next time, start over.
-			itemsRetrievalDone();
-			m_begin = true;
-		}
+		// Go around again for more...
+		scheduleCustomTask(this, "retrieveGALItems", QVariant(count), ResourceBase::Append);
 	}
-	kError() << "new/changed items:" << items.size() << "deleted items:" << deletedItems.size();
 }
 
 bool ExGalResource::retrieveItem( const Akonadi::Item &item, const QSet<QByteArray> &parts )

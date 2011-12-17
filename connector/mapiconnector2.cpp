@@ -58,15 +58,17 @@ case base ## _UNICODE: \
 #define DEBUG_APPOINTMENT_PROPERTIES 0
 #define DEBUG_NOTE_PROPERTIES 1
 
+#define STR(def) \
+case def: return QString::fromLatin1(#def)
+
 /**
- * Map all MAPI errors to strings. Note that all MAPI error handling 
- * assumes that MAPI_E_SUCCESS == 0!
+ * Map all MAPI errors to strings.
  */
 static QString mapiError()
 {
 	int code = GetLastError();
-#define STR(e_code) \
-if (e_code == code) { return QString::fromLatin1(#e_code); }
+	switch (code)
+	{
 	STR(MAPI_E_SUCCESS);
 	STR(MAPI_E_INTERFACE_NO_SUPPORT);
 	STR(MAPI_E_CALL_FAILED);
@@ -140,7 +142,71 @@ if (e_code == code) { return QString::fromLatin1(#e_code); }
 	STR(MAPI_E_NOT_ENOUGH_MEMORY);
 	STR(MAPI_E_INVALID_PARAMETER);
 	STR(MAPI_E_RESERVED);
-	return QString::fromLatin1("MAPI_E_0x%1").arg((unsigned)code, 0, 16);
+	default:
+		return QString::fromAscii("MAPI_E_0x%1").arg((unsigned)code, 0, 16);
+	}
+}
+
+/**
+ * Map all MAPI object types to strings.
+ */
+static QString mapiDisplayType(unsigned type)
+{
+	switch (type)
+	{
+	case DT_AGENT:
+		return QString::fromAscii("automated agent");
+	case DT_DISTLIST:
+		return QString::fromAscii("distribution list");
+	case DT_FORUM:
+		return QString::fromAscii("forum");
+	case DT_MAILUSER:
+		return QString::fromAscii("normal messaging user");
+	case DT_ORGANIZATION:
+		return QString::fromAscii("alias for a large group");
+	case DT_PRIVATE_DISTLIST:
+		return QString::fromAscii("private distribution list");
+	case DT_REMOTE_MAILUSER:
+		return QString::fromAscii("foreign/remote messaging user");
+	default:
+		return QString::fromAscii("MAPI_0x%1 display type").arg(type, 0, 16);
+	}
+}
+
+/**
+ * Map all MAPI object types to strings.
+ */
+static QString mapiObjectType(unsigned type)
+{
+	switch (type)
+	{
+	case MAPI_ABCONT:
+		return QString::fromAscii("Address book container");
+	case MAPI_ADDRBOOK:
+		return QString::fromAscii("Address book");
+	case MAPI_ATTACH:
+		return QString::fromAscii("Message attachment");
+	case MAPI_DISTLIST:
+		return QString::fromAscii("Distribution list");
+	case MAPI_FOLDER:
+		return QString::fromAscii("Folder");
+	case MAPI_FORMINFO:
+		return QString::fromAscii("Form");
+	case MAPI_MAILUSER:
+		return QString::fromAscii("Messaging user");
+	case MAPI_MESSAGE:
+		return QString::fromAscii("Message");
+	case MAPI_PROFSECT:
+		return QString::fromAscii("Profile section");
+	case MAPI_SESSION:
+		return QString::fromAscii("Session");
+	case MAPI_STATUS:
+		return QString::fromAscii("Status");
+	case MAPI_STORE:
+		return QString::fromAscii("Message store");
+	default:
+		return QString::fromAscii("MAPI_0x%1 object type").arg(type, 0, 16);
+	}
 }
 
 static QDateTime convertSysTime(const FILETIME& filetime)
@@ -897,21 +963,19 @@ bool MapiConnector2::fetchGAL(bool begin, unsigned requestedCount, QList<GalMemb
 	struct SPropTagArray *tags;
 	struct SRowSet *results = NULL;
 
-	tags = set_SPropTagArray(ctx(), 14,
-			PR_INSTANCE_KEY,
-			PR_ENTRYID,
-			PR_DISPLAY_NAME_UNICODE,
-			PR_EMAIL_ADDRESS_UNICODE,
+	tags = set_SPropTagArray(ctx(), 17,
+			PR_RECORD_KEY,
 			PR_DISPLAY_TYPE,
 			PR_OBJECT_TYPE,
-			PR_ADDRTYPE_UNICODE,
-			PR_OFFICE_TELEPHONE_NUMBER_UNICODE,
-			PR_OFFICE_LOCATION_UNICODE,
-			PR_TITLE_UNICODE,
-			PR_COMPANY_NAME_UNICODE,
-			PR_ACCOUNT_UNICODE,
-			PR_SMTP_ADDRESS_UNICODE,
-			PR_SMTP_ADDRESS
+			PR_DISPLAY_NAME,		PR_DISPLAY_NAME_UNICODE,
+			PR_SMTP_ADDRESS,		PR_SMTP_ADDRESS_UNICODE,
+			PR_TITLE,			PR_TITLE_UNICODE,
+			PR_COMPANY_NAME,		PR_COMPANY_NAME_UNICODE,
+			PR_ACCOUNT,			PR_ACCOUNT_UNICODE,
+			PR_OFFICE_TELEPHONE_NUMBER,	PR_OFFICE_TELEPHONE_NUMBER_UNICODE,
+			PR_OFFICE_LOCATION,		PR_OFFICE_LOCATION_UNICODE
+			//PR_EMAIL_ADDRESS,		PR_EMAIL_ADDRESS_UNICODE,
+			//PR_ADDRTYPE,			PR_ADDRTYPE_UNICODE,
 			);
 	if (!tags) {
 		error() << "cannot set GAL tags" << mapiError();
@@ -928,14 +992,22 @@ bool MapiConnector2::fetchGAL(bool begin, unsigned requestedCount, QList<GalMemb
 		for (unsigned i = 0; i < results->cRows; i++) {
 			struct SRow &contact = results->aRow[i];
 			GalMember data;
+			unsigned displayType = DT_MAILUSER;
+			unsigned objectType = MAPI_MAILUSER;
 
 			for (unsigned j = 0; j < contact.cValues; ++j) {
 				MapiProperty property(contact.lpProps[j]);
 
 				switch (property.tag()) {
-				case PR_ENTRYID:
+				case PR_RECORD_KEY:
 					// Get the id as a hex string.
 					data.id = property.toString();
+					break;
+				case PR_DISPLAY_TYPE:
+					displayType = property.value().toUInt();
+					break;
+				case PR_OBJECT_TYPE:
+					objectType = property.value().toUInt();
 					break;
 				CASE_PREFER_UNICODE2(PR_DISPLAY_NAME, data.name, property.value().toString());
 					break;
@@ -946,6 +1018,10 @@ bool MapiConnector2::fetchGAL(bool begin, unsigned requestedCount, QList<GalMemb
 				CASE_PREFER_UNICODE2(PR_COMPANY_NAME, data.organization, property.value().toString());
 					break;
 				CASE_PREFER_UNICODE2(PR_ACCOUNT, data.nick, property.value().toString());
+					break;
+				CASE_PREFER_UNICODE2(PR_OFFICE_TELEPHONE_NUMBER, data.phone, property.value().toString());
+					break;
+				CASE_PREFER_UNICODE2(PR_OFFICE_LOCATION, data.location, property.value().toString());
 					break;
 				default:
 					{
@@ -963,13 +1039,19 @@ bool MapiConnector2::fetchGAL(bool begin, unsigned requestedCount, QList<GalMemb
 				// If PR_ADDRTYPE_UNICODE == "EX" it's a NSPI address book entry (whatever that means?)
 				// in that case the PR_EMAIL_ADDRESS_UNICODE contains a cryptic string. 
 				// PR_SMTP_ADDRESS_UNICODE seams to work better
+				if (displayType != DT_MAILUSER) {
+					data.displayType = mapiDisplayType(displayType);
+				}
+				if (objectType != MAPI_MAILUSER) {
+					data.objectType = mapiObjectType(objectType);
+				}
 			}
 
 			if (data.id.isEmpty()) {
 				error() << "GLA entry with missing id:" << data.name << data.email;
 				continue;
 			}
-			error() << "GLA:"<<data.id<<data.name<<data.email;
+			error() << "GAL:" << data.name << data.email << data.displayType << data.objectType;
 			list << data;
 		}
 	}

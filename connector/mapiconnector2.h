@@ -162,6 +162,12 @@ public:
 	QString email;
 	QString title;
 	QString organization;
+	QString phone;
+	QString location;
+	// The display type, if not a normal user.
+	QString displayType;
+	// The object type, if not a normal user.
+	QString objectType;
 };
 
 /**
