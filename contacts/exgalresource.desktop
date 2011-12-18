@@ -1,6 +1,16 @@
 [Desktop Entry]
 Name=Exchange Address Lists
+Name[pt]=Listas de Endereços do Exchange
+Name[pt_BR]=Listas de endereço do Exchange
+Name[sv]=Exchange-adresslistor
+Name[uk]=Списки адрес Exchange
+Name[x-test]=xxExchange Address Listsxx
 Comment=Access to personal Contacts and the Global Address List on an Exchange server
+Comment[pt]=Acesso aos Contactos e Lista de Endereços Globais pessoais num servidor de Exchange
+Comment[pt_BR]=Acesso aos contatos e lista de endereços globais pessoais em um servidor Exchange
+Comment[sv]=Åtkomst till personliga kontakter och den globala adresslistan på en Exchange-server
+Comment[uk]=Доступ до записів особистих контактів та загального списку адрес на сервері Exchange
+Comment[x-test]=xxAccess to personal Contacts and the Global Address List on an Exchange serverxx
 Type=AkonadiResource
 Exec=akonadi_exgal_resource
 Icon=text-directory
