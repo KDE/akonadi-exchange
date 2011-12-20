@@ -42,15 +42,6 @@ case unicode: \
 	lvalue = rvalue; \
 	break;
 
-#define CASE_PREFER_UNICODE2(base, lvalue, rvalue) \
-case base: \
-	if (lvalue.isEmpty()) { \
-		lvalue = rvalue; \
-	} \
-	break; \
-case base ## _UNICODE: \
-	lvalue = rvalue;
-
 #define UNDOCUMENTED_PR_EMAIL 0x6001001e
 #define UNDOCUMENTED_PR_EMAIL_UNICODE 0x6001001f
 
@@ -59,8 +50,6 @@ case base ## _UNICODE: \
  * respectively, e.g. to see what a server has available.
  */
 #define DEBUG_APPOINTMENT_PROPERTIES 1
-#define DEBUG_CONTACT_PROPERTIES 1
-#define DEBUG_GAL_PROPERTIES 0
 #define DEBUG_NOTE_PROPERTIES 0
 
 #define STR(def) \
@@ -152,68 +141,6 @@ static QString mapiError()
 	}
 }
 
-/**
- * Map all MAPI object types to strings.
- */
-static QString mapiDisplayType(unsigned type)
-{
-	switch (type)
-	{
-	case DT_AGENT:
-		return QString::fromAscii("automated agent");
-	case DT_DISTLIST:
-		return QString::fromAscii("distribution list");
-	case DT_FORUM:
-		return QString::fromAscii("forum");
-	case DT_MAILUSER:
-		return QString::fromAscii("normal messaging user");
-	case DT_ORGANIZATION:
-		return QString::fromAscii("alias for a large group");
-	case DT_PRIVATE_DISTLIST:
-		return QString::fromAscii("private distribution list");
-	case DT_REMOTE_MAILUSER:
-		return QString::fromAscii("foreign/remote messaging user");
-	default:
-		return QString::fromAscii("MAPI_0x%1 display type").arg(type, 0, 16);
-	}
-}
-
-/**
- * Map all MAPI object types to strings.
- */
-static QString mapiObjectType(unsigned type)
-{
-	switch (type)
-	{
-	case MAPI_ABCONT:
-		return QString::fromAscii("Address book container");
-	case MAPI_ADDRBOOK:
-		return QString::fromAscii("Address book");
-	case MAPI_ATTACH:
-		return QString::fromAscii("Message attachment");
-	case MAPI_DISTLIST:
-		return QString::fromAscii("Distribution list");
-	case MAPI_FOLDER:
-		return QString::fromAscii("Folder");
-	case MAPI_FORMINFO:
-		return QString::fromAscii("Form");
-	case MAPI_MAILUSER:
-		return QString::fromAscii("Messaging user");
-	case MAPI_MESSAGE:
-		return QString::fromAscii("Message");
-	case MAPI_PROFSECT:
-		return QString::fromAscii("Profile section");
-	case MAPI_SESSION:
-		return QString::fromAscii("Session");
-	case MAPI_STATUS:
-		return QString::fromAscii("Status");
-	case MAPI_STORE:
-		return QString::fromAscii("Message store");
-	default:
-		return QString::fromAscii("MAPI_0x%1 object type").arg(type, 0, 16);
-	}
-}
-
 static QDateTime convertSysTime(const FILETIME& filetime)
 {
   NTTIME nt_time = filetime.dwHighDateTime;
@@ -233,37 +160,6 @@ static int profileSelectCallback(struct SRowSet *rowset, const void* /*private_v
 	//  TODO Some sort of handling would be needed here
 	return rowset->cRows;
 }
-
-/**
- * A very simple wrapper around a property.
- */
-class MapiProperty : private SPropValue
-{
-public:
-	MapiProperty(SPropValue &property);
-
-	/**
-	 * Get the value of the property in a nice typesafe wrapper.
-	 */
-	QVariant value() const;
-
-	/**
-	 * Get the string equivalent of a property, e.g. for display purposes.
-	 * We take care to hex-ify GUIDs and other byte arrays, and lists of
-	 * the same.
-	 */
-	QString toString() const;
-
-	/**
-	 * Return the integer tag.
-	 * 
-	 * To convert this into a name, @ref MapiObject::tagName().
-	 */
-	int tag() const;
-
-private:
-	SPropValue &m_property;
-};
 
 MapiAppointment::MapiAppointment(MapiConnector2 *connector, const char *tallocName, mapi_id_t folderId, mapi_id_t id) :
 	MapiMessage(connector, tallocName, folderId, id)
@@ -955,100 +851,13 @@ QDebug MapiConnector2::error() const
 	return TallocContext::error(prefix);
 }
 
-bool MapiConnector2::fetchGAL(bool begin, unsigned requestedCount, QList<GalMember> &list)
+bool MapiConnector2::fetchGAL(bool begin, unsigned requestedCount, SPropTagArray *tags, SRowSet **results)
 {
-	struct SPropTagArray *tags;
-	struct SRowSet *results = NULL;
-
-	tags = set_SPropTagArray(ctx(), 17,
-			PR_RECORD_KEY,
-			PR_DISPLAY_TYPE,
-			PR_OBJECT_TYPE,
-			PR_DISPLAY_NAME,		PR_DISPLAY_NAME_UNICODE,
-			PR_SMTP_ADDRESS,		PR_SMTP_ADDRESS_UNICODE,
-			PR_TITLE,			PR_TITLE_UNICODE,
-			PR_COMPANY_NAME,		PR_COMPANY_NAME_UNICODE,
-			PR_ACCOUNT,			PR_ACCOUNT_UNICODE,
-			PR_OFFICE_TELEPHONE_NUMBER,	PR_OFFICE_TELEPHONE_NUMBER_UNICODE,
-			PR_OFFICE_LOCATION,		PR_OFFICE_LOCATION_UNICODE
-			//PR_EMAIL_ADDRESS,		PR_EMAIL_ADDRESS_UNICODE,
-			//PR_ADDRTYPE,			PR_ADDRTYPE_UNICODE,
-			);
-	if (!tags) {
-		error() << "cannot set GAL tags" << mapiError();
-		return false;
-	}
-
 	uint8_t ulFlags = begin ? TABLE_START : TABLE_CUR;
-	if (MAPI_E_SUCCESS != GetGALTable(m_session, tags, &results, requestedCount, ulFlags)) {
+	if (MAPI_E_SUCCESS != GetGALTable(m_session, tags, results, requestedCount, ulFlags)) {
 		error() << "cannot read GAL entries" << mapiError();
 		return false;
 	}
-	if (results) {
-		for (unsigned i = 0; i < results->cRows; i++) {
-			struct SRow &contact = results->aRow[i];
-			GalMember data;
-			unsigned displayType = DT_MAILUSER;
-			unsigned objectType = MAPI_MAILUSER;
-
-			for (unsigned j = 0; j < contact.cValues; ++j) {
-				MapiProperty property(contact.lpProps[j]);
-
-				switch (property.tag()) {
-				case PR_RECORD_KEY:
-					// Get the id as a hex string.
-					data.id = property.toString();
-					break;
-				case PR_DISPLAY_TYPE:
-					displayType = property.value().toUInt();
-					break;
-				case PR_OBJECT_TYPE:
-					objectType = property.value().toUInt();
-					break;
-				CASE_PREFER_UNICODE2(PR_DISPLAY_NAME, data.name, property.value().toString());
-					break;
-				CASE_PREFER_UNICODE2(PR_SMTP_ADDRESS, data.email, property.value().toString());
-					break;
-				CASE_PREFER_UNICODE2(PR_TITLE, data.title, property.value().toString());
-					break;
-				CASE_PREFER_UNICODE2(PR_COMPANY_NAME, data.organization, property.value().toString());
-					break;
-				CASE_PREFER_UNICODE2(PR_ACCOUNT, data.nick, property.value().toString());
-					break;
-				CASE_PREFER_UNICODE2(PR_OFFICE_TELEPHONE_NUMBER, data.phone, property.value().toString());
-					break;
-				CASE_PREFER_UNICODE2(PR_OFFICE_LOCATION, data.location, property.value().toString());
-					break;
-				default:
-#if (DEBUG_GAL_PROPERTIES)
-					{
-					const char *str = get_proptag_name(property.tag());
-
-					if (str) {
-						debug() << "ignoring GAL property:" << str << property.value();
-					} else {
-						debug() << "ignoring GAL property:" << QString::number(property.tag(), 0, 16) << property.value();
-					}
-					}
-#endif
-					break;
-				}
-
-				// If PR_ADDRTYPE_UNICODE == "EX" it's a NSPI address book entry (whatever that means?)
-				// in that case the PR_EMAIL_ADDRESS_UNICODE contains a cryptic string. 
-				// PR_SMTP_ADDRESS_UNICODE seams to work better
-				if (displayType != DT_MAILUSER) {
-					data.displayType = mapiDisplayType(displayType);
-				}
-				if (objectType != MAPI_MAILUSER) {
-					data.objectType = mapiObjectType(objectType);
-				}
-			}
-			list << data;
-		}
-	}
-	MAPIFreeBuffer(results);
-	MAPIFreeBuffer(tags);
 	return true;
 }
 
@@ -1090,126 +899,6 @@ bool MapiConnector2::resolveNames(const char *names[], SPropTagArray *tags,
 	if (MAPI_E_SUCCESS != ResolveNames(m_session, names, tags, results, statuses, MAPI_UNICODE)) {
 		error() << "cannot resolve names" << mapiError();
 		return false;
-	}
-	return true;
-}
-
-MapiContact::MapiContact(MapiConnector2 *connector, const char *tallocName, mapi_id_t folderId, mapi_id_t id) :
-	MapiMessage(connector, tallocName, folderId, id)
-{
-}
-
-QDebug MapiContact::debug() const
-{
-	static QString prefix = QString::fromAscii("MapiContact: %1/%2:");
-	return MapiObject::debug(prefix.arg(m_folderId, 0, ID_BASE).arg(m_id, 0, ID_BASE)) /*<< title*/;
-}
-
-QDebug MapiContact::error() const
-{
-	static QString prefix = QString::fromAscii("MapiContact: %1/%2:");
-	return MapiObject::error(prefix.arg(m_folderId, 0, ID_BASE).arg(m_id, 0, ID_BASE)) /*<< title*/;
-}
-
-//
-// Mandatory properties as specified by [MS-NSPI] 3.1.1.1 for all
-// address book objects:
-//
-// PidTagObjectType,
-// PidTagInitialDetailsPane,
-// PidTag7BitDisplayName,
-// PidTagAddressBookContainerId,
-// PidTagEntryId,
-// PidTagInstanceKey,
-// PidTagSearchKey,
-// PidTagRecordKey,
-// PidTagAddressType,
-// PidTagEmailAddress,
-// PidTagDisplayType,
-// PidTagTemplateid,
-// PidTagTransmittableDisplayName,
-// PidTagDisplayName,
-// PidTagMappingSignature,
-// PidTagAddressBookObjectDistinguishedName,
-//
-// Additional mandatory properties for every object that has a
-// PidTagObjectType with the value DISTLIST.
-//
-// PidTagContainerContents,
-// PidTagContainerFlags,
-//
-bool MapiContact::propertiesPull()
-{
-	if (!MapiMessage::propertiesPull()) {
-		return false;
-	}
-
-	// Walk through the properties and extract the values of interest. The
-	// properties here should be aligned with the list pulled above.
-	unsigned displayType = DT_MAILUSER;
-	unsigned objectType = MAPI_MAILUSER;
-	for (unsigned i = 0; i < m_propertyCount; i++) {
-		MapiProperty property(m_properties[i]);
-
-		switch (property.tag()) {
-		case PidTagMessageClass:
-			// Sanity check the message class.
-			if (QLatin1String("IPM.Contact") != property.value().toString()) {
-				// This one is not a contact.
-				return false;
-			}
-			break;
-		//case PidTagEntryId:
-			// Get the id as a hex string.
-			//id = property.toString();
-			//break;
-		case PidTagDisplayType:
-			displayType = property.value().toUInt();
-			break;
-		case PidTagObjectType:
-			objectType = property.value().toUInt();
-			break;
-		case PidTagDisplayName:
-			displayName = property.value().toString();
-			break;
-		case PidTag7BitDisplayName:
-			if (displayName.isEmpty()) {
-				displayName = property.value().toString();
-			}
-			break;
-		case PidTagPrimarySmtpAddress:
-			email = property.value().toString();
-			break;
-		case PidTagTitle:
-			title = property.value().toString();
-			break;
-		case PidTagCompanyName:
-			organization = property.value().toString();
-			break;
-		case PidTagAccount:
-			nick = property.value().toString();
-			break;
-		case PidTagBusinessTelephoneNumber:
-			phone = property.value().toString();
-			break;
-		case PidTagPostalAddress:
-			location = property.value().toString();
-			break;
-		// If PR_ADDRTYPE_UNICODE == "EX" it's a NSPI address book entry (whatever that means?)
-		// in that case the PR_EMAIL_ADDRESS_UNICODE contains a cryptic string. 
-		// PR_SMTP_ADDRESS_UNICODE seams to work better
-		default:
-#if (DEBUG_CONTACT_PROPERTIES)
-			error() << "ignoring contact property:" << tagName(property.tag()) << property.value();
-#endif
-			break;
-		}
-	}
-	if (displayType != DT_MAILUSER) {
-		this->displayType = mapiDisplayType(displayType);
-	}
-	if (objectType != MAPI_MAILUSER) {
-		this->objectType = mapiObjectType(objectType);
 	}
 	return true;
 }

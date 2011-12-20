@@ -57,8 +57,7 @@ static qulonglong fromStringId(const QString &id)
 /**
  * We store all objects in Akonadi using the densest string representation to hand.
  */
-
-static QChar fidIdSeparator = QChar::fromAscii('/');
+const QChar FullId::fidIdSeparator = QChar::fromAscii('/');
 
 FullId::FullId(qulonglong f, qulonglong s)
 {
@@ -307,38 +306,6 @@ void MapiResource::fetchItems(const Akonadi::Collection &collection, Item::List 
 	// any subsequent activity to re-attempt the login.
 	logoff();
 }
-
-template <class Message>
-Message *MapiResource::fetchItem(const Akonadi::Item &itemOrig)
-{
-	kError() << "fetch item:" << currentCollection().name() << fidIdSeparator << itemOrig.id() <<
-			", " << itemOrig.remoteId();
-
-	if (!logon()) {
-		return 0;
-	}
-
-	FullId remoteId(itemOrig.remoteId());
-	Message *message = new Message(m_connection, "MapiResource::retrieveItem", remoteId.first, remoteId.second);
-	if (!message->open()) {
-		kError() << "open failed!";
-		emit status(Broken, i18n("Unable to open item: %1/%2", currentCollection().name(), itemOrig.id()));
-		return 0;
-	}
-
-	// find the remoteId of the item and the collection and try to fetch the needed data from the server
-	emit status(Running, i18n("Fetching item: %1/%2", currentCollection().name(), itemOrig.id()));
-	if (!message->propertiesPull()) {
-		delete message;
-		return 0;
-	}
-	kDebug() << "fetched item:" << itemOrig.remoteId() << "," << message->title;
-	return message;
-}
-
-template MapiNote *MapiResource::fetchItem<MapiNote>(const Akonadi::Item &itemOrig);
-template MapiAppointment *MapiResource::fetchItem<MapiAppointment>(const Akonadi::Item &itemOrig);
-template MapiContact *MapiResource::fetchItem<MapiContact>(const Akonadi::Item &itemOrig);
 
 bool MapiResource::logon(void)
 {

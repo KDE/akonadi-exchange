@@ -81,7 +81,7 @@ bool ExCalResource::retrieveItem( const Akonadi::Item &itemOrig, const QSet<QByt
 		return false;
 	}
 
-	// Create a clone of the passed in Item and fill it with the payload
+	// Create a clone of the passed in Item and fill it with the payload.
 	Akonadi::Item item(itemOrig);
 
 	KCal::Event* event = new KCal::Event;

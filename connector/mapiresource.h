@@ -20,6 +20,8 @@
 #ifndef MAPIRESOURCE_H
 #define MAPIRESOURCE_H
 
+#include <KLocalizedString>
+
 #include <akonadi/resourcebase.h>
 #include "mapiconnector2.h"
 
@@ -44,6 +46,8 @@ public:
 	 * To Akonadi id.
 	 */
 	QString toString() const;
+
+	static const QChar fidIdSeparator;
 };
 
 /**
@@ -138,5 +142,36 @@ private:
 
 	QString m_profileName;
 };
+
+/**
+ * Grrr. Stupid C++ and template instantiation requirements - Ada rules!
+ */
+template <class Message>
+Message *MapiResource::fetchItem(const Akonadi::Item &itemOrig)
+{
+	kError() << "fetch item:" << currentCollection().name() << FullId::fidIdSeparator << itemOrig.id() <<
+			", " << itemOrig.remoteId();
+
+	if (!logon()) {
+		return 0;
+	}
+
+	FullId remoteId(itemOrig.remoteId());
+	Message *message = new Message(m_connection, "MapiResource::retrieveItem", remoteId.first, remoteId.second);
+	if (!message->open()) {
+		kError() << "open failed!";
+		emit status(Broken, i18n("Unable to open item: %1/%2", currentCollection().name(), itemOrig.id()));
+		return 0;
+	}
+
+	// find the remoteId of the item and the collection and try to fetch the needed data from the server
+	emit status(Running, i18n("Fetching item: %1/%2", currentCollection().name(), itemOrig.id()));
+	if (!message->propertiesPull()) {
+		delete message;
+		return 0;
+	}
+	kDebug() << "fetched item:" << itemOrig.remoteId();
+	return message;
+}
 
 #endif

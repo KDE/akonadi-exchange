@@ -26,13 +26,480 @@
 #include <QtDBus/QDBusConnection>
 
 #include <KLocalizedString>
+#include <KABC/Address>
 #include <KABC/Addressee>
+#include <KABC/PhoneNumber>
+#include <KABC/Picture>
 #include <KWindowSystem>
 
 #include "mapiconnector2.h"
 #include "profiledialog.h"
 
+/**
+ * Display ids in the same format we use when stored in Akonadi.
+ */
+#define ID_BASE 36
+
+#define DEBUG_GAL_PROPERTIES 1
+
 using namespace Akonadi;
+
+/**
+ * A personal address book entry.
+ */
+class MapiContact : public MapiMessage, public KABC::Addressee
+{
+public:
+	MapiContact(MapiConnector2 *connection, const char *tallocName, mapi_id_t folderId, mapi_id_t id);
+
+	/**
+	 * Fetch all contact properties.
+	 */
+	virtual bool propertiesPull();
+
+private:
+	virtual QDebug debug() const;
+	virtual QDebug error() const;
+};
+
+/**
+ * Map all MAPI object types to strings.
+ */
+static QString mapiDisplayType(unsigned type)
+{
+	switch (type)
+	{
+	case DT_AGENT:
+		return QString::fromAscii("automated agent");
+	case DT_DISTLIST:
+		return QString::fromAscii("distribution list");
+	case DT_FORUM:
+		return QString::fromAscii("forum");
+	case DT_MAILUSER:
+		return QString::fromAscii("normal messaging user");
+	case DT_ORGANIZATION:
+		return QString::fromAscii("alias for a large group");
+	case DT_PRIVATE_DISTLIST:
+		return QString::fromAscii("private distribution list");
+	case DT_REMOTE_MAILUSER:
+		return QString::fromAscii("foreign/remote messaging user");
+	default:
+		return QString::fromAscii("MAPI_0x%1 display type").arg(type, 0, 16);
+	}
+}
+
+/**
+ * Map all MAPI object types to strings.
+ */
+static QString mapiObjectType(unsigned type)
+{
+	switch (type)
+	{
+	case MAPI_ABCONT:
+		return QString::fromAscii("Address book container");
+	case MAPI_ADDRBOOK:
+		return QString::fromAscii("Address book");
+	case MAPI_ATTACH:
+		return QString::fromAscii("Message attachment");
+	case MAPI_DISTLIST:
+		return QString::fromAscii("Distribution list");
+	case MAPI_FOLDER:
+		return QString::fromAscii("Folder");
+	case MAPI_FORMINFO:
+		return QString::fromAscii("Form");
+	case MAPI_MAILUSER:
+		return QString::fromAscii("Messaging user");
+	case MAPI_MESSAGE:
+		return QString::fromAscii("Message");
+	case MAPI_PROFSECT:
+		return QString::fromAscii("Profile section");
+	case MAPI_SESSION:
+		return QString::fromAscii("Session");
+	case MAPI_STATUS:
+		return QString::fromAscii("Status");
+	case MAPI_STORE:
+		return QString::fromAscii("Message store");
+	default:
+		return QString::fromAscii("MAPI_0x%1 object type").arg(type, 0, 16);
+	}
+}
+
+/**
+ * The list of tags used to fetch data from the GAL. This list must be kept 
+ * synchronised with the body of @ref preparePayload, with the notable exception
+ * of PidTagMessageClass.
+ *
+ * This list is the superset of useful entries from [MS-NSPI] with the address
+ * book objects as specified in that function, thus ensuring the best possible
+ * unified experience.
+ */
+static int galTags[] = {
+	PidTagDisplayName,
+	PidTagEmailAddress,
+	PidTagAddressType,
+	PidTagPrimarySmtpAddress,
+	PidTagAccount,
+
+	PidTagObjectType,
+	PidTagDisplayType,
+	PidTagSurname,
+	PidTagGivenName,
+	PidTagNickname,
+	PidTagDisplayNamePrefix,
+	PidTagGeneration,
+	PidTagTitle,
+	PidTagOfficeLocation,
+	PidTagStreetAddress,
+	PidTagPostOfficeBox,
+	PidTagLocality,
+	PidTagStateOrProvince,
+	PidTagPostalCode,
+	PidTagCountry,
+	PidTagLocation,
+
+	PidTagDepartmentName,
+	PidTagCompanyName,
+	PidTagPostalAddress,
+
+	PidTagHomeAddressStreet,
+	PidTagHomeAddressPostOfficeBox,
+	PidTagHomeAddressCity,
+	PidTagHomeAddressStateOrProvince,
+	PidTagHomeAddressPostalCode,
+	PidTagHomeAddressCountry,
+
+	PidTagOtherAddressStreet,
+	PidTagOtherAddressPostOfficeBox,
+	PidTagOtherAddressCity,
+	PidTagOtherAddressStateOrProvince,
+	PidTagOtherAddressPostalCode,
+	PidTagOtherAddressCountry,
+
+	PidTagPrimaryTelephoneNumber,
+	PidTagBusinessTelephoneNumber,
+	PidTagBusiness2TelephoneNumber,
+	PidTagBusiness2TelephoneNumbers,
+	PidTagHomeTelephoneNumber,
+	PidTagHome2TelephoneNumber,
+	PidTagHome2TelephoneNumbers,
+	PidTagMobileTelephoneNumber,
+	PidTagRadioTelephoneNumber,
+	PidTagCarTelephoneNumber,
+	PidTagPrimaryFaxNumber,
+	PidTagBusinessFaxNumber,
+	PidTagHomeFaxNumber,
+	PidTagPagerTelephoneNumber,
+	PidTagIsdnNumber,
+
+	PidTagGender,
+	PidTagPersonalHomePage,
+	PidTagBusinessHomePage,
+	PidTagBirthday,
+	PidTagThumbnailPhoto,
+	0 };
+
+/**
+ * Take a set of properties, and attempt to apply them to the given addressee.
+ * 
+ * The switch statement at the heart of this routine must be kept synchronised
+ * with the list in @ref galTags.
+ *
+ * @return false on error.
+ */
+static bool preparePayload(SPropValue *properties, unsigned propertyCount, KABC::Addressee &addressee)
+{
+	static QString separator = QString::fromAscii(", ");
+	unsigned displayType = DT_MAILUSER;
+	unsigned objectType = MAPI_MAILUSER;
+	QString email;
+	QString addressType;
+	QString officeLocation;
+	QString location;
+	KABC::Address postal(KABC::Address::Postal);
+	KABC::Address work(KABC::Address::Work);
+	KABC::Address home(KABC::Address::Home);
+	KABC::Address other(KABC::Address::Pref);
+
+	// Walk through the properties and extract the values of interest. The
+	// properties here should be aligned with the list pulled above.
+	//
+	// We want to decode all the properties in [MS-OXOABK] that we can,
+	// subject to the following:
+	//
+	// - Properties common to all objects (section 2.2.3), and which
+	//   apply to both Contacts from [MS-OXOAB] and the GAL from [MS-NSPI].
+	//
+	// - Properties which apply either to Mail Users (section 2.2.4) or 
+	//   Distribution Lists (section 2.2.6) and which map to either 
+	//   KABC::Addressee or KABC::DistributionList respectively.
+	//
+	// TODO For now, we don't do anything useful with distribtion lists.
+	for (unsigned i = 0; i < propertyCount; i++) {
+		MapiProperty property(properties[i]);
+
+		switch (property.tag()) {
+		case PidTagMessageClass:
+			// Sanity check the message class.
+			if (QLatin1String("IPM.Contact") != property.value().toString()) {
+				// This one is not a contact.
+				kError() << "retreived item is not a contact:" << property.value().toString();
+				return false;
+			}
+			break;
+		// 2.2.3.1
+		case PidTagDisplayName:
+			addressee.setNameFromString(property.value().toString());
+			break;
+		// 2.2.3.14 and related items.
+		case PidTagEmailAddress:
+			email = property.value().toString();
+			break;
+		case PidTagAddressType:
+			addressType = property.value().toString();
+			break;
+		case PidTagPrimarySmtpAddress:
+			addressee.insertEmail(property.value().toString(), true);
+			break;
+		case PidTagAccount:
+			addressee.insertEmail(property.value().toString());
+			break;
+
+		// 2.2.3.10
+		case PidTagObjectType:
+			objectType = property.value().toUInt();
+			break;
+		// 2.2.3.11
+		case PidTagDisplayType:
+			displayType = property.value().toUInt();
+			break;
+		// 2.2.4.1
+		case PidTagSurname:
+			addressee.setFamilyName(property.value().toString());
+			break;
+		// 2.2.4.2
+		case PidTagGivenName:
+			addressee.setGivenName(property.value().toString());
+			break;
+		// 2.2.4.3
+		case PidTagNickname:
+			addressee.setNickName(property.value().toString());
+			break;
+		// 2.2.4.4
+		case PidTagDisplayNamePrefix:
+			addressee.setPrefix(property.value().toString());
+			break;
+		// 2.2.4.6
+		case PidTagGeneration:
+			addressee.setSuffix(property.value().toString());
+			break;
+		// 2.2.4.7
+		case PidTagTitle:
+			addressee.setRole(property.value().toString());
+			break;
+		// 2.2.4.8 and related items.
+		case PidTagOfficeLocation:
+			officeLocation = property.value().toString();
+			break;
+		case PidTagStreetAddress:
+			work.setStreet(property.value().toString());
+			break;
+		case PidTagPostOfficeBox:
+			work.setPostOfficeBox(property.value().toString());
+			break;
+		case PidTagLocality:
+			work.setLocality(property.value().toString());
+			break;
+		case PidTagStateOrProvince:
+			work.setRegion(property.value().toString());
+			break;
+		case PidTagPostalCode:
+			work.setPostalCode(property.value().toString());
+			break;
+		case PidTagCountry:
+			work.setCountry(property.value().toString());
+			break;
+		case PidTagLocation:
+			location = property.value().toString();
+			break;
+
+		// 2.2.4.9
+		case PidTagDepartmentName:
+			addressee.setDepartment(property.value().toString());
+			break;
+		// 2.2.4.10
+		case PidTagCompanyName:
+			addressee.setOrganization(property.value().toString());
+			break;
+		// 2.2.4.18
+		case PidTagPostalAddress:
+			postal.setStreet(property.value().toString());
+			break;
+
+		// 2.2.4.25 and related items.
+		case PidTagHomeAddressStreet:
+			home.setStreet(property.value().toString());
+			break;
+		case PidTagHomeAddressPostOfficeBox:
+			home.setPostOfficeBox(property.value().toString());
+			break;
+		case PidTagHomeAddressCity:
+			home.setLocality(property.value().toString());
+			break;
+		case PidTagHomeAddressStateOrProvince:
+			home.setRegion(property.value().toString());
+			break;
+		case PidTagHomeAddressPostalCode:
+			home.setPostalCode(property.value().toString());
+			break;
+		case PidTagHomeAddressCountry:
+			home.setCountry(property.value().toString());
+			break;
+
+		// 2.2.4.31 and related items.
+		case PidTagOtherAddressStreet:
+			other.setStreet(property.value().toString());
+			break;
+		case PidTagOtherAddressPostOfficeBox:
+			other.setPostOfficeBox(property.value().toString());
+			break;
+		case PidTagOtherAddressCity:
+			other.setLocality(property.value().toString());
+			break;
+		case PidTagOtherAddressStateOrProvince:
+			other.setRegion(property.value().toString());
+			break;
+		case PidTagOtherAddressPostalCode:
+			other.setPostalCode(property.value().toString());
+			break;
+		case PidTagOtherAddressCountry:
+			other.setCountry(property.value().toString());
+			break;
+
+		// 2.2.4.37 and related items.
+		case PidTagPrimaryTelephoneNumber:
+			addressee.insertPhoneNumber(KABC::PhoneNumber(property.value().toString(), KABC::PhoneNumber::Pref | KABC::PhoneNumber::Voice));
+			break;
+		case PidTagBusinessTelephoneNumber:
+		case PidTagBusiness2TelephoneNumber:
+		case PidTagBusiness2TelephoneNumbers:
+			addressee.insertPhoneNumber(KABC::PhoneNumber(property.value().toString(), KABC::PhoneNumber::Work | KABC::PhoneNumber::Voice));
+			break;
+		case PidTagHomeTelephoneNumber:
+		case PidTagHome2TelephoneNumber:
+		case PidTagHome2TelephoneNumbers:
+			addressee.insertPhoneNumber(KABC::PhoneNumber(property.value().toString(), KABC::PhoneNumber::Home | KABC::PhoneNumber::Voice));
+			break;
+		case PidTagMobileTelephoneNumber:
+		case PidTagRadioTelephoneNumber:
+			addressee.insertPhoneNumber(KABC::PhoneNumber(property.value().toString(), KABC::PhoneNumber::Cell | KABC::PhoneNumber::Voice));
+			break;
+		case PidTagCarTelephoneNumber:
+			addressee.insertPhoneNumber(KABC::PhoneNumber(property.value().toString(), KABC::PhoneNumber::Car | KABC::PhoneNumber::Voice));
+			break;
+		case PidTagPrimaryFaxNumber:
+			addressee.insertPhoneNumber(KABC::PhoneNumber(property.value().toString(), KABC::PhoneNumber::Pref | KABC::PhoneNumber::Fax));
+			break;
+		case PidTagBusinessFaxNumber:
+			addressee.insertPhoneNumber(KABC::PhoneNumber(property.value().toString(), KABC::PhoneNumber::Work | KABC::PhoneNumber::Fax));
+			break;
+		case PidTagHomeFaxNumber:
+			addressee.insertPhoneNumber(KABC::PhoneNumber(property.value().toString(), KABC::PhoneNumber::Home | KABC::PhoneNumber::Fax));
+			break;
+		case PidTagPagerTelephoneNumber:
+			addressee.insertPhoneNumber(KABC::PhoneNumber(property.value().toString(), KABC::PhoneNumber::Pager));
+			break;
+		case PidTagIsdnNumber:
+			addressee.insertPhoneNumber(KABC::PhoneNumber(property.value().toString(), KABC::PhoneNumber::Isdn));
+			break;
+
+		// 2.2.4.73
+		case PidTagGender:
+			switch (property.value().toString().toUInt()) {
+			case 1:
+				// Female.
+				addressee.setTitle(i18n("Ms."));
+				break;
+			case 2:
+				// Male.
+				addressee.setTitle(i18n("Mr."));
+				break;
+			}
+			break;
+		// 2.2.4.77 and related.
+		case PidTagPersonalHomePage:
+			addressee.setUrl(KUrl(property.value().toString()));
+			break;
+		case PidTagBusinessHomePage:
+			if (addressee.url().isEmpty()) {
+				addressee.setUrl(KUrl(property.value().toString()));
+			}
+			break;
+
+		// 2.2.4.79
+		case PidTagBirthday:
+			addressee.setBirthday(property.value().toDateTime());
+			break;
+		// 2.2.4.82
+		case PidTagThumbnailPhoto:
+			addressee.setPhoto(KABC::Picture(QImage::fromData(property.value().toByteArray())));
+			break;
+		default:
+			if (PT_ERROR != (property.tag() & 0xFFFF)) {
+				const char *str = get_proptag_name(property.tag());
+				QString tagName;
+				if (str) {
+					tagName = QString::fromAscii(str).mid(6);
+				} else {
+					tagName = QString::number(property.tag(), 0, 16);
+				}
+				addressee.insertCustom(i18n("Exchange"), tagName, property.toString());
+			}
+			break;
+		}
+	}
+	if (displayType != DT_MAILUSER) {
+		//this->displayType = mapiDisplayType(displayType);
+	}
+	if (objectType != MAPI_MAILUSER) {
+		//this->objectType = mapiObjectType(objectType);
+	}
+
+	// Don't override an SMTP address.
+	if (!email.isEmpty()) {
+		addressee.insertEmail(addressType.append(separator).append(email));
+	}
+
+	// location
+	// officeLocation
+	// location, officeLocation
+	if (!location.isEmpty())
+	{
+		work.setExtended(location);
+	}
+	if (!officeLocation.isEmpty()) {
+		if (!location.isEmpty())
+		{
+			work.setExtended(location.append(separator).append(officeLocation));
+		} else {
+			work.setExtended(officeLocation);
+		}
+	}
+
+	// Any non-empty addresses?
+	if (!postal.formattedAddress().isEmpty()) {
+		addressee.insertAddress(postal);
+	}
+	if (!work.formattedAddress().isEmpty()) {
+		addressee.insertAddress(work);
+	}
+	if (!home.formattedAddress().isEmpty()) {
+		addressee.insertAddress(home);
+	}
+	if (!other.formattedAddress().isEmpty()) {
+		addressee.insertAddress(other);
+	}
+	return true;
+}
 
 ExGalResource::ExGalResource(const QString &id) : 
 	MapiResource(id, i18n("Exchange Contacts"), IPF_CONTACT, "IPM.Contact", QString::fromAscii("text/directory")),
@@ -92,46 +559,50 @@ void ExGalResource::retrieveItems(const Akonadi::Collection &collection)
 	}
 }
 
+/**
+ * Streamed fetch of the GAL.
+ */
 void ExGalResource::retrieveGALItems(const QVariant &countVariant)
 {
 	qulonglong count = countVariant.toULongLong();
 	unsigned requestedCount = 300;
 	Item::List items;
 	Item::List deletedItems;
+	static SPropTagArray tags = {
+		(sizeof(galTags) / sizeof(galTags[0])) - 1,
+		(MAPITAGS *)galTags };
+	struct SRowSet *results = NULL;
 
-	QList<GalMember> list;
 	emit status(Running, i18n("Fetching GAL from Exchange"));
-	if (!m_connection->fetchGAL(count == 0, requestedCount, list)) {
+	if (!m_connection->fetchGAL(count == 0, requestedCount, &tags, &results)) {
 		error(i18n("cannot fetch GAL from Exchange"));
 		return;
 	}
-	foreach (GalMember data, list) {
+	if (!results) {
+		// All done!
+		emit status(Running, i18n("%1 GAL entries returned from Exchange", count));
+		itemsRetrievalDone();
+		return;
+	}
+
+	// For each row, construct an Addressee, and add the item to the list.
+	for (unsigned i = 0; i < results->cRows; i++) {
+		struct SRow &contact = results->aRow[i];
+		KABC::Addressee addressee;
+
+		if (!preparePayload(contact.lpProps, contact.cValues, addressee)) {
+			emit status(Running, i18n("Skipped malformed GAL entry"));
+			continue;
+		}
 		Item item(m_itemMimeType);
 		item.setParentCollection(m_galCollection);
-		item.setRemoteId(data.id);
+		item.setRemoteId(addressee.emails()[0]);
 		item.setRemoteRevision(QString::number(1));
-
-		// Prepare payload.
-		KABC::Addressee addressee;
-		addressee.setName(data.name);
-		addressee.setNickName(data.nick);
-		addressee.insertEmail(data.email, true);
-		addressee.setTitle(data.title);
-		addressee.setOrganization(data.organization);
-		addressee.insertPhoneNumber(KABC::PhoneNumber(data.phone, KABC::PhoneNumber::Work));
-		KABC::Address address(KABC::Address::Work);
-		address.setLocality(data.location);
-		addressee.insertAddress(address);
-		if (!data.displayType.isEmpty()) {
-			addressee.insertCategory(data.displayType);
-		}
-		if (!data.objectType.isEmpty()) {
-			addressee.insertCategory(data.objectType);
-		}
-
 		item.setPayload<KABC::Addressee>(addressee);
+
 		items << item;
 	}
+	MAPIFreeBuffer(results);
 	count += items.size();
 	itemsRetrievedIncremental(items, deletedItems);
 	// TODO Exit early for debug only.
@@ -140,6 +611,7 @@ void ExGalResource::retrieveGALItems(const QVariant &countVariant)
 	}
 	if ((unsigned)items.size() < requestedCount) {
 		// All done!
+		emit status(Running, i18n("%1 GAL entries returned from Exchange", count));
 		itemsRetrievalDone();
 	} else {
 		// Go around again for more...
@@ -149,50 +621,25 @@ void ExGalResource::retrieveGALItems(const QVariant &countVariant)
 //	taskDone();
 }
 
-// TODO: this method is called when Akonadi wants more data for a given item.
-// You can only provide the parts that have been requested but you are allowed
-// to provide all in one go
+/**
+ * Per-item fetch of Contacts.
+ */
 bool ExGalResource::retrieveItem(const Akonadi::Item &itemOrig, const QSet<QByteArray> &parts)
 {
 	Q_UNUSED(parts);
 
-	kError() << "++++++++++++++ get item";
 	MapiContact *message = fetchItem<MapiContact>(itemOrig);
 	if (!message) {
 		return false;
 	}
-	kError() << "++++++++++++++ got item";
 
-	// Create a clone of the passed in Item and fill it with the payload
+	// Create a clone of the passed in Item and fill it with the payload.
 	Akonadi::Item item(itemOrig);
-
-	// Prepare payload.
-	KABC::Addressee addressee;
-	addressee.setName(message->name);
-	addressee.setNickName(message->nick);
-	addressee.insertEmail(message->email, true);
-	addressee.setTitle(message->title);
-	addressee.setOrganization(message->organization);
-	addressee.insertPhoneNumber(KABC::PhoneNumber(message->phone, KABC::PhoneNumber::Work));
-	KABC::Address address(KABC::Address::Work);
-	address.setLocality(message->location);
-	addressee.insertAddress(address);
-	if (!message->displayType.isEmpty()) {
-		addressee.insertCategory(message->displayType);
-	}
-	if (!message->objectType.isEmpty()) {
-		addressee.insertCategory(message->objectType);
-	}
-
-	item.setPayload<KABC::Addressee>(addressee);
-
-	// TODO add further message properties.
-	//item.setModificationTime(message->modified);
+	item.setPayload<KABC::Addressee>(*message);
 	delete message;
 
 	// Notify Akonadi about the new data.
 	itemRetrieved(item);
-	kError() << "++++++++++++++ set item";
 	return true;
 }
 
@@ -254,6 +701,36 @@ void ExGalResource::itemRemoved( const Akonadi::Item &item )
 
   // NOTE: There is an equivalent method for collections, but it isn't part
   // of this template code to keep it simple
+}
+
+MapiContact::MapiContact(MapiConnector2 *connector, const char *tallocName, mapi_id_t folderId, mapi_id_t id) :
+	MapiMessage(connector, tallocName, folderId, id),
+	KABC::Addressee()
+{
+}
+
+QDebug MapiContact::debug() const
+{
+	static QString prefix = QString::fromAscii("MapiContact: %1/%2:");
+	return MapiObject::debug(prefix.arg(m_folderId, 0, ID_BASE).arg(m_id, 0, ID_BASE)) /*<< title*/;
+}
+
+QDebug MapiContact::error() const
+{
+	static QString prefix = QString::fromAscii("MapiContact: %1/%2:");
+	return MapiObject::error(prefix.arg(m_folderId, 0, ID_BASE).arg(m_id, 0, ID_BASE)) /*<< title*/;
+}
+
+bool MapiContact::propertiesPull()
+{
+	if (!MapiMessage::propertiesPull()) {
+		return false;
+	}
+
+	if (!preparePayload(m_properties, m_propertyCount, *this)) {
+		return false;
+	}
+	return true;
 }
 
 AKONADI_RESOURCE_MAIN(ExGalResource)

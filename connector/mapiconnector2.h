@@ -71,6 +71,37 @@ typedef enum
 	PublicNNTPArticle       = olFolderPublicNNTPArticle,
 } MapiDefaultFolder;
 
+/**
+ * A very simple wrapper around a property.
+ */
+class MapiProperty : private SPropValue
+{
+public:
+	MapiProperty(SPropValue &property);
+
+	/**
+	 * Get the value of the property in a nice typesafe wrapper.
+	 */
+	QVariant value() const;
+
+	/**
+	 * Get the string equivalent of a property, e.g. for display purposes.
+	 * We take care to hex-ify GUIDs and other byte arrays, and lists of
+	 * the same.
+	 */
+	QString toString() const;
+
+	/**
+	 * Return the integer tag.
+	 * 
+	 * To convert this into a name, @ref MapiObject::tagName().
+	 */
+	int tag() const;
+
+private:
+	SPropValue &m_property;
+};
+
 class Recipient
 {
 public:
@@ -152,22 +183,6 @@ public:
 	QBitArray mDays;
 	QDateTime mStartDate;
 	QDateTime mEndDate;
-};
-
-class GalMember {
-public:
-	QString id;
-	QString name;
-	QString nick;
-	QString email;
-	QString title;
-	QString organization;
-	QString phone;
-	QString location;
-	// The display type, if not a normal user.
-	QString displayType;
-	// The object type, if not a normal user.
-	QString objectType;
 };
 
 /**
@@ -276,7 +291,7 @@ public:
 	 * Fetch upto the requested number of entries from the GAL. The start
 	 * point is either the beginning, or where we previously left off.
 	 */
-	bool fetchGAL(bool begin, unsigned requestedCount, QList<GalMember> &list);
+	bool fetchGAL(bool begin, unsigned requestedCount, SPropTagArray *tags, SRowSet **results);
 
 	mapi_object_t *d()
 	{
@@ -592,37 +607,6 @@ public:
 	QString text;
 	QString sender;
 	QDateTime created;
-
-private:
-	virtual QDebug debug() const;
-	virtual QDebug error() const;
-};
-
-/**
- * A personal address book entry.
- */
-class MapiContact : public MapiMessage
-{
-public:
-	MapiContact(MapiConnector2 *connection, const char *tallocName, mapi_id_t folderId, mapi_id_t id);
-
-	/**
-	 * Fetch all contact properties.
-	 */
-	virtual bool propertiesPull();
-
-	QString name;
-	QString displayName;
-	QString nick;
-	QString email;
-	QString title;
-	QString organization;
-	QString phone;
-	QString location;
-	// The display type, if not a normal user.
-	QString displayType;
-	// The object type, if not a normal user.
-	QString objectType;
 
 private:
 	virtual QDebug debug() const;
