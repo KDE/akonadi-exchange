@@ -273,11 +273,6 @@ public:
 	bool defaultFolder(MapiDefaultFolder folderType, mapi_id_t *id);
 
 	/**
-	 * How many entries does the GAL have?
-	 */
-	bool fetchGALCount(unsigned *count);
-
-	/**
 	 * Fetch upto the requested number of entries from the GAL. The start
 	 * point is either the beginning, or where we previously left off.
 	 */
@@ -445,9 +440,8 @@ private:
 };
 
 /**
- * Represents a MAPI folder.
- * 
- * @ref MapiItem
+ * Represents a MAPI folder. A folder contains other child folder and
+ * @ref MapiItem objects.
  */
 class MapiFolder : public MapiObject
 {
@@ -598,6 +592,37 @@ public:
 	QString text;
 	QString sender;
 	QDateTime created;
+
+private:
+	virtual QDebug debug() const;
+	virtual QDebug error() const;
+};
+
+/**
+ * A personal address book entry.
+ */
+class MapiContact : public MapiMessage
+{
+public:
+	MapiContact(MapiConnector2 *connection, const char *tallocName, mapi_id_t folderId, mapi_id_t id);
+
+	/**
+	 * Fetch all contact properties.
+	 */
+	virtual bool propertiesPull();
+
+	QString name;
+	QString displayName;
+	QString nick;
+	QString email;
+	QString title;
+	QString organization;
+	QString phone;
+	QString location;
+	// The display type, if not a normal user.
+	QString displayType;
+	// The object type, if not a normal user.
+	QString objectType;
 
 private:
 	virtual QDebug debug() const;

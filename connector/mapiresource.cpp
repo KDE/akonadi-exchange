@@ -213,7 +213,7 @@ void MapiResource::fetchItems(const Akonadi::Collection &collection, Item::List 
 		return;
 	}
 
-	// find all item that are already in this collection
+	// Find all item that are already in this collection in Akonadi.
 	QSet<FullId> knownRemoteIds;
 	QMap<FullId, Item> knownItems;
 	{
@@ -247,7 +247,7 @@ void MapiResource::fetchItems(const Akonadi::Collection &collection, Item::List 
 		return;
 	}
 
-	// get the folder content for the collection
+	// Get the folder content for the collection.
 	QList<MapiItem *> list;
 	emit status(Running, i18n("Fetching collection: %1", collection.name()));
 	if (!parentFolder.childrenPull(list)) {
@@ -338,6 +338,7 @@ Message *MapiResource::fetchItem(const Akonadi::Item &itemOrig)
 
 template MapiNote *MapiResource::fetchItem<MapiNote>(const Akonadi::Item &itemOrig);
 template MapiAppointment *MapiResource::fetchItem<MapiAppointment>(const Akonadi::Item &itemOrig);
+template MapiContact *MapiResource::fetchItem<MapiContact>(const Akonadi::Item &itemOrig);
 
 bool MapiResource::logon(void)
 {

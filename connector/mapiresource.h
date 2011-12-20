@@ -35,8 +35,14 @@ class FullId : public QPair<qulonglong, qulonglong>
 public:
 	FullId(qulonglong f, qulonglong s);
 
+	/**
+	 * From an Akonadi id.
+	 */
 	FullId(const QString &id);
 
+	/**
+	 * To Akonadi id.
+	 */
 	QString toString() const;
 };
 

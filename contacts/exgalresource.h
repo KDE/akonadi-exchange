@@ -42,7 +42,7 @@ public Q_SLOTS:
 protected Q_SLOTS:
 	void retrieveCollections();
 	void retrieveItems(const Akonadi::Collection &collection);
-	bool retrieveItem(const Akonadi::Item &item, const QSet<QByteArray> &parts);
+	bool retrieveItem(const Akonadi::Item &itemOrig, const QSet<QByteArray> &parts);
 
 protected:
 	virtual void aboutToQuit();

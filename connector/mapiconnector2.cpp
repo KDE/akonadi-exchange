@@ -51,12 +51,17 @@ case base: \
 case base ## _UNICODE: \
 	lvalue = rvalue;
 
+#define UNDOCUMENTED_PR_EMAIL 0x6001001e
+#define UNDOCUMENTED_PR_EMAIL_UNICODE 0x6001001f
+
 /**
  * Set this to 1 to pull all the properties for an appointment or a note 
  * respectively, e.g. to see what a server has available.
  */
-#define DEBUG_APPOINTMENT_PROPERTIES 0
-#define DEBUG_NOTE_PROPERTIES 1
+#define DEBUG_APPOINTMENT_PROPERTIES 1
+#define DEBUG_CONTACT_PROPERTIES 1
+#define DEBUG_GAL_PROPERTIES 0
+#define DEBUG_NOTE_PROPERTIES 0
 
 #define STR(def) \
 case def: return QString::fromLatin1(#def)
@@ -568,12 +573,14 @@ bool MapiAppointment::propertiesPull()
 		MapiProperty property(m_properties[i]);
 
 		switch (property.tag()) {
+		case PidTagMessageClass:
 			// Sanity check the message class.
 			if (QLatin1String("IPM.Appointment") != property.value().toString()) {
 				// this one is not an appointment
 				return false;
 			}
-			case PidTagDisplayTo:
+			break;
+		case PidTagDisplayTo:
 			// Step 2. Add the DisplayTo items.
 			//
 			// Astonishingly, when we call recipientsPull() later,
@@ -695,7 +702,7 @@ bool MapiAppointment::propertiesPull()
 					PidTag7BitDisplayName_string8, PidTagDisplayName_string8, PidTagRecipientDisplayName_string8,
 					PidTagPrimarySmtpAddress,
 					PidTagPrimarySmtpAddress_string8,
-					0x6001001f,
+					UNDOCUMENTED_PR_EMAIL_UNICODE,
 					0x60010018);
 		if (!tags) {
 			error() << "cannot set name resolution tags" << mapiError();
@@ -731,16 +738,16 @@ bool MapiAppointment::propertiesPull()
 					CASE_PREFER_UNICODE(PidTagDisplayName, name, property.value().toString())
 					CASE_PREFER_UNICODE(PidTagRecipientDisplayName, name, property.value().toString())
 					CASE_PREFER_UNICODE(PidTagPrimarySmtpAddress, email, property.value().toString())
-					case 0x6001001e:
+					case UNDOCUMENTED_PR_EMAIL:
 						if (email.isEmpty()) {
 							email = property.value().toString();
 						}
 						break;
-					case 0x6001001f:
+					case UNDOCUMENTED_PR_EMAIL_UNICODE:
 						email = property.value().toString();
 						break;
 					default:
-						//debug() << "ignoring attendee property:" << tagName(property.tag()) << property.value();
+						debug() << "ignoring attendee property:" << tagName(property.tag()) << property.value();
 						break;
 					}
 				}
@@ -948,16 +955,6 @@ QDebug MapiConnector2::error() const
 	return TallocContext::error(prefix);
 }
 
-bool MapiConnector2::fetchGALCount(unsigned *count)
-{
-	if (MAPI_E_SUCCESS != GetGALTableCount(m_session, count)) {
-		error() << "cannot get GAL count" << mapiError();
-		return false;
-	}
-	error() << "Total Number of entries in GAL:" << *count;
-	return true;
-}
-
 bool MapiConnector2::fetchGAL(bool begin, unsigned requestedCount, QList<GalMember> &list)
 {
 	struct SPropTagArray *tags;
@@ -981,8 +978,7 @@ bool MapiConnector2::fetchGAL(bool begin, unsigned requestedCount, QList<GalMemb
 		error() << "cannot set GAL tags" << mapiError();
 		return false;
 	}
-	error() << "fetch GAL:" << __LINE__ << begin;
-//return true;
+
 	uint8_t ulFlags = begin ? TABLE_START : TABLE_CUR;
 	if (MAPI_E_SUCCESS != GetGALTable(m_session, tags, &results, requestedCount, ulFlags)) {
 		error() << "cannot read GAL entries" << mapiError();
@@ -1024,15 +1020,17 @@ bool MapiConnector2::fetchGAL(bool begin, unsigned requestedCount, QList<GalMemb
 				CASE_PREFER_UNICODE2(PR_OFFICE_LOCATION, data.location, property.value().toString());
 					break;
 				default:
+#if (DEBUG_GAL_PROPERTIES)
 					{
 					const char *str = get_proptag_name(property.tag());
 
 					if (str) {
-						error() << "ignoring GAL property:" << str << property.value();
+						debug() << "ignoring GAL property:" << str << property.value();
 					} else {
-						error() << "ignoring GAL property:" << QString::number(property.tag(), 0, 16) << property.value();
+						debug() << "ignoring GAL property:" << QString::number(property.tag(), 0, 16) << property.value();
 					}
 					}
+#endif
 					break;
 				}
 
@@ -1046,18 +1044,11 @@ bool MapiConnector2::fetchGAL(bool begin, unsigned requestedCount, QList<GalMemb
 					data.objectType = mapiObjectType(objectType);
 				}
 			}
-
-			if (data.id.isEmpty()) {
-				error() << "GLA entry with missing id:" << data.name << data.email;
-				continue;
-			}
-			error() << "GAL:" << data.name << data.email << data.displayType << data.objectType;
 			list << data;
 		}
 	}
 	MAPIFreeBuffer(results);
 	MAPIFreeBuffer(tags);
-	error() << "fetch GAL entries:" << list.size();
 	return true;
 }
 
@@ -1099,6 +1090,126 @@ bool MapiConnector2::resolveNames(const char *names[], SPropTagArray *tags,
 	if (MAPI_E_SUCCESS != ResolveNames(m_session, names, tags, results, statuses, MAPI_UNICODE)) {
 		error() << "cannot resolve names" << mapiError();
 		return false;
+	}
+	return true;
+}
+
+MapiContact::MapiContact(MapiConnector2 *connector, const char *tallocName, mapi_id_t folderId, mapi_id_t id) :
+	MapiMessage(connector, tallocName, folderId, id)
+{
+}
+
+QDebug MapiContact::debug() const
+{
+	static QString prefix = QString::fromAscii("MapiContact: %1/%2:");
+	return MapiObject::debug(prefix.arg(m_folderId, 0, ID_BASE).arg(m_id, 0, ID_BASE)) /*<< title*/;
+}
+
+QDebug MapiContact::error() const
+{
+	static QString prefix = QString::fromAscii("MapiContact: %1/%2:");
+	return MapiObject::error(prefix.arg(m_folderId, 0, ID_BASE).arg(m_id, 0, ID_BASE)) /*<< title*/;
+}
+
+//
+// Mandatory properties as specified by [MS-NSPI] 3.1.1.1 for all
+// address book objects:
+//
+// PidTagObjectType,
+// PidTagInitialDetailsPane,
+// PidTag7BitDisplayName,
+// PidTagAddressBookContainerId,
+// PidTagEntryId,
+// PidTagInstanceKey,
+// PidTagSearchKey,
+// PidTagRecordKey,
+// PidTagAddressType,
+// PidTagEmailAddress,
+// PidTagDisplayType,
+// PidTagTemplateid,
+// PidTagTransmittableDisplayName,
+// PidTagDisplayName,
+// PidTagMappingSignature,
+// PidTagAddressBookObjectDistinguishedName,
+//
+// Additional mandatory properties for every object that has a
+// PidTagObjectType with the value DISTLIST.
+//
+// PidTagContainerContents,
+// PidTagContainerFlags,
+//
+bool MapiContact::propertiesPull()
+{
+	if (!MapiMessage::propertiesPull()) {
+		return false;
+	}
+
+	// Walk through the properties and extract the values of interest. The
+	// properties here should be aligned with the list pulled above.
+	unsigned displayType = DT_MAILUSER;
+	unsigned objectType = MAPI_MAILUSER;
+	for (unsigned i = 0; i < m_propertyCount; i++) {
+		MapiProperty property(m_properties[i]);
+
+		switch (property.tag()) {
+		case PidTagMessageClass:
+			// Sanity check the message class.
+			if (QLatin1String("IPM.Contact") != property.value().toString()) {
+				// This one is not a contact.
+				return false;
+			}
+			break;
+		//case PidTagEntryId:
+			// Get the id as a hex string.
+			//id = property.toString();
+			//break;
+		case PidTagDisplayType:
+			displayType = property.value().toUInt();
+			break;
+		case PidTagObjectType:
+			objectType = property.value().toUInt();
+			break;
+		case PidTagDisplayName:
+			displayName = property.value().toString();
+			break;
+		case PidTag7BitDisplayName:
+			if (displayName.isEmpty()) {
+				displayName = property.value().toString();
+			}
+			break;
+		case PidTagPrimarySmtpAddress:
+			email = property.value().toString();
+			break;
+		case PidTagTitle:
+			title = property.value().toString();
+			break;
+		case PidTagCompanyName:
+			organization = property.value().toString();
+			break;
+		case PidTagAccount:
+			nick = property.value().toString();
+			break;
+		case PidTagBusinessTelephoneNumber:
+			phone = property.value().toString();
+			break;
+		case PidTagPostalAddress:
+			location = property.value().toString();
+			break;
+		// If PR_ADDRTYPE_UNICODE == "EX" it's a NSPI address book entry (whatever that means?)
+		// in that case the PR_EMAIL_ADDRESS_UNICODE contains a cryptic string. 
+		// PR_SMTP_ADDRESS_UNICODE seams to work better
+		default:
+#if (DEBUG_CONTACT_PROPERTIES)
+			error() << "ignoring contact property:" << tagName(property.tag()) << property.value();
+#endif
+			break;
+		}
+	}
+	if (displayType != DT_MAILUSER) {
+		this->displayType = mapiDisplayType(displayType);
+	}
+	if (objectType != MAPI_MAILUSER) {
+		this->objectType = mapiObjectType(objectType);
 	}
 	return true;
 }
@@ -1350,12 +1461,12 @@ Recipient MapiMessage::recipientAt(unsigned i) const
 		CASE_PREFER_UNICODE(PidTagDisplayName, result.name, property.value().toString())
 		CASE_PREFER_UNICODE(PidTagRecipientDisplayName, result.name, property.value().toString())
 		CASE_PREFER_UNICODE(PidTagPrimarySmtpAddress, result.email, property.value().toString())
-		case 0x6001001e:
+		case UNDOCUMENTED_PR_EMAIL:
 			if (result.email.isEmpty()) {
 				result.email = property.value().toString();
 			}
 			break;
-		case 0x6001001f:
+		case UNDOCUMENTED_PR_EMAIL_UNICODE:
 			result.email = property.value().toString(); 
 			break;
 		case PidTagRecipientTrackStatus:
@@ -2180,12 +2291,14 @@ bool MapiNote::propertiesPull()
 		MapiProperty property(m_properties[i]);
 
 		switch (property.tag()) {
+		case PidTagMessageClass:
 			// Sanity check the message class.
 			if (QLatin1String("IPM.Note") != property.value().toString()) {
 				// this one is not an appointment
 				return false;
 			}
-			case PidTagDisplayTo:
+			break;
+		case PidTagDisplayTo:
 			// Step 2. Add the DisplayTo items.
 			//
 			// Astonishingly, when we call recipientsPull() later,

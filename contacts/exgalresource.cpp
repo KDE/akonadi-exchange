@@ -88,14 +88,14 @@ void ExGalResource::retrieveItems(const Akonadi::Collection &collection)
 		// streaming mode.
 		fetchItems(collection, items, deletedItems);
 		itemsRetrievedIncremental(items, deletedItems);
-		kError() << "new/changed items:" << items.size() << "deleted items:" << deletedItems.size();
+		kDebug() << "new/changed items:" << items.size() << "deleted items:" << deletedItems.size();
 	}
 }
 
 void ExGalResource::retrieveGALItems(const QVariant &countVariant)
 {
 	qulonglong count = countVariant.toULongLong();
-	unsigned requestedCount = 100;
+	unsigned requestedCount = 300;
 	Item::List items;
 	Item::List deletedItems;
 
@@ -111,7 +111,7 @@ void ExGalResource::retrieveGALItems(const QVariant &countVariant)
 		item.setRemoteId(data.id);
 		item.setRemoteRevision(QString::number(1));
 
-		// prepare payload
+		// Prepare payload.
 		KABC::Addressee addressee;
 		addressee.setName(data.name);
 		addressee.setNickName(data.nick);
@@ -133,8 +133,11 @@ void ExGalResource::retrieveGALItems(const QVariant &countVariant)
 		items << item;
 	}
 	count += items.size();
-	kError() << "new items:" << count;
 	itemsRetrievedIncremental(items, deletedItems);
+	// TODO Exit early for debug only.
+	if (count > 3 * requestedCount) {
+		//requestedCount = items.size() + 1;
+	}
 	if ((unsigned)items.size() < requestedCount) {
 		// All done!
 		itemsRetrievalDone();
@@ -142,18 +145,55 @@ void ExGalResource::retrieveGALItems(const QVariant &countVariant)
 		// Go around again for more...
 		scheduleCustomTask(this, "retrieveGALItems", QVariant(count), ResourceBase::Append);
 	}
+	// Uncommenting this causes retrieveItem() to fail for Contacts...
+//	taskDone();
 }
 
-bool ExGalResource::retrieveItem( const Akonadi::Item &item, const QSet<QByteArray> &parts )
+// TODO: this method is called when Akonadi wants more data for a given item.
+// You can only provide the parts that have been requested but you are allowed
+// to provide all in one go
+bool ExGalResource::retrieveItem(const Akonadi::Item &itemOrig, const QSet<QByteArray> &parts)
 {
-  Q_UNUSED( item );
-  Q_UNUSED( parts );
+	Q_UNUSED(parts);
 
-  // TODO: this method is called when Akonadi wants more data for a given item.
-  // You can only provide the parts that have been requested but you are allowed
-  // to provide all in one go
+	kError() << "++++++++++++++ get item";
+	MapiContact *message = fetchItem<MapiContact>(itemOrig);
+	if (!message) {
+		return false;
+	}
+	kError() << "++++++++++++++ got item";
 
-  return true;
+	// Create a clone of the passed in Item and fill it with the payload
+	Akonadi::Item item(itemOrig);
+
+	// Prepare payload.
+	KABC::Addressee addressee;
+	addressee.setName(message->name);
+	addressee.setNickName(message->nick);
+	addressee.insertEmail(message->email, true);
+	addressee.setTitle(message->title);
+	addressee.setOrganization(message->organization);
+	addressee.insertPhoneNumber(KABC::PhoneNumber(message->phone, KABC::PhoneNumber::Work));
+	KABC::Address address(KABC::Address::Work);
+	address.setLocality(message->location);
+	addressee.insertAddress(address);
+	if (!message->displayType.isEmpty()) {
+		addressee.insertCategory(message->displayType);
+	}
+	if (!message->objectType.isEmpty()) {
+		addressee.insertCategory(message->objectType);
+	}
+
+	item.setPayload<KABC::Addressee>(addressee);
+
+	// TODO add further message properties.
+	//item.setModificationTime(message->modified);
+	delete message;
+
+	// Notify Akonadi about the new data.
+	itemRetrieved(item);
+	kError() << "++++++++++++++ set item";
+	return true;
 }
 
 void ExGalResource::aboutToQuit()
