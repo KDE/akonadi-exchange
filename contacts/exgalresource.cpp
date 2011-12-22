@@ -40,7 +40,9 @@
  */
 #define ID_BASE 36
 
-#define DEBUG_GAL_PROPERTIES 1
+#ifndef DEBUG_CONTACT_PROPERTIES
+#define DEBUG_CONTACT_PROPERTIES 0
+#endif
 
 using namespace Akonadi;
 
@@ -125,15 +127,15 @@ static QString mapiObjectType(unsigned type)
 }
 
 /**
- * The list of tags used to fetch data from the GAL. This list must be kept 
- * synchronised with the body of @ref preparePayload, with the notable exception
- * of PidTagMessageClass.
+ * The list of tags used to fetch data from the GAL or for a Contact. This list
+ * must be kept synchronised with the body of @ref preparePayload.
  *
  * This list is the superset of useful entries from [MS-NSPI] with the address
  * book objects as specified in that function, thus ensuring the best possible
  * unified experience.
  */
-static int galTags[] = {
+static int contactTagList[] = {
+	PidTagMessageClass,
 	PidTagDisplayName,
 	PidTagEmailAddress,
 	PidTagAddressType,
@@ -197,12 +199,15 @@ static int galTags[] = {
 	PidTagBirthday,
 	PidTagThumbnailPhoto,
 	0 };
+static SPropTagArray contactTags = {
+	(sizeof(contactTagList) / sizeof(contactTagList[0])) - 1,
+	(MAPITAGS *)contactTagList };
 
 /**
  * Take a set of properties, and attempt to apply them to the given addressee.
  * 
  * The switch statement at the heart of this routine must be kept synchronised
- * with the list in @ref galTags.
+ * with @ref contactTagList.
  *
  * @return false on error.
  */
@@ -241,7 +246,6 @@ static bool preparePayload(SPropValue *properties, unsigned propertyCount, KABC:
 		case PidTagMessageClass:
 			// Sanity check the message class.
 			if (QLatin1String("IPM.Contact") != property.value().toString()) {
-				// This one is not a contact.
 				kError() << "retreived item is not a contact:" << property.value().toString();
 				return false;
 			}
@@ -568,13 +572,10 @@ void ExGalResource::retrieveGALItems(const QVariant &countVariant)
 	unsigned requestedCount = 300;
 	Item::List items;
 	Item::List deletedItems;
-	static SPropTagArray tags = {
-		(sizeof(galTags) / sizeof(galTags[0])) - 1,
-		(MAPITAGS *)galTags };
 	struct SRowSet *results = NULL;
 
 	emit status(Running, i18n("Fetching GAL from Exchange"));
-	if (!m_connection->fetchGAL(count == 0, requestedCount, &tags, &results)) {
+	if (!m_connection->fetchGAL(count == 0, requestedCount, &contactTags, &results)) {
 		error(i18n("cannot fetch GAL from Exchange"));
 		return;
 	}
@@ -605,10 +606,12 @@ void ExGalResource::retrieveGALItems(const QVariant &countVariant)
 	MAPIFreeBuffer(results);
 	count += items.size();
 	itemsRetrievedIncremental(items, deletedItems);
-	// TODO Exit early for debug only.
+#if (DEBUG_CONTACT_PROPERTIES)
+	// Exit early for debug only.
 	if (count > 3 * requestedCount) {
-		//requestedCount = items.size() + 1;
+		requestedCount = items.size() + 1;
 	}
+#endif
 	if ((unsigned)items.size() < requestedCount) {
 		// All done!
 		emit status(Running, i18n("%1 GAL entries returned from Exchange", count));
@@ -636,10 +639,10 @@ bool ExGalResource::retrieveItem(const Akonadi::Item &itemOrig, const QSet<QByte
 	// Create a clone of the passed in Item and fill it with the payload.
 	Akonadi::Item item(itemOrig);
 	item.setPayload<KABC::Addressee>(*message);
-	delete message;
 
 	// Notify Akonadi about the new data.
 	itemRetrieved(item);
+	delete message;
 	return true;
 }
 
@@ -723,9 +726,15 @@ QDebug MapiContact::error() const
 
 bool MapiContact::propertiesPull()
 {
+#if (DEBUG_CONTACT_PROPERTIES)
 	if (!MapiMessage::propertiesPull()) {
 		return false;
 	}
+#else
+	if (!MapiMessage::propertiesPull(&contactTags)) {
+		return false;
+	}
+#endif
 
 	if (!preparePayload(m_properties, m_propertyCount, *this)) {
 		return false;

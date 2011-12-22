@@ -72,6 +72,11 @@ typedef enum
 } MapiDefaultFolder;
 
 /**
+ * Stringified errors.
+ */
+extern QString mapiError();
+
+/**
  * A very simple wrapper around a property.
  */
 class MapiProperty : private SPropValue
@@ -367,6 +372,8 @@ public:
 	 */
 	bool propertiesPull(QVector<int> &tags);
 
+	bool propertiesPull(SPropTagArray *tags);
+
 	/**
 	 * Fetch all properties.
 	 */
@@ -581,34 +588,6 @@ private:
 
 	static unsigned isGoodEmailAddress(QString &email);
 
-	virtual QDebug debug() const;
-	virtual QDebug error() const;
-};
-
-/**
- * An Email.
- */
-class MapiNote : public MapiMessage
-{
-public:
-	MapiNote(MapiConnector2 *connection, const char *tallocName, mapi_id_t folderId, mapi_id_t id);
-
-	/**
-	 * Fetch all note properties.
-	 */
-	virtual bool propertiesPull();
-
-	/**
-	 * Update a note item.
-	 */
-	virtual bool propertiesPush();
-
-	QString title;
-	QString text;
-	QString sender;
-	QDateTime created;
-
-private:
 	virtual QDebug debug() const;
 	virtual QDebug error() const;
 };

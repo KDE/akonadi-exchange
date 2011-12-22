@@ -32,13 +32,660 @@
 #include <Akonadi/AgentManager>
 #include <Akonadi/ItemFetchJob>
 #include <Akonadi/ItemFetchScope>
+#include <akonadi/kmime/messageflags.h>
 #include <akonadi/kmime/messageparts.h>
 #include <kmime/kmime_message.h>
+#include <kpimutils/email.h>
 
 #include "mapiconnector2.h"
 #include "profiledialog.h"
 
+/**
+ * Display ids in the same format we use when stored in Akonadi.
+ */
+#define ID_BASE 36
+
+#ifndef DEBUG_NOTE_PROPERTIES
+#define DEBUG_NOTE_PROPERTIES 1
+#endif
+
 using namespace Akonadi;
+
+/**
+ * An Email.
+ */
+class MapiNote : public MapiMessage, public KMime::Message
+{
+public:
+	MapiNote(MapiConnector2 *connection, const char *tallocName, mapi_id_t folderId, mapi_id_t id);
+
+	virtual ~MapiNote();
+
+	/**
+	 * Fetch all note properties.
+	 */
+	virtual bool propertiesPull();
+
+	/**
+	 * Update a note item.
+	 */
+	virtual bool propertiesPush();
+
+private:
+	virtual QDebug debug() const;
+	virtual QDebug error() const;
+
+	bool preparePayload();
+
+	/**
+	 * Dump a change to a header.
+	 */
+	void dumpChange(KMime::Headers::Base *header, const char *item, MapiProperty &property);
+	void dumpChange(KMime::Headers::Base *header, const char *item, MapiProperty &property, QString &value);
+
+	mapi_object_t m_attachments;
+	mapi_object_t m_attachment;
+	mapi_object_t m_stream;
+};
+
+/**
+ * Add an attendee to the list. We:
+ *
+ *  1. Check whether the name has an embedded email address, and if it does
+ *     use it (if it is better than the one we have).
+ *
+ *  2. If the name matches an existing entry in the list, just pick the
+ *     better email address.
+ *
+ *  3. If the email matches, just pick the better name.
+ *
+ * Otherwise, we have a new entry.
+ */
+static unsigned isGoodEmailAddress(QString &email)
+{
+	static QChar at(QChar::fromAscii('@'));
+	static QChar x500Prefix(QChar::fromAscii('/'));
+
+	// Anything is better than an empty address!
+	if (email.isEmpty()) {
+		return 0;
+	}
+
+	// KDEPIM does not currently handle anything like this:
+	//
+	// "/O=CISCO SYSTEMS/OU=FIRST ADMINISTRATIVE GROUP/CN=RECIPIENTS/CN=name"
+	//
+	// but for the user, it is still better than nothing, so we give it a
+	// low priority.
+	if (email[0] == x500Prefix) {
+		return 1;
+	}
+
+	// An @ sign is better than no @ sign.
+	if (!email.contains(at)) {
+		return 2;
+	} else {
+		return 3;
+	}
+}
+
+static void parseEmail(QString &candidate, QString &email, QString &name)
+{
+	// See if we can deduce a better email address from the name than we 
+	// have in the explicit value. Look for the last possible starting 
+	// delimiter, and work forward from there. Thus:
+	//
+	//       "blah (blah) <blah> <result>"
+	//
+	// should return "result". Note that we don't remove this from the name
+	// so as to give the resolution process as much to work with as possible.
+	static QRegExp firstRE(QString::fromAscii("[(<]"));
+	static QRegExp lastRE(QString::fromAscii("[)>]"));
+
+	candidate = candidate.trimmed();
+	int first = candidate.lastIndexOf(firstRE);
+	int last = candidate.indexOf(lastRE, first);
+
+	name = candidate;
+	kError() << "parsing" << candidate << email << name;
+	if ((first > -1) && (last > first + 1)) {
+		QString mid = candidate.mid(first + 1, last - first - 1);
+		if (isGoodEmailAddress(email) < isGoodEmailAddress(mid)) {
+			email = mid;
+		}
+	}
+#if 0
+	for (int i = 0; i < list.size(); i++) {
+		KMime::Types::Mailbox &entry = list[i];
+
+		// If we find a name match, fill in a missing email if we can.
+		if (!name.isEmpty() && (entry.name() == name)) {
+			if (isGoodEmailAddress(entry.email()) < isGoodEmailAddress(email)) {
+				entry.email = email;
+				return;
+			}
+		}
+
+		// If we find an email match, fill in a missing name if we can.
+		if (!email.isEmpty() && (entry.email == email)) {
+			if (entry.name.length() < name.length()) {
+				entry.name = name;
+				return;
+			}
+		}
+	}
+
+	// Add the entry if it did not match.
+	list.append(candidate);
+#endif
+}
+
+
+/**
+ * The list of tags used to fetch a Note.
+ */
+static int noteTagList[] = {
+	PidTagMessageClass,
+	PidTagDisplayTo,
+	PidTagConversationTopic,
+	PidTagBody,
+	0 };
+static SPropTagArray noteTags = {
+	(sizeof(noteTagList) / sizeof(noteTagList[0])) - 1,
+	(MAPITAGS *)noteTagList };
+
+
+/**
+ * The list of tags used to fetch an attachment.
+ */
+static int attachmentTagList[] = {
+	PidTagAttachNumber,
+	PidTagRenderingPosition,
+	PidTagAttachMimeTag,
+	PidTagAttachMethod,
+	PidTagAttachLongFilename,
+	PidTagAttachFilename,
+	PidTagAttachSize,
+	PidTagAttachDataBinary,
+	PidTagAttachDataObject,
+	0 };
+static SPropTagArray attachmentTags = {
+	(sizeof(attachmentTagList) / sizeof(attachmentTagList[0])) - 1,
+	(MAPITAGS *)attachmentTagList };
+
+	
+/**
+ * Take a set of properties, and attempt to apply them to the given addressee.
+ * 
+ * The switch statement at the heart of this routine must be kept synchronised
+ * with @ref noteTagList.
+ *
+ * @return false on error.
+ */
+void MapiNote::dumpChange(KMime::Headers::Base *header, const char *item, MapiProperty &property)
+{
+	if (header) {
+		error() << "change" << item << header->asUnicodeString() << "using" << tagName(property.tag()) << property.value().toString();
+	}
+}
+void MapiNote::dumpChange(KMime::Headers::Base *header, const char *item, MapiProperty &property, QString &value)
+{
+	if (header) {
+		error() << "change" << item << header->asUnicodeString() << "using" << tagName(property.tag()) << value;
+	}
+}
+
+bool MapiNote::preparePayload()
+{
+/*
+	QString title;
+	QString text;
+	QString sender;
+	QDateTime created;
+
+	
+	QStringList displayTo;
+*/
+	bool hasAttachments = false;
+	unsigned index;
+	KMime::Content *body;
+
+	// First set the header content, and parse what we can from it. Note
+	// this anything beyond the header will return the last value only. For
+	// example, this will result in a contentType of "text/html" instead of
+	// "multipart/alternative":
+	//
+	// Content-Type: multipart/alternative;^M
+	// boundary="----_=_NextPart_001_01CC9A5A.689896D8"^M
+	// Subject: ...^M
+	// ...
+	// Return-Path: owner-build-guru@mtv-core-1.cisco.com^M
+	// ^M
+	// ------_=_NextPart_001_01CC9A5A.689896D8^M
+	// Content-Type: text/plain;^M
+	//         charset="US-ASCII"^M
+	// Content-Transfer-Encoding: quoted-printable^M
+	// ^M
+	// ------_=_NextPart_001_01CC9A5A.689896D8^M
+	// Content-Type: text/html;^M
+	//         charset="US-ASCII"^M
+	if (UINT_MAX > (index = propertyFind(PidTagTransportMessageHeaders))) {
+		//setHead(propertyAt(index).value().toString().toUtf8());
+		//parse();
+	}
+	kError() << "+++++++++ before" << contentType()->asUnicodeString();
+	// Walk through the properties and extract the values of interest. The
+	// properties here should be aligned with the list pulled above.
+	for (unsigned i = 0; i < m_propertyCount; i++) {
+		MapiProperty property(m_properties[i]);
+		QString email;
+		QString name;
+
+		switch (property.tag()) {
+		case PidTagMessageClass:
+			// Sanity check the message class.
+			if ((QLatin1String("IPM.Note") != property.value().toString()) &&
+				(QLatin1String("Remote.IPM.Note") != property.value().toString())){
+				kError() << "retrieved item is not an email or a header:" << property.value().toString();
+				return false;
+			}
+			break;
+		// 2.2.2.3
+		case PidTagCreationTime:
+			dumpChange(date(true), "date", property);
+			date()->setDateTime(KDateTime(property.value().toDateTime()));
+			break;
+		case PidTagTransportMessageHeaders:
+			kError() << "headers:" << property.value().toString();
+			setHead(property.value().toString().toUtf8());
+	kError() << "+++++++++ before parse" << contentType()->asUnicodeString();
+	//parse();
+	kError() << "+++++++++ after parse" << contentType()->asUnicodeString();
+			break;
+		case PidTagBody:
+			kError() << "text body:" << property.value().toString();
+			body = new KMime::Content;
+			body->contentType()->setMimeType("text/plain");
+			body->setBody(property.value().toString().toUtf8());
+			addContent(body);
+			break;
+		case PidTagHtml:
+			kError() << "html body:" << property.value().toString();
+			body = new KMime::Content;
+			body->contentType()->setMimeType("text/html");
+			body->setBody(property.value().toString().toUtf8());
+			addContent(body);
+			break;
+		case PidTagHasAttachments:
+			hasAttachments = true;
+			break;
+		case PidTagSentRepresentingName:
+			dumpChange(replyTo(), "replyTo", property);
+			KPIMUtils::extractEmailAddressAndName(property.value().toString(), email, name);
+			replyTo()->addAddress(email.toUtf8(), name);
+			break;
+/*
+		case PidTagSentRepresentingAddressType:
+			sentRepresentingAddressType = property.value().toString();
+			break;
+		case PidTagSentRepresentingEmailAddress:
+			sentRepresentingEmail = property.value().toString();
+			break;
+*/
+		case PidTagSenderName:
+			dumpChange(sender(), "sender", property);
+			KPIMUtils::extractEmailAddressAndName(property.value().toString(), email, name);
+			sender()->addAddress(email.toUtf8(), name);
+			break;
+/*
+		case PidTagSenderAddressType:
+			senderAddressType = property.value().toString();
+			break;
+		case PidTagSenderEmailAddress:
+			senderEmail = property.value().toString();
+			break;
+*/
+
+		case PidTagDisplayTo:
+			foreach (QString displayTo, property.value().toString().split(QChar::fromAscii(';'))) {
+				dumpChange(to(), "to", property, displayTo);
+				if (!KPIMUtils::extractEmailAddressAndName(displayTo, email, name))
+				{
+				kError() << "pre-parsed" << email << name;
+					parseEmail(displayTo, email, name);
+				}
+				kError() << "parsed" << email << name;
+				to()->addAddress(email.toUtf8(), name);
+			}
+			break;
+
+		case PidTagConversationTopic:
+			if (!subject() || subject()->isEmpty()) {
+				dumpChange(subject(true), "subject", property);
+				subject()->fromUnicodeString(property.value().toString(), "utf-8");
+			}
+			break;
+		case PidTagOriginalSubject:
+			dumpChange(subject(true), "subject", property);
+			subject()->fromUnicodeString(property.value().toString(), "utf-8");
+			break;
+
+			
+		case PidTagInternetMessageId:
+			//dumpChange(messageID(true), "messageID", property);
+			messageID()->fromUnicodeString(property.value().toString(), "utf-8");
+			break;
+		case PidTagInternetReferences:
+			//dumpChange(references(true), "references", property);
+			references()->fromUnicodeString(property.value().toString(), "utf-8");
+			break;
+
+			
+/*
+		case PidTagSubject:
+			break;
+			
+PidTagCreationTime (section 2.2.2.3)
+
+PidTagLastModificationTime (section 2.2.2.2)
+
+PidTagLastModifierName ([MS-OXCPRPT] section 2.2.1.5)
+
+PidTagObjectType ([MS-OXCPRPT] section 2.2.1.7)
+
+
+
+
+2.2.1.2 PidTagHasAttachments Property
+
+
+2.2.1.4 PidTagMessageCodepage Property
+
+2.2.1.5 PidTagMessageLocaleId Property
+
+2.2.1.6 PidTagMessageFlags Property
+
+2.2.1.7 PidTagMessageSize Property
+
+2.2.1.8 PidTagMessageStatus Property
+
+2.2.1.9 PidTagSubjectPrefix Property
+
+2.2.1.10 PidTagNormalizedSubject Property
+
+2.2.1.11 PidTagImportance Property
+
+2.2.1.12 PidTagPriority Property
+
+2.2.1.13 PidTagSensitivity Property
+
+2.2.1.14 PidLidSmartNoAttach Property
+
+2.2.1.15 PidLidPrivate Property
+
+2.2.1.16 PidLidSideEffects Property
+
+2.2.1.17 PidNameKeywords Property
+
+2.2.1.18 PidLidCommonStart Property
+
+2.2.1.19 PidLidCommonEnd Property
+
+2.2.1.20 PidTagAutoForwarded Property
+
+2.2.1.21 PidTagAutoForwardComment Property
+
+2.2.1.22 PidLidCategories Property
+
+2.2.1.23 PidLidClassification
+
+2.2.1.24 PidLidClassificationDescription Property
+
+2.2.1.25 PidLidClassified Property
+
+2.2.1.26 PidTagInternetReferences Property
+
+2.2.1.27 PidLidInfoPathFormName Property
+
+2.2.1.28 PidTagMimeSkeleton Property
+
+2.2.1.29 PidTagTnefCorrelationKey Property
+
+2.2.1.30 PidTagAddressBookDisplayNamePrintable Property
+
+2.2.1.31 PidTagCreatorEntryId Property
+
+2.2.1.32 PidTagLastModifierEntryId Property
+
+2.2.1.33 PidLidAgingDontAgeMe Property
+
+2.2.1.34 PidLidCurrentVersion Property
+
+2.2.1.35 PidLidCurrentVersionName Property
+
+2.2.1.36 PidTagAlternateRecipientAllowed Property
+
+2.2.1.37 PidTagResponsibility Property
+
+2.2.1.38 PidTagRowid Property
+
+2.2.1.39 PidTagHasNamedProperties Property
+
+2.2.1.40 PidTagRecipientOrder Property
+
+2.2.1.41 PidNameContentBase Property
+
+2.2.1.42 PidNameAcceptLanguage Property
+
+2.2.1.43 PidTagPurportedSenderDomain Property
+
+2.2.1.44 PidTagStoreEntryId Property
+
+2.2.1.45 PidTagTrustSender
+
+2.2.1.46  Property
+
+2.2.1.47 PidTagMessageRecipients Property
+
+2.2.1.48 Body Properties
+
+2.2.1.49 Contact Linking Properties
+
+2.2.1.50 Retention and Archive Properties
+
+*/
+
+
+
+/*
+			text = property.value().toString();
+			break;
+		case PidTagCreationTime:
+			created = property.value().toDateTime();
+			break;
+*/
+		default:
+#if (DEBUG_NOTE_PROPERTIES)
+			debug() << "ignoring note property:" << tagName(property.tag()) << property.toString();
+#endif
+			break;
+		}
+	}
+	kError() << "kErr !!!!!!!!!!!! has attachments:" << hasAttachments; 
+	if (!hasAttachments) {
+		return true;
+	}
+	if (MAPI_E_SUCCESS != GetAttachmentTable(&m_object, &m_attachments)) {
+		error() << "cannot get attachment table:" << mapiError();
+		return false;
+	}
+	error() << "eErr got attachment table";
+	if (MAPI_E_SUCCESS != SetColumns(&m_attachments, &attachmentTags)) {
+		error() << "cannot set attachment table columns:" << mapiError();
+		return false;
+	}
+	error() << "eErr set cols table";
+
+	while (true) {
+		// Get current cursor position.
+		uint32_t cursor;
+		if (MAPI_E_SUCCESS != QueryPosition(&m_attachments, NULL, &cursor)) {
+			error() << "cannot query attachments position:" << mapiError();
+			return false;
+		}
+		// Iterate through sets of rows.
+		SRowSet rowset;
+
+		error() << "get attachments from row:" << cursor;
+		if (MAPI_E_SUCCESS != QueryRows(&m_attachments, cursor, TBL_ADVANCE, &rowset)) {
+			error() << "cannot query attachments" << mapiError();
+			return false;
+		}
+		if (!rowset.cRows) {
+			error() << "attachment count" << cursor;
+			break;
+		}
+		error() << "got rows" << rowset.cRows;
+		for (unsigned i = 0; i < rowset.cRows; i++) {
+			SRow &row = rowset.aRow[i];
+			unsigned number = 0;
+			unsigned renderingPosition = 0;
+			QString mimeTag;
+			QString file;
+			unsigned method = 0;
+			unsigned dataSize;
+
+			for (unsigned j = 0; j < row.cValues; j++) {
+				MapiProperty property(row.lpProps[j]); 
+
+				// Note that the set of properties fetched here must be aligned
+				// with those set above.
+				switch (property.tag()) {
+				case PidTagAttachNumber: 
+					number = property.value().toUInt();
+					break;
+				case PidTagRenderingPosition: 
+					renderingPosition = property.value().toUInt();
+					break;
+				case PidTagAttachMimeTag: 
+					mimeTag = property.value().toString();
+					break;
+				case PidTagAttachLongFilename: 
+					file = property.value().toString();
+					break;
+				case PidTagAttachFilename:
+					if (file.isEmpty()) {
+						file = property.value().toString();
+					}
+					break;
+				case PidTagAttachMethod: 
+					method = property.value().toUInt();
+					break;
+				case PidTagAttachSize: 
+					dataSize = property.value().toUInt();
+					error() << "read data size" << dataSize;
+					break;
+				case PidTagAttachDataBinary: 
+					break;
+				case PidTagAttachDataObject: 
+					break;
+				default:
+					debug() << "ignoring attachment property:" << tagName(property.tag()) << property.toString();
+					break;
+				}
+			}
+
+			QByteArray attachment;
+			unsigned offset;
+			uint16_t readSize;
+			debug() << "attachment method:" << method;
+			switch (method)
+			{
+			case 1:
+				if (MAPI_E_SUCCESS != OpenAttach(&m_object, number, &m_attachment)) {
+					error() << "cannot open attachment" << mapiError();
+					return false;
+				}
+				if (MAPI_E_SUCCESS != OpenStream(&m_attachment, (MAPITAGS)PidTagAttachDataBinary, OpenStream_ReadOnly, &m_stream)) {
+					error() << "cannot open stream" << mapiError();
+					return false;
+				}
+				if (MAPI_E_SUCCESS != GetStreamSize(&m_stream, &dataSize)) {
+					error() << "cannot get stream size" << mapiError();
+					return false;
+				}
+				error() << "fetched stream size" << dataSize;
+				attachment.reserve(dataSize);
+				offset = 0;
+				do {
+					if (MAPI_E_SUCCESS != ReadStream(&m_stream, (uchar *)attachment.data() + offset, 1024, &readSize)) {
+						error() << "cannot read stream" << mapiError();
+						return false;
+					}
+					offset += readSize;
+				} while (readSize && (offset < dataSize));
+				attachment.resize(dataSize);
+				error() << "stream attachment size:" << attachment.size();
+				body = new KMime::Content;
+				body->contentType()->setMimeType(mimeTag.toUtf8());
+				if (!file.isEmpty()) {
+					body->contentDescription(true)->fromUnicodeString(file, "utf-8");
+				}
+				body->setBody(attachment);
+				addContent(body);
+				break;
+			case 5:
+				error() << "PidTagAttachDataBinary" << propertyFind(PidTagAttachDataBinary);
+				error() << "PidTagAttachDataObject" << propertyFind(PidTagAttachDataObject);
+				error() << "PidTagAttachDataBinary_Error" << propertyFind(PidTagAttachDataBinary_Error);
+				error() << "PidTagAttachDataObject_Error" << propertyFind(PidTagAttachDataObject_Error);
+				
+				if (UINT_MAX > (index = propertyFind(PidTagAttachDataBinary))) {
+					attachment = propertyAt(index).toByteArray();
+				error() << mimeTag << "attachment object:" << attachment.toHex();
+				} else {
+					if (MAPI_E_SUCCESS != OpenAttach(&m_object, number, &m_attachment)) {
+						error() << "cannot open attachment" << mapiError();
+						return false;
+					}
+					if (MAPI_E_SUCCESS != OpenStream(&m_attachment, (MAPITAGS)PidTagAttachDataObject, OpenStream_ReadOnly, &m_stream)) {
+						error() << "cannot open stream" << mapiError();
+						return false;
+					}
+					if (MAPI_E_SUCCESS != GetStreamSize(&m_stream, &dataSize)) {
+						error() << "cannot get stream size" << mapiError();
+						return false;
+					}
+					attachment.reserve(dataSize);
+					offset = 0;
+					do {
+						if (MAPI_E_SUCCESS != ReadStream(&m_stream, (uchar *)attachment.data() + offset, 1024, &readSize)) {
+							error() << "cannot read stream" << mapiError();
+							return false;
+						}
+						offset += readSize;
+					} while (readSize && (offset < dataSize));
+					attachment.resize(dataSize);
+					error() << mimeTag << "binary attachment size:" << attachment.size();
+				}
+				kError() << mimeTag << "attachment object:" << attachment.toHex();
+				body = new KMime::Content;
+				body->contentType()->setMimeType(mimeTag.toUtf8());
+				if (!file.isEmpty()) {
+					body->contentDescription(true)->fromUnicodeString(file, "utf-8");
+				}
+				body->setBody(attachment);
+				addContent(body);
+				break;
+			default:
+				error() << "ignoring attachment method:" << method;
+				break;
+			}
+		}
+	}
+	assemble();
+	return true;
+}
 
 ExMailResource::ExMailResource(const QString &id) :
 	MapiResource(id, i18n("Exchange Mail"), IPF_NOTE, "IPM.Note", KMime::Message::mimeType())
@@ -72,6 +719,11 @@ void ExMailResource::retrieveItems(const Akonadi::Collection &collection)
 	
 	fetchItems(collection, items, deletedItems);
 	kError() << "new/changed items:" << items.size() << "deleted items:" << deletedItems.size();
+#if (DEBUG_NOTE_PROPERTIES)
+	while (items.size() > 3) {
+		items.removeLast();
+	}
+#endif
 	itemsRetrievedIncremental(items, deletedItems);
 }
 
@@ -83,6 +735,8 @@ bool ExMailResource::retrieveItem(const Akonadi::Item &itemOrig, const QSet<QByt
 	if (!message) {
 		return false;
 	}
+
+	KMime::Message::Ptr ptr(message);
 
 	// Create a clone of the passed in const Item and fill it with the payload.
 	Akonadi::Item item(itemOrig);
@@ -103,10 +757,13 @@ bool ExMailResource::retrieveItem(const Akonadi::Item &itemOrig, const QSet<QByt
 	if (KMime::hasAttachment(message.get())) {
 		item.setFlag(Akonadi::MessageFlags::HasAttachment);
 	}
-*/
 	// TODO add further message properties.
 //	item.setModificationTime(message->modified);
-	delete message;
+*/
+	item.setPayload<KMime::Message::Ptr>(ptr);
+
+	// Not needed!
+	//delete message;
 
 	// Notify Akonadi about the new data.
 	itemRetrieved(item);
@@ -260,6 +917,94 @@ void ExMailResource::itemRemoved( const Akonadi::Item &item )
 
   // NOTE: There is an equivalent method for collections, but it isn't part
   // of this template code to keep it simple
+}
+
+MapiNote::MapiNote(MapiConnector2 *connector, const char *tallocName, mapi_id_t folderId, mapi_id_t id) :
+	MapiMessage(connector, tallocName, folderId, id)
+{
+	mapi_object_init(&m_attachments);
+	mapi_object_init(&m_attachment);
+	mapi_object_init(&m_stream);
+}
+
+MapiNote::~MapiNote()
+{
+	mapi_object_release(&m_stream);
+	mapi_object_release(&m_attachment);
+	mapi_object_release(&m_attachments);
+}
+
+QDebug MapiNote::debug() const
+{
+	static QString prefix = QString::fromAscii("MapiNote: %1/%2:");
+	return MapiObject::debug(prefix.arg(m_folderId, 0, ID_BASE).arg(m_id, 0, ID_BASE)) /*<< title*/;
+}
+
+QDebug MapiNote::error() const
+{
+	static QString prefix = QString::fromAscii("MapiNote: %1/%2");
+	return MapiObject::error(prefix.arg(m_folderId, 0, ID_BASE).arg(m_id, 0, ID_BASE)) /*<< title*/;
+}
+
+bool MapiNote::propertiesPull()
+{
+#if (DEBUG_NOTE_PROPERTIES)
+	if (!MapiMessage::propertiesPull()) {
+		return false;
+	}
+#else
+	if (!MapiMessage::propertiesPull(&noteTags)) {
+		return false;
+	}
+#endif
+
+	if (!preparePayload()) {
+		return false;
+	}
+	return true;
+}
+
+bool MapiNote::propertiesPush()
+{
+	// Overwrite all the fields we know about.
+#if 0
+	if (!propertyWrite(PidTagConversationTopic, title)) {
+		return false;
+	}
+	if (!propertyWrite(PidTagBody, text)) {
+		return false;
+	}
+	if (!propertyWrite(PidTagCreationTime, created)) {
+		return false;
+	}
+	if (!MapiMessage::propertiesPush()) {
+		return false;
+	}
+	debug() << "************  OpenFolder";
+	if (!OpenFolder(&m_store, folder.id(), folder.d())) {
+		error() << "cannot open folder" << folderID
+			<< ", error:" << mapiError();
+		return false;
+        }
+	debug() << "************  SaveChangesMessage";
+	if (!SaveChangesMessage(folder.d(), message.d(), KeepOpenReadWrite)) {
+		error() << "cannot save message" << messageID << "in folder" << folderID
+			<< ", error:" << mapiError();
+		return false;
+	}
+	debug() << "************  SubmitMessage";
+	if (MAPI_E_SUCCESS != SubmitMessage(&m_object)) {
+		error() << "cannot submit message, error:" << mapiError();
+		return false;
+	}
+	struct mapi_SPropValue_array replyProperties;
+	debug() << "************  TransportSend";
+	if (MAPI_E_SUCCESS != TransportSend(&m_object, &replyProperties)) {
+		error() << "cannot send message, error:" << mapiError();
+		return false;
+	}
+#endif
+	return true;
 }
 
 AKONADI_RESOURCE_MAIN( ExMailResource )

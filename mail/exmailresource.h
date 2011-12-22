@@ -50,6 +50,9 @@ private Q_SLOTS:
 	 * Completion handler for itemChanged().
 	 */
 	void itemChangedContinue(KJob* job);
+
+private:
+	bool retrieveAttachments(MapiMessage *message);
 };
 
 #endif

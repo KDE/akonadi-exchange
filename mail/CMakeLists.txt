@@ -21,6 +21,7 @@ kde4_add_executable(akonadi_exmail_resource RUN_UNINSTALLED ${exmailresource_SRC
 target_link_libraries(akonadi_exmail_resource 
 					${KDE4_AKONADI_LIBS} 
 					${KDEPIMLIBS_KMIME_LIBS}
+					${KDEPIMLIBS_KPIMUTILS_LIBS}
 					${LIBMAPI_LIBRARY}
 					${LIBDCERPC_LIBRARY}
 					${QT_QTCORE_LIBRARY} 
