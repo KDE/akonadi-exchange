@@ -53,9 +53,6 @@ case unicode: \
  * Set this to 1 to pull all the properties, e.g. to see what a server has
  * available.
  */
-#ifndef DEBUG_APPOINTMENT_PROPERTIES
-#define DEBUG_APPOINTMENT_PROPERTIES 0
-#endif
 #ifndef DEBUG_MESSAGE_PROPERTIES
 #define DEBUG_MESSAGE_PROPERTIES 0
 #endif
@@ -195,362 +192,6 @@ unsigned isGoodEmailAddress(QString &email)
 	} else {
 		return 3;
 	}
-}
-
-MapiAppointment::MapiAppointment(MapiConnector2 *connector, const char *tallocName, mapi_id_t folderId, mapi_id_t id) :
-	MapiMessage(connector, tallocName, folderId, id)
-{
-}
-
-void MapiAppointment::addUniqueAttendee(Recipient &candidate)
-{
-	attendees.append(Attendee(candidate));
-}
-
-QDebug MapiAppointment::debug() const
-{
-	static QString prefix = QString::fromAscii("MapiAppointment: %1/%2:");
-	return MapiObject::debug(prefix.arg(m_folderId, 0, ID_BASE).arg(m_id, 0, ID_BASE)) /*<< title*/;
-}
-
-QDebug MapiAppointment::error() const
-{
-	static QString prefix = QString::fromAscii("MapiAppointment: %1/%2:");
-	return MapiObject::error(prefix.arg(m_folderId, 0, ID_BASE).arg(m_id, 0, ID_BASE)) /*<< title*/;
-}
-
-bool MapiAppointment::debugRecurrencyPattern(RecurrencePattern *pattern)
-{
-	// do the actual work
-	debug() << "-- Recurrency debug output [BEGIN] --";
-	switch (pattern->RecurFrequency) {
-	case RecurFrequency_Daily:
-		debug() << "Fequency: daily";
-		break;
-	case RecurFrequency_Weekly:
-		debug() << "Fequency: weekly";
-		break;
-	case RecurFrequency_Monthly:
-		debug() << "Fequency: monthly";
-		break;
-	case RecurFrequency_Yearly:
-		debug() << "Fequency: yearly";
-		break;
-	default:
-		debug() << "unsupported frequency:"<<pattern->RecurFrequency;
-		return false;
-	}
-
-	switch (pattern->PatternType) {
-	case PatternType_Day:
-		debug() << "PatternType: day";
-		break;
-	case PatternType_Week:
-		debug() << "PatternType: week";
-		break;
-	case PatternType_Month:
-		debug() << "PatternType: month";
-		break;
-	default:
-		debug() << "unsupported patterntype:"<<pattern->PatternType;
-		return false;
-	}
-
-	debug() << "Calendar:" << pattern->CalendarType;
-	debug() << "FirstDateTime:" << pattern->FirstDateTime;
-	debug() << "Period:" << pattern->Period;
-	if (pattern->PatternType == PatternType_Month) {
-		debug() << "PatternTypeSpecific:" << pattern->PatternTypeSpecific.Day;
-	} else if (pattern->PatternType == PatternType_Week) {
-		debug() << "PatternTypeSpecific:" << QString::number(pattern->PatternTypeSpecific.WeekRecurrencePattern, 2);
-	}
-
-	switch (pattern->EndType) {
-		case END_AFTER_DATE:
-			debug() << "EndType: after date";
-			break;
-		case END_AFTER_N_OCCURRENCES:
-			debug() << "EndType: after occurenc count";
-			break;
-		case END_NEVER_END:
-			debug() << "EndType: never";
-			break;
-		default:
-			debug() << "unsupported endtype:"<<pattern->EndType;
-			return false;
-	}
-	debug() << "OccurencCount:" << pattern->OccurrenceCount;
-	debug() << "FirstDOW:" << pattern->FirstDOW;
-	debug() << "Start:" << pattern->StartDate;
-	debug() << "End:" << pattern->EndDate;
-	debug() << "-- Recurrency debug output [END] --";
-
-	return true;
-}
-
-/**
- * We collect recipients as well as properties. The recipients are pulled from
- * multiple sources, but need to go through a resolution process to fix them up.
- * The duplicates will disappear as part of the resolution process. The logic
- * looks like this:
- *
- *  1. Read the RecipientsTable.
- *
- *  2. Add in the contents of the DisplayTo tag (Exchange can return records
- *     from Step 1 with no name or email).
- *
- *  3. Add in the sent-representing values (also not in Step 1, and not clear
- *     if it is guaranteed to be in step 2 as well).
- *
- * That results in a whole lot of duplication as well as bringing in the missing
- * items. So then, there is a whole lot of work to resolve things:
- *
- *  - For anything we get from 1, 2 and 3 (mostly 2 and 3, but also 1) try hard
- *    to get an email address. Whenever I find one, I compare the "quality" of
- *    the address against what we already have, and keep the best one.
- *
- *  - For all but the best quality addresses, call ResolveNames. Again, keep
- *    the best value seen.
- *
- *  - For those that are left, wing-it.
- *
- * There is also a load of cruft data elimination along the way.
- */
-bool MapiAppointment::propertiesPull(QVector<int> &tags, const bool tagsAppended)
-{
-	/**
-	 * The list of tags used to fetch an Appointment.
-	 */
-	static int ourTagList[] = {
-		PidTagMessageClass,
-		PidTagDisplayTo,
-		PidTagConversationTopic,
-		PidTagBody,
-		PidTagLastModificationTime,
-		PidTagCreationTime,
-		PidTagStartDate,
-		PidTagEndDate,
-		PidLidLocation,
-		PidLidReminderSet,
-		PidLidReminderSignalTime,
-		PidLidReminderDelta,
-		PidLidRecurrenceType,
-		PidLidAppointmentRecur,
-
-		PidTagSentRepresentingEmailAddress,
-		PidTagSentRepresentingEmailAddress_string8,
-
-		PidTagSentRepresentingName,
-		PidTagSentRepresentingName_string8,
-
-		PidTagSentRepresentingSimpleDisplayName,
-		PidTagSentRepresentingSimpleDisplayName_string8,
-
-		PidTagOriginalSentRepresentingEmailAddress,
-		PidTagOriginalSentRepresentingEmailAddress_string8,
-
-		PidTagOriginalSentRepresentingName,
-		PidTagOriginalSentRepresentingName_string8,
-		0 };
-	static SPropTagArray ourTags = {
-		(sizeof(ourTagList) / sizeof(ourTagList[0])) - 1,
-		(MAPITAGS *)ourTagList };
-
-	if (!tagsAppended) {
-		for (unsigned i = 0; i < ourTags.cValues; i++) {
-			int newTag = ourTags.aulPropTag[i];
-			
-			if (!tags.contains(newTag)) {
-				tags.append(newTag);
-			}
-		}
-	}
-	if (!MapiMessage::propertiesPull(tags, tagsAppended)) {
-		return false;
-	}
-
-	// Start with a clean slate.
-	reminderActive = false;
-	attendees.clear();
-
-	foreach (Recipient attendee, recipients()) {
-		addUniqueAttendee(attendee);
-	}
-	debug() << "attendees after resolution:" << attendees.size();
-
-	// Walk through the properties and extract the values of interest. The
-	// properties here should be aligned with the list pulled above.
-	unsigned recurrenceType = 0;
-	RecurrencePattern *pattern = 0;
-
-	for (unsigned i = 0; i < m_propertyCount; i++) {
-		MapiProperty property(m_properties[i]);
-
-		switch (property.tag()) {
-		case PidTagMessageClass:
-			// Sanity check the message class.
-			if (QLatin1String("IPM.Appointment") != property.value().toString()) {
-				// this one is not an appointment
-				return false;
-			}
-			break;
-		case PidTagConversationTopic:
-			title = property.value().toString();
-			break;
-		case PidTagBody:
-			text = property.value().toString();
-			break;
-		case PidTagLastModificationTime:
-			modified = property.value().toDateTime();
-			break;
-		case PidTagCreationTime:
-			created = property.value().toDateTime();
-			break;
-		case PidTagStartDate:
-			begin = property.value().toDateTime();
-			break;
-		case PidTagEndDate:
-			end = property.value().toDateTime();
-			break;
-		case PidLidLocation:
-			location = property.value().toString();
-			break;
-		case PidLidReminderSet:
-			reminderActive = property.value().toInt();
-			break;
-		case PidLidReminderSignalTime:
-			reminderTime = property.value().toDateTime();
-			break;
-		case PidLidReminderDelta:
-			reminderMinutes = property.value().toInt();
-			break;
-		case PidLidRecurrenceType:
-			recurrenceType = property.value().toInt();
-			break;
-		case PidLidAppointmentRecur:
-			pattern = get_RecurrencePattern(ctx(), &m_properties[i].value.bin);
-			break;
-		default:
-#if (DEBUG_APPOINTMENT_PROPERTIES)
-			debug() << "ignoring appointment property:" << tagName(property.tag()) << property.value();
-#endif
-			break;
-		}
-	}
-
-	// Is there a recurrance type set?
-	if (recurrenceType != 0) {
-		if (pattern) {
-			debugRecurrencyPattern(pattern);
-			recurrency.setData(pattern);
-		} else {
-			// TODO This should not happen. PidLidRecurrenceType says this is a recurring event, so why is there no PidLidAppointmentRecur???
-			debug() << "missing recurrencePattern";
-			return false;
-		}
-	}
-	return true;
-}
-
-bool MapiAppointment::propertiesPull()
-{
-	static bool tagsAppended = false;
-	static QVector<int> tags;
-
-	if (!propertiesPull(tags, tagsAppended)) {
-		tagsAppended = true;
-		return false;
-	}
-	tagsAppended = true;
-	return true;
-}
-
-bool MapiAppointment::propertiesPush()
-{
-	// Overwrite all the fields we know about.
-	if (!propertyWrite(PidTagConversationTopic, title)) {
-		return false;
-	}
-	if (!propertyWrite(PidTagBody, text)) {
-		return false;
-	}
-	if (!propertyWrite(PidTagLastModificationTime, modified)) {
-		return false;
-	}
-	if (!propertyWrite(PidTagCreationTime, created)) {
-		return false;
-	}
-	if (!propertyWrite(PidTagStartDate, begin)) {
-		return false;
-	}
-	if (!propertyWrite(PidTagEndDate, end)) {
-		return false;
-	}
-	//if (!propertyWrite(PidTagSentRepresentingName, sender()[0].name)) {
-	//	return false;
-	//}
-	if (!propertyWrite(PidLidLocation, location)) {
-		return false;
-	}
-	if (!propertyWrite(PidLidReminderSet, reminderActive)) {
-		return false;
-	}
-	if (reminderActive) {
-		if (!propertyWrite(PidLidReminderSignalTime, reminderTime)) {
-			return false;
-		}
-		if (!propertyWrite(PidLidReminderDelta, reminderMinutes)) {
-			return false;
-		}
-	}
-#if 0
-	const char* toAttendeesString = (const char *)find_mapi_SPropValue_data(&properties_array, PR_DISPLAY_TO_UNICODE);
-	uint32_t* recurrenceType = (uint32_t*)find_mapi_SPropValue_data(&properties_array, PidLidRecurrenceType);
-	Binary_r* binDataRecurrency = (Binary_r*)find_mapi_SPropValue_data(&properties_array, PidLidAppointmentRecur);
-
-	if (recurrenceType && (*recurrenceType) > 0x0) {
-		if (binDataRecurrency != 0x0) {
-			RecurrencePattern* pattern = get_RecurrencePattern(mem_ctx, binDataRecurrency);
-			debugRecurrencyPattern(pattern);
-
-			data.recurrency.setData(pattern);
-		} else {
-			// TODO This should not happen. PidLidRecurrenceType says this is a recurring event, so why is there no PidLidAppointmentRecur???
-			debug() << "missing recurrencePattern in message"<<messageID<<"in folder"<<folderID;
-			}
-	}
-
-	getAttendees(obj_message, QString::fromLocal8Bit(toAttendeesString), data);
-#endif
-	if (!MapiMessage::propertiesPush()) {
-		return false;
-	}
-#if 0
-	debug() << "************  OpenFolder";
-	if (!OpenFolder(&m_store, folder.id(), folder.d())) {
-		error() << "cannot open folder" << folderID
-			<< ", error:" << mapiError();
-		return false;
-        }
-	debug() << "************  SaveChangesMessage";
-	if (!SaveChangesMessage(folder.d(), message.d(), KeepOpenReadWrite)) {
-		error() << "cannot save message" << messageID << "in folder" << folderID
-			<< ", error:" << mapiError();
-		return false;
-	}
-#endif
-	debug() << "************  SubmitMessage";
-	if (MAPI_E_SUCCESS != SubmitMessage(&m_object)) {
-		error() << "cannot submit message, error:" << mapiError();
-		return false;
-	}
-	struct mapi_SPropValue_array replyProperties;
-	debug() << "************  TransportSend";
-	if (MAPI_E_SUCCESS != TransportSend(&m_object, &replyProperties)) {
-		error() << "cannot send message, error:" << mapiError();
-		return false;
-	}
-	return true;
 }
 
 MapiConnector2::MapiConnector2() :
@@ -842,7 +483,7 @@ MapiMessage::MapiMessage(MapiConnector2 *connection, const char *tallocName, map
 {
 }
 
-void MapiMessage::addUniqueRecipient(Recipient &candidate, QList<Recipient> &list)
+void MapiMessage::addUniqueRecipient(MapiRecipient &candidate)
 {
 	if (candidate.name.isEmpty() && candidate.email.isEmpty()) {
 		error() << "ignore garbage";
@@ -879,22 +520,23 @@ void MapiMessage::addUniqueRecipient(Recipient &candidate, QList<Recipient> &lis
 	}
 	error() << "trying address" << candidate.name << candidate.email;
 
-	for (int i = 0; i < list.size(); i++) {
-		Recipient &entry = list[i];
+	for (int i = 0; i < m_recipients.size(); i++) {
+		MapiRecipient &entry = m_recipients[i];
 
 		// If we find a name match, fill in a missing email if we can.
 		if (!candidate.name.isEmpty() && (entry.name == candidate.name)) {
 			if (isGoodEmailAddress(entry.email) < isGoodEmailAddress(candidate.email)) {
 				entry.email = candidate.email;
-				// Promote the type if needed to more specific type.
+				// Promote the type if needed to more specific
+				// (numerically lower) type.
 				if (entry.type() > candidate.type()) {
 					entry.setType(candidate.type());
 				}
-				// Promote the object and displkay type to a non-default value.
-				if (entry.displayType() == Recipient::DtMailuser) {
+				// Promote the object and display type to a non-default value.
+				if (entry.displayType() == MapiRecipient::DtMailuser) {
 					entry.setDisplayType(candidate.displayType());
 				}
-				if (entry.objectType() == Recipient::OtMailuser) {
+				if (entry.objectType() == MapiRecipient::OtMailuser) {
 					entry.setObjectType(candidate.objectType());
 				}
 				error() << "updated address" << entry.toString();
@@ -906,15 +548,16 @@ void MapiMessage::addUniqueRecipient(Recipient &candidate, QList<Recipient> &lis
 		if (!candidate.email.isEmpty() && (entry.email == candidate.email)) {
 			if (entry.name.length() < candidate.name.length()) {
 				entry.name = candidate.name;
-				// Promote the type if needed to more specific type.
+				// Promote the type if needed to more specific
+				// (numerically lower) type.
 				if (entry.type() > candidate.type()) {
 					entry.setType(candidate.type());
 				}
 				// Promote the object and displkay type to a non-default value.
-				if (entry.displayType() == Recipient::DtMailuser) {
+				if (entry.displayType() == MapiRecipient::DtMailuser) {
 					entry.setDisplayType(candidate.displayType());
 				}
-				if (entry.objectType() == Recipient::OtMailuser) {
+				if (entry.objectType() == MapiRecipient::OtMailuser) {
 					entry.setObjectType(candidate.objectType());
 				}
 				error() << "updated address" << entry.toString();
@@ -925,7 +568,7 @@ void MapiMessage::addUniqueRecipient(Recipient &candidate, QList<Recipient> &lis
 
 	// Add the entry if it did not match.
 	error() << "add new address" << candidate.toString();
-	list.append(candidate);
+	m_recipients.append(candidate);
 }
 
 QDebug MapiMessage::debug() const
@@ -954,6 +597,9 @@ bool MapiMessage::open()
 	return true;
 }
 
+/**
+ * We collect recipients as well as properties.
+ */
 bool MapiMessage::propertiesPull(QVector<int> &tags, const bool tagsAppended)
 {
 	static int ourTagList[] = {
@@ -1001,7 +647,7 @@ bool MapiMessage::propertiesPull()
 	return true;
 }
 
-void MapiMessage::recipientPopulate(const char *phase, SRow &recipient, Recipient &result)
+void MapiMessage::recipientPopulate(const char *phase, SRow &recipient, MapiRecipient &result)
 {
 	for (unsigned j = 0; j < recipient.cValues; j++) {
 		MapiProperty property(recipient.lpProps[j]);
@@ -1032,16 +678,16 @@ void MapiMessage::recipientPopulate(const char *phase, SRow &recipient, Recipien
 			result.flags = property.value().toInt();
 			break;
 		case PidTagRecipientType:
-			result.setType(property.value().toUInt());
+			result.setType((MapiRecipient::Type)property.value().toUInt());
 			break;
 		case PidTagRecipientOrder:
 			result.order = property.value().toInt();
 			break;
 		case PidTagDisplayType:
-			result.setDisplayType((Recipient::DisplayType)property.value().toUInt());
+			result.setDisplayType((MapiRecipient::DisplayType)property.value().toUInt());
 			break;
 		case PidTagObjectType:
-			result.setObjectType((Recipient::ObjectType)property.value().toUInt());
+			result.setObjectType((MapiRecipient::ObjectType)property.value().toUInt());
 			break;
 		default:
 #if (DEBUG_MESSAGE_PROPERTIES)
@@ -1054,7 +700,33 @@ void MapiMessage::recipientPopulate(const char *phase, SRow &recipient, Recipien
 	}
 }
 
-bool MapiMessage::recipientsPull()
+/**
+ * The recipients are pulled from multiple sources, but need to go through a 
+ * resolution process to fix them up. The duplicates will disappear as part
+ * of the resolution process. The logic looks like this:
+ *
+ *  1. Read the RecipientsTable.
+ *
+ *  2. Add in the contents of the DisplayTo tag (Exchange can return records
+ *     from Step 1 with no name or email); ditto for CC and BCC.
+ *
+ *  3. Add in the sent-representing values (also not in Step 1, and not clear
+ *     if it is guaranteed to be in step 2 as well).
+ *
+ * That results in a whole lot of duplication as well as bringing in the missing
+ * items. So then, there is a whole lot of work to resolve things:
+ *
+ *  - For anything we get from 1, 2 and 3 (mostly 2 and 3, but also 1) try hard
+ *    to get an email address. Whenever I find one, I compare the "quality" of
+ *    the address against what we already have, and keep the best one.
+ *
+ *  - For all but the best quality addresses, call ResolveNames. Again, keep
+ *    the best value seen.
+ *
+ *  - For those that are left, wing-it.
+ *
+ * There is also a load of cruft data elimination along the way.
+ */bool MapiMessage::recipientsPull()
 {
 #if 0
 // TEST -START-  Try an easier approach to find all the recipients
@@ -1118,10 +790,10 @@ bool MapiMessage::recipientsPull()
 
 	for (unsigned i = 0; i < rowset.cRows; i++) {
 		SRow &recipient = rowset.aRow[i];
-		Recipient result;
+		MapiRecipient result;
 
 		recipientPopulate("recipient table", recipient, result);
-		addUniqueRecipient(result, m_recipients);
+		addUniqueRecipient(result);
 	}
 
 	// Walk through the properties and extract the values of interest. The
@@ -1133,8 +805,8 @@ bool MapiMessage::recipientsPull()
 	// the results can contain entries with missing name (!)
 	// and email values. Reading this property is a pathetic
 	// workaround.
-	Recipient sentRepresenting;
-	Recipient originalSentRepresenting;
+	MapiRecipient sentRepresenting;
+	MapiRecipient originalSentRepresenting;
 
 	for (unsigned i = 0; i < m_propertyCount; i++) {
 		MapiProperty property(m_properties[i]);
@@ -1142,32 +814,32 @@ bool MapiMessage::recipientsPull()
 		switch (property.tag()) {
 		case PidTagDisplayTo:
 			foreach (QString name, property.value().toString().split(QChar::fromAscii(';'))) {
-				Recipient result;
+				MapiRecipient result;
 
 				result.name = name.trimmed();
 		error() << "add result:" << __LINE__ << result.name << result.email;
-				result.setType(Recipient::To);
-				addUniqueRecipient(result, m_recipients);
+				result.setType(MapiRecipient::To);
+				addUniqueRecipient(result);
 			}
 			break;
 		case PidTagDisplayCc:
 			foreach (QString name, property.value().toString().split(QChar::fromAscii(';'))) {
-				Recipient result;
+				MapiRecipient result;
 
 				result.name = name.trimmed();
 		error() << "add result:" << __LINE__ << result.name << result.email;
-				result.setType(Recipient::CC);
-				addUniqueRecipient(result, m_recipients);
+				result.setType(MapiRecipient::CC);
+				addUniqueRecipient(result);
 			}
 			break;
 		case PidTagDisplayBcc:
 			foreach (QString name, property.value().toString().split(QChar::fromAscii(';'))) {
-				Recipient result;
+				MapiRecipient result;
 
 				result.name = name.trimmed();
 		error() << "add result:" << __LINE__ << result.name << result.email;
-				result.setType(Recipient::BCC);
-				addUniqueRecipient(result, m_recipients);
+				result.setType(MapiRecipient::BCC);
+				addUniqueRecipient(result);
 			}
 			break;
 		case PidTagSentRepresentingEmailAddress:
@@ -1189,19 +861,19 @@ bool MapiMessage::recipientsPull()
 	// Step 3. Add the sent-on-behalf-of (not the sender!).
 	if (!originalSentRepresenting.name.isEmpty()) {
 		error() << "add result:" << __LINE__ << sentRepresenting.name << sentRepresenting.email;
-		originalSentRepresenting.setType(Recipient::Sender);
-		addUniqueRecipient(originalSentRepresenting, m_recipients);
+		originalSentRepresenting.setType(MapiRecipient::Sender);
+		addUniqueRecipient(originalSentRepresenting);
 	}
 	if (!sentRepresenting.name.isEmpty()) {
 		error() << "add result:" << __LINE__ << sentRepresenting.name << sentRepresenting.email;
-		sentRepresenting.setType(Recipient::Sender);
-		addUniqueRecipient(sentRepresenting, m_recipients);
+		sentRepresenting.setType(MapiRecipient::Sender);
+		addUniqueRecipient(sentRepresenting);
 	}
 
 	// We have all the recipients; find any that need resolution.
 	QList<int> needingResolution;
 	for (int i = 0; i < m_recipients.size(); i++) {
-		Recipient &recipient = m_recipients[i];
+		MapiRecipient &recipient = m_recipients[i];
 		static QString perfectForm = QString::fromAscii("foo@foo");
 		static unsigned perfect = isGoodEmailAddress(perfectForm);
 
@@ -1227,7 +899,7 @@ bool MapiMessage::recipientsPull()
 	const char *names[needingResolution.size() + 1];
 	unsigned j = 0;
 	foreach (int i, needingResolution) {
-		Recipient &recipient = m_recipients[i];
+		MapiRecipient &recipient = m_recipients[i];
 		QByteArray utf8(recipient.name.toUtf8());
 
 		utf8.append('\0');
@@ -1272,10 +944,10 @@ bool MapiMessage::recipientsPull()
 		for (unsigned i = 0, unresolveds = 0; i < statuses->cValues; i++) {
 			if (MAPI_RESOLVED == statuses->aulPropTag[i]) {
 				struct SRow &recipient = results->aRow[i - unresolveds];
-				Recipient result;
+				MapiRecipient result;
 
 				recipientPopulate("resolution", recipient, result);
-				addUniqueRecipient(result, m_recipients);
+				addUniqueRecipient(result);
 				needingResolution.removeAt(unresolveds);
 			} else {
 				unresolveds++;
@@ -1289,15 +961,15 @@ bool MapiMessage::recipientsPull()
 	// Secondary resolution is to remove entries which have the the same 
 	// email. But we must take care since we'll still have unresolved 
 	// entries with empty email values (which would collide).
-	QMap<QString, Recipient> uniqueResolvedRecipients;
+	QMap<QString, MapiRecipient> uniqueResolvedRecipients;
 	for (int i = 0; i < m_recipients.size(); i++) {
-		Recipient &recipient = m_recipients[i];
+		MapiRecipient &recipient = m_recipients[i];
 
 		if (!recipient.email.isEmpty()) {
 			// If we have duplicates, keep the one with the longer 
 			// name in the hopes that it will be the more 
 			// descriptive.
-			QMap<QString, Recipient>::const_iterator i = uniqueResolvedRecipients.constFind(recipient.email);
+			QMap<QString, MapiRecipient>::const_iterator i = uniqueResolvedRecipients.constFind(recipient.email);
 			if (i != uniqueResolvedRecipients.constEnd()) {
 				if (recipient.name.length() < i.value().name.length()) {
 					continue;
@@ -1325,7 +997,7 @@ bool MapiMessage::recipientsPull()
 	// not by name. And delete any which have no name either.
 	for (int i = 0; i < needingResolution.size(); i++)
 	{
-		Recipient &recipient = m_recipients[needingResolution.at(i)];
+		MapiRecipient &recipient = m_recipients[needingResolution.at(i)];
 
 		if (recipient.name.isEmpty()) {
 			// Grrrr...
@@ -1340,7 +1012,7 @@ bool MapiMessage::recipientsPull()
 
 	// Finally, recreate the sanitised list.
 	m_recipients.clear();
-	foreach (Recipient recipient, uniqueResolvedRecipients) {
+	foreach (MapiRecipient recipient, uniqueResolvedRecipients) {
 		m_recipients.append(recipient);
 	error() << "recipient name:" << recipient.name << "email:" << recipient.email;
 	}
@@ -1348,7 +1020,7 @@ bool MapiMessage::recipientsPull()
 	return true;
 }
 
-const QList<Recipient> &MapiMessage::recipients()
+const QList<MapiRecipient> &MapiMessage::recipients()
 {
 	return m_recipients;
 }
@@ -1979,6 +1651,91 @@ QVariant MapiProperty::value() const
 	default:
 		return QString::fromLatin1("PT_0x%1").arg(m_property.ulPropTag & 0xFFFF, 0, 16);
 	}
+}
+
+QString MapiRecipient::toString() const
+{
+	static QString format = QString::fromAscii("%1 <%2>, %3, %4, %5");
+
+	return format.arg(name).arg(email).arg(typeString()).arg(objectTypeString()).arg(displayTypeString());
+}
+
+QString MapiRecipient::displayTypeString() const
+{
+	switch (m_displayType)
+	{
+	case DtMailuser:
+		return QString::fromAscii("Messaging user");
+	case DtDistlist:
+		return QString::fromAscii("Distribution list");
+	case DtForum:
+		return QString::fromAscii("Forum");
+	case DtAgent:
+		return QString::fromAscii("Automated agent");
+	case DtOrganization:
+		return QString::fromAscii("Group alias");
+	case DtPrivateDistlist:
+		return QString::fromAscii("Private distribution list");
+	case DtRemoteMailuser:
+		return QString::fromAscii("Foreign/remote messaging user");
+	case DtRoom:
+		return QString::fromAscii("Room");
+	case DtEquipment:
+		return QString::fromAscii("Equipment");
+	case DtSecurityGroup:
+		return QString::fromAscii("Security group");
+	default:
+		return QString::fromAscii("MAPI_0x%1 display type").arg(m_objectType, 0, 16);
+	}
+}
+
+QString MapiRecipient::objectTypeString() const
+{
+	switch (m_objectType)
+	{
+	case OtStore:
+		return QString::fromAscii("Message store");
+	case OtAddrbook:
+		return QString::fromAscii("Address book");
+	case OtFolder:
+		return QString::fromAscii("Folder");
+	case OtABcont:
+		return QString::fromAscii("Address book container");
+	case OtMessage:
+		return QString::fromAscii("Message");
+	case OtMailuser:
+		return QString::fromAscii("Messaging user");
+	case OtAttach:
+		return QString::fromAscii("Message attachment");
+	case OtDistlist:
+		return QString::fromAscii("Distribution list");
+	case OtProfsect:
+		return QString::fromAscii("Profile section");
+	case OtStatus:
+		return QString::fromAscii("Status");
+	case OtSession:
+		return QString::fromAscii("Session");
+	case OtForminfo:
+		return QString::fromAscii("Form");
+	default:
+		return QString::fromAscii("MAPI_0x%1 object type").arg(m_displayType, 0, 16);
+	}
+}
+
+QString MapiRecipient::typeString() const
+{
+	switch (type())
+	{
+	case Sender:
+		return QString::fromAscii("Sender");
+	case To:
+		return QString::fromAscii("To");
+	case CC:
+		return QString::fromAscii("CC");
+	case BCC:
+		return QString::fromAscii("BCC");
+	}
+	return QString();
 }
 
 bool MapiRecurrencyPattern::setData(RecurrencePattern* pattern)

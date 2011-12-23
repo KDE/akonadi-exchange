@@ -40,6 +40,10 @@
  */
 #define ID_BASE 36
 
+/**
+ * Set this to 1 to pull all the properties, e.g. to see what a server has
+ * available.
+ */
 #ifndef DEBUG_CONTACT_PROPERTIES
 #define DEBUG_CONTACT_PROPERTIES 0
 #endif

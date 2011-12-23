@@ -35,7 +35,67 @@
 #include "mapiconnector2.h"
 #include "profiledialog.h"
 
+/**
+ * Display ids in the same format we use when stored in Akonadi.
+ */
+#define ID_BASE 36
+
+/**
+ * Set this to 1 to pull all the properties, e.g. to see what a server has
+ * available.
+ */
+#ifndef DEBUG_APPOINTMENT_PROPERTIES
+#define DEBUG_APPOINTMENT_PROPERTIES 0
+#endif
+
 using namespace Akonadi;
+
+/**
+ * An Appointment, with attendee recipients.
+ *
+ * The attendees include not just the To/CC/BCC recipients (@ref propertiesPull)
+ * but also whoever the meeting was sent-on-behalf-of. That might or might 
+ * not be the sender of the invitation.
+ */
+class MapiAppointment : public MapiMessage
+{
+public:
+	MapiAppointment(MapiConnector2 *connection, const char *tallocName, mapi_id_t folderId, mapi_id_t id);
+
+	/**
+	 * Fetch all properties.
+	 */
+	virtual bool propertiesPull();
+
+	/**
+	 * Update a calendar item.
+	 */
+	virtual bool propertiesPush();
+
+	QString title;
+	QString text;
+	QString location;
+	QDateTime created;
+	QDateTime begin;
+	QDateTime end;
+	QDateTime modified;
+	bool reminderActive;
+	QDateTime reminderTime;
+	uint32_t reminderMinutes;
+
+	MapiRecurrencyPattern recurrency;
+
+private:
+	bool debugRecurrencyPattern(RecurrencePattern *pattern);
+
+	/**
+	 * Fetch calendar properties.
+	 */
+	virtual bool propertiesPull(QVector<int> &tags, const bool tagsAppended);
+
+	virtual QDebug debug() const;
+	virtual QDebug error() const;
+};
 
 ExCalResource::ExCalResource(const QString &id) :
 	MapiResource(id, i18n("Exchange Calendar"), IPF_APPOINTMENT, "IPM.Appointment", QString::fromAscii("text/calendar"))
@@ -92,12 +152,16 @@ bool ExCalResource::retrieveItem( const Akonadi::Item &itemOrig, const QSet<QByt
 	event->setCreated(KDateTime(message->created));
 	event->setLastModified(KDateTime(message->modified));
 	event->setDescription(message->text);
-	foreach (Recipient attendee, message->recipients()) {
-		if (attendee.type() == Recipient::Sender) {
-			event->setOrganizer(attendee.name);
-			break;
+	foreach (MapiRecipient recipient, message->recipients()) {
+		if (recipient.type() == MapiRecipient::Sender) {
+			KCal::Person person(recipient.name, recipient.email);
+			event->setOrganizer(person);
+		} else {
+			KCal::Attendee *person = new KCal::Attendee(recipient.name, recipient.email);
+			event->addAttendee(person);
 		}
 	}
+
 	event->setLocation(message->location);
 	if (message->reminderActive) {
 		KCal::Alarm* alarm = new KCal::Alarm(dynamic_cast<KCal::Incidence*>(event));
@@ -108,16 +172,6 @@ bool ExCalResource::retrieveItem( const Akonadi::Item &itemOrig, const QSet<QByt
 		alarm->setStartOffset(KCal::Duration(message->reminderMinutes * -60));
 		alarm->setEnabled(true);
 		event->addAlarm(alarm);
-	}
-
-	foreach (Attendee att, message->attendees) {
-		if (att.isOrganizer()) {
-			KCal::Person person(att.name, att.email);
-			event->setOrganizer(person);
-		} else {
-			KCal::Attendee *person = new KCal::Attendee(att.name, att.email);
-			event->addAttendee(person);
-		}
 	}
 
 	if (message->recurrency.isRecurring()) {
@@ -239,17 +293,16 @@ void ExCalResource::itemChangedContinue(KJob* job)
 		message->reminderActive = false;
 	}
 
-	message->attendees.clear();
-	Attendee att;
+	MapiRecipient att;
 	att.name = event->organizer().name();
 	att.email = event->organizer().email();
-	att.setOrganizer(true);
-	message->attendees.append(att);
-	att.setOrganizer(false);
+	att.setType(MapiRecipient::Sender);
+	message->addUniqueRecipient(att);
+	att.setType(MapiRecipient::To);
 	foreach (KCal::Attendee *person, event->attendees()) {
-	att.name = person->name();
-	att.email = person->email();
-	message->attendees.append(att);
+		att.name = person->name();
+		att.email = person->email();
+		message->addUniqueRecipient(att);
 	}
 
 	if (message->recurrency.isRecurring()) {
@@ -312,6 +365,323 @@ void ExCalResource::createKCalRecurrency(KCal::Recurrence* rec, const MapiRecurr
 	} else if (pattern.mEndType == MapiRecurrencyPattern::Date) {
 		rec->setEndDateTime(KDateTime(pattern.mEndDate));
 	} 
+}
+
+MapiAppointment::MapiAppointment(MapiConnector2 *connector, const char *tallocName, mapi_id_t folderId, mapi_id_t id) :
+	MapiMessage(connector, tallocName, folderId, id)
+{
+}
+
+QDebug MapiAppointment::debug() const
+{
+	static QString prefix = QString::fromAscii("MapiAppointment: %1/%2:");
+	return MapiObject::debug(prefix.arg(m_folderId, 0, ID_BASE).arg(m_id, 0, ID_BASE)) /*<< title*/;
+}
+
+QDebug MapiAppointment::error() const
+{
+	static QString prefix = QString::fromAscii("MapiAppointment: %1/%2:");
+	return MapiObject::error(prefix.arg(m_folderId, 0, ID_BASE).arg(m_id, 0, ID_BASE)) /*<< title*/;
+}
+
+bool MapiAppointment::debugRecurrencyPattern(RecurrencePattern *pattern)
+{
+	// do the actual work
+	debug() << "-- Recurrency debug output [BEGIN] --";
+	switch (pattern->RecurFrequency) {
+	case RecurFrequency_Daily:
+		debug() << "Fequency: daily";
+		break;
+	case RecurFrequency_Weekly:
+		debug() << "Fequency: weekly";
+		break;
+	case RecurFrequency_Monthly:
+		debug() << "Fequency: monthly";
+		break;
+	case RecurFrequency_Yearly:
+		debug() << "Fequency: yearly";
+		break;
+	default:
+		debug() << "unsupported frequency:"<<pattern->RecurFrequency;
+		return false;
+	}
+
+	switch (pattern->PatternType) {
+	case PatternType_Day:
+		debug() << "PatternType: day";
+		break;
+	case PatternType_Week:
+		debug() << "PatternType: week";
+		break;
+	case PatternType_Month:
+		debug() << "PatternType: month";
+		break;
+	default:
+		debug() << "unsupported patterntype:"<<pattern->PatternType;
+		return false;
+	}
+
+	debug() << "Calendar:" << pattern->CalendarType;
+	debug() << "FirstDateTime:" << pattern->FirstDateTime;
+	debug() << "Period:" << pattern->Period;
+	if (pattern->PatternType == PatternType_Month) {
+		debug() << "PatternTypeSpecific:" << pattern->PatternTypeSpecific.Day;
+	} else if (pattern->PatternType == PatternType_Week) {
+		debug() << "PatternTypeSpecific:" << QString::number(pattern->PatternTypeSpecific.WeekRecurrencePattern, 2);
+	}
+
+	switch (pattern->EndType) {
+		case END_AFTER_DATE:
+			debug() << "EndType: after date";
+			break;
+		case END_AFTER_N_OCCURRENCES:
+			debug() << "EndType: after occurenc count";
+			break;
+		case END_NEVER_END:
+			debug() << "EndType: never";
+			break;
+		default:
+			debug() << "unsupported endtype:"<<pattern->EndType;
+			return false;
+	}
+	debug() << "OccurencCount:" << pattern->OccurrenceCount;
+	debug() << "FirstDOW:" << pattern->FirstDOW;
+	debug() << "Start:" << pattern->StartDate;
+	debug() << "End:" << pattern->EndDate;
+	debug() << "-- Recurrency debug output [END] --";
+
+	return true;
+}
+
+bool MapiAppointment::propertiesPull(QVector<int> &tags, const bool tagsAppended)
+{
+	/**
+	 * The list of tags used to fetch an Appointment.
+	 */
+	static int ourTagList[] = {
+		PidTagMessageClass,
+		PidTagDisplayTo,
+		PidTagConversationTopic,
+		PidTagBody,
+		PidTagLastModificationTime,
+		PidTagCreationTime,
+		PidTagStartDate,
+		PidTagEndDate,
+		PidLidLocation,
+		PidLidReminderSet,
+		PidLidReminderSignalTime,
+		PidLidReminderDelta,
+		PidLidRecurrenceType,
+		PidLidAppointmentRecur,
+
+		PidTagSentRepresentingEmailAddress,
+		PidTagSentRepresentingEmailAddress_string8,
+
+		PidTagSentRepresentingName,
+		PidTagSentRepresentingName_string8,
+
+		PidTagSentRepresentingSimpleDisplayName,
+		PidTagSentRepresentingSimpleDisplayName_string8,
+
+		PidTagOriginalSentRepresentingEmailAddress,
+		PidTagOriginalSentRepresentingEmailAddress_string8,
+
+		PidTagOriginalSentRepresentingName,
+		PidTagOriginalSentRepresentingName_string8,
+		0 };
+	static SPropTagArray ourTags = {
+		(sizeof(ourTagList) / sizeof(ourTagList[0])) - 1,
+		(MAPITAGS *)ourTagList };
+
+	if (!tagsAppended) {
+		for (unsigned i = 0; i < ourTags.cValues; i++) {
+			int newTag = ourTags.aulPropTag[i];
+			
+			if (!tags.contains(newTag)) {
+				tags.append(newTag);
+			}
+		}
+	}
+	if (!MapiMessage::propertiesPull(tags, tagsAppended)) {
+		return false;
+	}
+
+	// Start with a clean slate.
+	reminderActive = false;
+
+	// Walk through the properties and extract the values of interest. The
+	// properties here should be aligned with the list pulled above.
+	unsigned recurrenceType = 0;
+	RecurrencePattern *pattern = 0;
+
+	for (unsigned i = 0; i < m_propertyCount; i++) {
+		MapiProperty property(m_properties[i]);
+
+		switch (property.tag()) {
+		case PidTagMessageClass:
+			// Sanity check the message class.
+			if (QLatin1String("IPM.Appointment") != property.value().toString()) {
+				// this one is not an appointment
+				return false;
+			}
+			break;
+		case PidTagConversationTopic:
+			title = property.value().toString();
+			break;
+		case PidTagBody:
+			text = property.value().toString();
+			break;
+		case PidTagLastModificationTime:
+			modified = property.value().toDateTime();
+			break;
+		case PidTagCreationTime:
+			created = property.value().toDateTime();
+			break;
+		case PidTagStartDate:
+			begin = property.value().toDateTime();
+			break;
+		case PidTagEndDate:
+			end = property.value().toDateTime();
+			break;
+		case PidLidLocation:
+			location = property.value().toString();
+			break;
+		case PidLidReminderSet:
+			reminderActive = property.value().toInt();
+			break;
+		case PidLidReminderSignalTime:
+			reminderTime = property.value().toDateTime();
+			break;
+		case PidLidReminderDelta:
+			reminderMinutes = property.value().toInt();
+			break;
+		case PidLidRecurrenceType:
+			recurrenceType = property.value().toInt();
+			break;
+		case PidLidAppointmentRecur:
+			pattern = get_RecurrencePattern(ctx(), &m_properties[i].value.bin);
+			break;
+		default:
+#if (DEBUG_APPOINTMENT_PROPERTIES)
+			debug() << "ignoring appointment property:" << tagName(property.tag()) << property.value();
+#endif
+			break;
+		}
+	}
+
+	// Is there a recurrance type set?
+	if (recurrenceType != 0) {
+		if (pattern) {
+			debugRecurrencyPattern(pattern);
+			recurrency.setData(pattern);
+		} else {
+			// TODO This should not happen. PidLidRecurrenceType says this is a recurring event, so why is there no PidLidAppointmentRecur???
+			debug() << "missing recurrencePattern";
+			return false;
+		}
+	}
+	return true;
+}
+
+bool MapiAppointment::propertiesPull()
+{
+	static bool tagsAppended = false;
+	static QVector<int> tags;
+
+	if (!propertiesPull(tags, tagsAppended)) {
+		tagsAppended = true;
+		return false;
+	}
+	tagsAppended = true;
+	return true;
+}
+
+bool MapiAppointment::propertiesPush()
+{
+	// Overwrite all the fields we know about.
+	if (!propertyWrite(PidTagConversationTopic, title)) {
+		return false;
+	}
+	if (!propertyWrite(PidTagBody, text)) {
+		return false;
+	}
+	if (!propertyWrite(PidTagLastModificationTime, modified)) {
+		return false;
+	}
+	if (!propertyWrite(PidTagCreationTime, created)) {
+		return false;
+	}
+	if (!propertyWrite(PidTagStartDate, begin)) {
+		return false;
+	}
+	if (!propertyWrite(PidTagEndDate, end)) {
+		return false;
+	}
+	//if (!propertyWrite(PidTagSentRepresentingName, sender()[0].name)) {
+	//	return false;
+	//}
+	if (!propertyWrite(PidLidLocation, location)) {
+		return false;
+	}
+	if (!propertyWrite(PidLidReminderSet, reminderActive)) {
+		return false;
+	}
+	if (reminderActive) {
+		if (!propertyWrite(PidLidReminderSignalTime, reminderTime)) {
+			return false;
+		}
+		if (!propertyWrite(PidLidReminderDelta, reminderMinutes)) {
+			return false;
+		}
+	}
+#if 0
+	const char* toAttendeesString = (const char *)find_mapi_SPropValue_data(&properties_array, PR_DISPLAY_TO_UNICODE);
+	uint32_t* recurrenceType = (uint32_t*)find_mapi_SPropValue_data(&properties_array, PidLidRecurrenceType);
+	Binary_r* binDataRecurrency = (Binary_r*)find_mapi_SPropValue_data(&properties_array, PidLidAppointmentRecur);
+
+	if (recurrenceType && (*recurrenceType) > 0x0) {
+		if (binDataRecurrency != 0x0) {
+			RecurrencePattern* pattern = get_RecurrencePattern(mem_ctx, binDataRecurrency);
+			debugRecurrencyPattern(pattern);
+
+			data.recurrency.setData(pattern);
+		} else {
+			// TODO This should not happen. PidLidRecurrenceType says this is a recurring event, so why is there no PidLidAppointmentRecur???
+			debug() << "missing recurrencePattern in message"<<messageID<<"in folder"<<folderID;
+			}
+	}
+
+	getAttendees(obj_message, QString::fromLocal8Bit(toAttendeesString), data);
+#endif
+	if (!MapiMessage::propertiesPush()) {
+		return false;
+	}
+#if 0
+	debug() << "************  OpenFolder";
+	if (!OpenFolder(&m_store, folder.id(), folder.d())) {
+		error() << "cannot open folder" << folderID
+			<< ", error:" << mapiError();
+		return false;
+        }
+	debug() << "************  SaveChangesMessage";
+	if (!SaveChangesMessage(folder.d(), message.d(), KeepOpenReadWrite)) {
+		error() << "cannot save message" << messageID << "in folder" << folderID
+			<< ", error:" << mapiError();
+		return false;
+	}
+#endif
+	debug() << "************  SubmitMessage";
+	if (MAPI_E_SUCCESS != SubmitMessage(&m_object)) {
+		error() << "cannot submit message, error:" << mapiError();
+		return false;
+	}
+	struct mapi_SPropValue_array replyProperties;
+	debug() << "************  TransportSend";
+	if (MAPI_E_SUCCESS != TransportSend(&m_object, &replyProperties)) {
+		error() << "cannot send message, error:" << mapiError();
+		return false;
+	}
+	return true;
 }
 
 AKONADI_RESOURCE_MAIN( ExCalResource )

@@ -45,6 +45,10 @@
  */
 #define ID_BASE 36
 
+/**
+ * Set this to 1 to pull all the properties, e.g. to see what a server has
+ * available.
+ */
 #ifndef DEBUG_NOTE_PROPERTIES
 #define DEBUG_NOTE_PROPERTIES 1
 #endif
@@ -323,7 +327,7 @@ PidTagObjectType ([MS-OXCPRPT] section 2.2.1.7)
 
 2.2.1.35 PidLidCurrentVersionName Property
 
-2.2.1.36 PidTagAlternateRecipientAllowed Property
+2.2.1.36 PidTagAlternateMapiRecipientAllowed Property
 
 2.2.1.37 PidTagResponsibility Property
 
@@ -331,7 +335,7 @@ PidTagObjectType ([MS-OXCPRPT] section 2.2.1.7)
 
 2.2.1.39 PidTagHasNamedProperties Property
 
-2.2.1.40 PidTagRecipientOrder Property
+2.2.1.40 PidTagMapiRecipientOrder Property
 
 2.2.1.41 PidNameContentBase Property
 
@@ -345,7 +349,7 @@ PidTagObjectType ([MS-OXCPRPT] section 2.2.1.7)
 
 2.2.1.46  Property
 
-2.2.1.47 PidTagMessageRecipients Property
+2.2.1.47 PidTagMessageMapiRecipients Property
 
 2.2.1.48 Body Properties
 
@@ -372,19 +376,19 @@ PidTagObjectType ([MS-OXCPRPT] section 2.2.1.7)
 		}
 	}
 
-	foreach (Recipient item, MapiMessage::recipients()) {
+	foreach (MapiRecipient item, MapiMessage::recipients()) {
 		switch (item.type()) {
-		case Recipient::Sender:
+		case MapiRecipient::Sender:
 			sender()->addAddress(item.email.toUtf8(), item.name);
 			break;
-		case Recipient::To:
+		case MapiRecipient::To:
 			to()->addAddress(item.email.toUtf8(), item.name);
 			replyTo()->addAddress(item.email.toUtf8(), item.name);
 			break;
-		case Recipient::CC:
+		case MapiRecipient::CC:
 			cc()->addAddress(item.email.toUtf8(), item.name);
 			break;
-		case Recipient::BCC:
+		case MapiRecipient::BCC:
 			bcc()->addAddress(item.email.toUtf8(), item.name);
 			break;
 		}

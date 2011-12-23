@@ -107,7 +107,7 @@ private:
 	SPropValue &m_property;
 };
 
-class Recipient
+class MapiRecipient
 {
 public:
 	typedef enum {
@@ -122,13 +122,16 @@ public:
 	 * but will be stringified by @ref displayTypeString.
 	 */
 	typedef enum {
-		DtAgent =		DT_AGENT,
+		DtMailuser =		DT_MAILUSER,
 		DtDistlist =		DT_DISTLIST,
 		DtForum =		DT_FORUM,
-		DtMailuser =		DT_MAILUSER,
+		DtAgent =		DT_AGENT,
 		DtOrganization =	DT_ORGANIZATION,
 		DtPrivateDistlist =	DT_PRIVATE_DISTLIST,
 		DtRemoteMailuser =	DT_REMOTE_MAILUSER,
+		DtRoom =		0x7,
+		DtEquipment =		0x8,
+		DtSecurityGroup =	0x9,
 	} DisplayType;
 
 	/**
@@ -136,21 +139,21 @@ public:
 	 * but will be stringified by @ref objectTypeString.
 	 */
 	typedef enum {
-		OtABcont =		MAPI_ABCONT,
+		OtStore =		MAPI_STORE,
 		OtAddrbook =		MAPI_ADDRBOOK,
+		OtFolder =		MAPI_FOLDER,
+		OtABcont =		MAPI_ABCONT,
+		OtMessage =		MAPI_MESSAGE,
+		OtMailuser =		MAPI_MAILUSER,
 		OtAttach =		MAPI_ATTACH,
 		OtDistlist =		MAPI_DISTLIST,
-		OtFolder =		MAPI_FOLDER,
-		OtForminfo =		MAPI_FORMINFO,
-		OtMailuser =		MAPI_MAILUSER,
-		OtMessage =		MAPI_MESSAGE,
 		OtProfsect =		MAPI_PROFSECT,
-		OtSession =		MAPI_SESSION,
 		OtStatus =		MAPI_STATUS,
-		OtStore =		MAPI_STORE,
+		OtSession =		MAPI_SESSION,
+		OtForminfo =		MAPI_FORMINFO,
 	} ObjectType;
 
-	Recipient(unsigned type = To) :
+	MapiRecipient(unsigned type = To) :
 		m_type(type),
 		m_displayType(DtMailuser),
 		m_objectType(OtMailuser)
@@ -160,9 +163,10 @@ public:
 		order = 0;
 	}
 
-	void setType(unsigned type)
+	void setType(Type type)
 	{
-		m_type = type;
+		m_type &= ~0x3;
+		m_type |= type;
 	}
 
 	Type type() const
@@ -170,21 +174,10 @@ public:
 		return (Type)(m_type & 0x3);
 	}
 
-	QString typeString() const
-	{
-		switch (type())
-		{
-		case Sender:
-			return QString::fromAscii("Sender");
-		case To:
-			return QString::fromAscii("To");
-		case CC:
-			return QString::fromAscii("CC");
-		case BCC:
-			return QString::fromAscii("BCC");
-		}
-		return QString();
-	}
+	/**
+	 * Map all recipient types to strings.
+	 */
+	QString typeString() const;
 
 	void setObjectType(ObjectType type)
 	{
@@ -199,38 +192,7 @@ public:
 	/**
 	 * Map all MAPI object types to strings.
 	 */
-	QString objectTypeString() const
-	{
-		switch (m_objectType)
-		{
-		case OtABcont:
-			return QString::fromAscii("Address book container");
-		case OtAddrbook:
-			return QString::fromAscii("Address book");
-		case OtAttach:
-			return QString::fromAscii("Message attachment");
-		case OtDistlist:
-			return QString::fromAscii("Distribution list");
-		case OtFolder:
-			return QString::fromAscii("Folder");
-		case OtForminfo:
-			return QString::fromAscii("Form");
-		case OtMailuser:
-			return QString::fromAscii("Messaging user");
-		case OtMessage:
-			return QString::fromAscii("Message");
-		case OtProfsect:
-			return QString::fromAscii("Profile section");
-		case OtSession:
-			return QString::fromAscii("Session");
-		case OtStatus:
-			return QString::fromAscii("Status");
-		case OtStore:
-			return QString::fromAscii("Message store");
-		default:
-			return QString::fromAscii("MAPI_0x%1 object type").arg(m_displayType, 0, 16);
-		}
-	}
+	QString objectTypeString() const;
 
 	void setDisplayType(DisplayType type)
 	{
@@ -243,30 +205,9 @@ public:
 	}
 
 	/**
-	 * Map all MAPI object types to strings.
+	 * Map all MAPI display types to strings.
 	 */
-	QString displayTypeString() const
-	{
-		switch (m_displayType)
-		{
-		case DtAgent:
-			return QString::fromAscii("Automated agent");
-		case DtDistlist:
-			return QString::fromAscii("Distribution list");
-		case DtForum:
-			return QString::fromAscii("Forum");
-		case DtMailuser:
-			return QString::fromAscii("Messaging user");
-		case DtOrganization:
-			return QString::fromAscii("Group alias");
-		case DtPrivateDistlist:
-			return QString::fromAscii("Private distribution list");
-		case DtRemoteMailuser:
-			return QString::fromAscii("Foreign/remote messaging user");
-		default:
-			return QString::fromAscii("MAPI_0x%1 display type").arg(m_objectType, 0, 16);
-		}
-	}
+	QString displayTypeString() const;
 
 	QString name;
 	QString email;
@@ -274,12 +215,10 @@ public:
 	unsigned flags;
 	unsigned order;
 
-	QString toString() const
-	{
-		static QString format = QString::fromAscii("%1 <%2>, %3, %4, %5");
-
-		return format.arg(name).arg(email).arg(typeString()).arg(objectTypeString()).arg(displayTypeString());
-	}
+	/**
+	 * Convert the whole things to a string for debug purposes.
+	 */
+	QString toString() const;
 
 protected:
 	// 0x00000000 - The recipient is the message originator.
@@ -290,35 +229,6 @@ protected:
 	unsigned m_type;
 	DisplayType m_displayType;
 	ObjectType m_objectType;
-};
-
-class Attendee : public Recipient
-{
-public:
-	Attendee() :
-		Recipient()
-	{
-	}
-
-	Attendee(const Recipient &recipient) :
-		Recipient(recipient)
-	{
-	}
-
-	bool isOrganizer()
-	{
-		return ((m_type & 0x3) == 0);
-	}
-
-	void setOrganizer(bool organizer)
-	{
-		if (organizer) {
-			m_type &= ~0x3;
-		} else {
-			m_type &= ~0x3;
-			m_type |= To;
-		}
-	}
 };
 
 class MapiRecurrencyPattern 
@@ -697,11 +607,13 @@ public:
 	 * Lists of To, CC and BCC, as well as the sender (the last will have 
 	 * 0 or 1 items only).
 	 */
-	const QList<Recipient> &recipients();
+	const QList<MapiRecipient> &recipients();
+
+	void addUniqueRecipient(MapiRecipient &candidate);
 
 protected:
 	const mapi_id_t m_folderId;
-	QList<Recipient> m_recipients;
+	QList<MapiRecipient> m_recipients;
 
 	virtual bool propertiesPull(QVector<int> &tags, const bool tagsAppended);
 
@@ -717,59 +629,7 @@ private:
 	/**
 	 * Flesh out a recipient.
 	 */
-	void recipientPopulate(const char *phase, SRow &recipient, Recipient &result);
-
-	void addUniqueRecipient(Recipient &candidate, QList<Recipient> &list);
-};
-
-/**
- * An Appointment, with attendee recipients.
- */
-class MapiAppointment : public MapiMessage
-{
-public:
-	MapiAppointment(MapiConnector2 *connection, const char *tallocName, mapi_id_t folderId, mapi_id_t id);
-
-	/**
-	 * Fetch all properties.
-	 */
-	virtual bool propertiesPull();
-
-	/**
-	 * Update a calendar item.
-	 */
-	virtual bool propertiesPush();
-
-	QString title;
-	QString text;
-	QString location;
-	QDateTime created;
-	QDateTime begin;
-	QDateTime end;
-	QDateTime modified;
-	bool reminderActive;
-	QDateTime reminderTime;
-	uint32_t reminderMinutes;
-	/**
-	 * The attendees include not just the recipients (@ref recipientsPull)
-	 * but also whoever the meeting was sent-on-behalf-of. That might or 
-	 * might not be the sender of the invitation.
-	 */
-	QList<Attendee> attendees;
-	MapiRecurrencyPattern recurrency;
-
-private:
-	bool debugRecurrencyPattern(RecurrencePattern *pattern);
-
-	void addUniqueAttendee(Recipient &candidate);
-
-	/**
-	 * Fetch calendar properties.
-	 */
-	virtual bool propertiesPull(QVector<int> &tags, const bool tagsAppended);
-
-	virtual QDebug debug() const;
-	virtual QDebug error() const;
+	void recipientPopulate(const char *phase, SRow &recipient, MapiRecipient &result);
 };
 
 #endif // MAPICONNECTOR2_H
