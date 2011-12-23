@@ -293,16 +293,16 @@ void ExCalResource::itemChangedContinue(KJob* job)
 		message->reminderActive = false;
 	}
 
-	MapiRecipient att;
+	MapiRecipient att(MapiRecipient::Sender);
 	att.name = event->organizer().name();
 	att.email = event->organizer().email();
-	att.setType(MapiRecipient::Sender);
-	message->addUniqueRecipient(att);
+	message->addUniqueRecipient("event organiser", att);
+
 	att.setType(MapiRecipient::To);
 	foreach (KCal::Attendee *person, event->attendees()) {
 		att.name = person->name();
 		att.email = person->email();
-		message->addUniqueRecipient(att);
+		message->addUniqueRecipient("event attendee", att);
 	}
 
 	if (message->recurrency.isRecurring()) {

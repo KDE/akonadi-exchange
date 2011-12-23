@@ -377,13 +377,14 @@ PidTagObjectType ([MS-OXCPRPT] section 2.2.1.7)
 	}
 
 	foreach (MapiRecipient item, MapiMessage::recipients()) {
+	debug() << "attach note recipient:" << item.toString();
 		switch (item.type()) {
 		case MapiRecipient::Sender:
 			sender()->addAddress(item.email.toUtf8(), item.name);
+			replyTo()->addAddress(item.email.toUtf8(), item.name);
 			break;
 		case MapiRecipient::To:
 			to()->addAddress(item.email.toUtf8(), item.name);
-			replyTo()->addAddress(item.email.toUtf8(), item.name);
 			break;
 		case MapiRecipient::CC:
 			cc()->addAddress(item.email.toUtf8(), item.name);

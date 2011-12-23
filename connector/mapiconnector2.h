@@ -604,12 +604,21 @@ public:
 	virtual bool propertiesPull();
 
 	/**
-	 * Lists of To, CC and BCC, as well as the sender (the last will have 
-	 * 0 or 1 items only).
+	 * Lists of To, CC and BCC, as well as the sender (the last should have 
+	 * 0 or 1 items only, but in theory may have more).
 	 */
 	const QList<MapiRecipient> &recipients();
 
-	void addUniqueRecipient(MapiRecipient &candidate);
+	/**
+	 * Add another recipient to our list.
+	 * 
+	 * @param source 	A descriptive string identifying the source, for
+	 * 			debug purposes.
+	 * @param candidate	A recipient. If unique, it will be added. If not,
+	 * 			the current entry will be updated where appropriate
+	 * 			with information from the candidate.
+	 */
+	void addUniqueRecipient(const char *source, MapiRecipient &candidate);
 
 protected:
 	const mapi_id_t m_folderId;

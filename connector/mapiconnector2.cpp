@@ -166,10 +166,11 @@ static int profileSelectCallback(struct SRowSet *rowset, const void* /*private_v
 	return rowset->cRows;
 }
 
+static QChar x500Prefix(QChar::fromAscii('/'));
+static QChar domainSeparator(QChar::fromAscii('@'));
+
 unsigned isGoodEmailAddress(QString &email)
 {
-	static QChar at(QChar::fromAscii('@'));
-	static QChar x500Prefix(QChar::fromAscii('/'));
 
 	// Anything is better than an empty address!
 	if (email.isEmpty()) {
@@ -187,7 +188,7 @@ unsigned isGoodEmailAddress(QString &email)
 	}
 
 	// An @ sign is better than no @ sign.
-	if (!email.contains(at)) {
+	if (!email.contains(domainSeparator)) {
 		return 2;
 	} else {
 		return 3;
@@ -483,8 +484,9 @@ MapiMessage::MapiMessage(MapiConnector2 *connection, const char *tallocName, map
 {
 }
 
-void MapiMessage::addUniqueRecipient(MapiRecipient &candidate)
+void MapiMessage::addUniqueRecipient(const char *source, MapiRecipient &candidate)
 {
+	error() << "add" << source << candidate.name << candidate.email;
 	if (candidate.name.isEmpty() && candidate.email.isEmpty()) {
 		error() << "ignore garbage";
 		return;
@@ -494,8 +496,11 @@ void MapiMessage::addUniqueRecipient(MapiRecipient &candidate)
 	// have in the explicit value. First, we give the library routines a chance.
 	QString name;
 	QString email;
-	error() << "try address" << candidate.name << candidate.email;
-	if (!KPIMUtils::extractEmailAddressAndName(candidate.name, email, name)) {
+	if (KPIMUtils::extractEmailAddressAndName(candidate.name, email, name)) {
+		if (isGoodEmailAddress(candidate.email) < isGoodEmailAddress(email)) {
+			candidate.email = email;
+		}
+	} else {
 		// Now for some custom action. Look for the last possible starting 
 		// delimiter, and work forward from there. Thus:
 		//
@@ -518,13 +523,26 @@ void MapiMessage::addUniqueRecipient(MapiRecipient &candidate)
 			}
 		}
 	}
+	if (candidate.email.startsWith(x500Prefix)) {
+		// Convert an X500 (or "EX"change) address to an account name,
+		// which should get resolved nicely.
+		int lastCn = candidate.email.lastIndexOf(QString::fromAscii("/CN="), -1, Qt::CaseInsensitive);
+
+		if (lastCn > -1) {
+			email = candidate.email.mid(lastCn + 4);
+			if (isGoodEmailAddress(candidate.email) < isGoodEmailAddress(email)) {
+				candidate.email = email.toLower();
+			}
+		}
+	}
 	error() << "trying address" << candidate.name << candidate.email;
 
 	for (int i = 0; i < m_recipients.size(); i++) {
 		MapiRecipient &entry = m_recipients[i];
 
 		// If we find a name match, fill in a missing email if we can.
-		if (!candidate.name.isEmpty() && (entry.name == candidate.name)) {
+	error() << "compare names" << entry.name << candidate.name << entry.name.compare(candidate.name, Qt::CaseInsensitive);
+		if (!candidate.name.isEmpty() && (0 == entry.name.compare(candidate.name, Qt::CaseInsensitive))) {
 			if (isGoodEmailAddress(entry.email) < isGoodEmailAddress(candidate.email)) {
 				entry.email = candidate.email;
 				// Promote the type if needed to more specific
@@ -540,12 +558,12 @@ void MapiMessage::addUniqueRecipient(MapiRecipient &candidate)
 					entry.setObjectType(candidate.objectType());
 				}
 				error() << "updated address" << entry.toString();
-				return;
 			}
+			return;
 		}
 
 		// If we find an email match, fill in a missing name if we can.
-		if (!candidate.email.isEmpty() && (entry.email == candidate.email)) {
+		if (!candidate.email.isEmpty() && (0 == entry.email.compare(candidate.email, Qt::CaseInsensitive))) {
 			if (entry.name.length() < candidate.name.length()) {
 				entry.name = candidate.name;
 				// Promote the type if needed to more specific
@@ -561,8 +579,8 @@ void MapiMessage::addUniqueRecipient(MapiRecipient &candidate)
 					entry.setObjectType(candidate.objectType());
 				}
 				error() << "updated address" << entry.toString();
-				return;
 			}
+			return;
 		}
 	}
 
@@ -606,6 +624,12 @@ bool MapiMessage::propertiesPull(QVector<int> &tags, const bool tagsAppended)
 		PidTagDisplayTo,
 		PidTagDisplayCc,
 		PidTagDisplayBcc,
+		PidTagSenderEmailAddress,
+		PidTagSenderSmtpAddress,
+		PidTagSenderName,
+		PidTagSenderSimpleDisplayName,
+		PidTagOriginalSenderEmailAddress,
+		PidTagOriginalSenderName,
 		PidTagSentRepresentingEmailAddress,
 		PidTagSentRepresentingName,
 		PidTagSentRepresentingSimpleDisplayName,
@@ -793,7 +817,7 @@ void MapiMessage::recipientPopulate(const char *phase, SRow &recipient, MapiReci
 		MapiRecipient result;
 
 		recipientPopulate("recipient table", recipient, result);
-		addUniqueRecipient(result);
+		addUniqueRecipient("recipient table", result);
 	}
 
 	// Walk through the properties and extract the values of interest. The
@@ -805,8 +829,10 @@ void MapiMessage::recipientPopulate(const char *phase, SRow &recipient, MapiReci
 	// the results can contain entries with missing name (!)
 	// and email values. Reading this property is a pathetic
 	// workaround.
-	MapiRecipient sentRepresenting;
-	MapiRecipient originalSentRepresenting;
+	MapiRecipient sender(MapiRecipient::Sender);
+	MapiRecipient originalSender(MapiRecipient::Sender);
+	MapiRecipient sentRepresenting(MapiRecipient::Sender);
+	MapiRecipient originalSentRepresenting(MapiRecipient::Sender);
 
 	for (unsigned i = 0; i < m_propertyCount; i++) {
 		MapiProperty property(m_properties[i]);
@@ -814,33 +840,41 @@ void MapiMessage::recipientPopulate(const char *phase, SRow &recipient, MapiReci
 		switch (property.tag()) {
 		case PidTagDisplayTo:
 			foreach (QString name, property.value().toString().split(QChar::fromAscii(';'))) {
-				MapiRecipient result;
+				MapiRecipient result(MapiRecipient::To);
 
 				result.name = name.trimmed();
-		error() << "add result:" << __LINE__ << result.name << result.email;
-				result.setType(MapiRecipient::To);
-				addUniqueRecipient(result);
+				addUniqueRecipient("displayTo", result);
 			}
 			break;
 		case PidTagDisplayCc:
 			foreach (QString name, property.value().toString().split(QChar::fromAscii(';'))) {
-				MapiRecipient result;
+				MapiRecipient result(MapiRecipient::CC);
 
 				result.name = name.trimmed();
-		error() << "add result:" << __LINE__ << result.name << result.email;
-				result.setType(MapiRecipient::CC);
-				addUniqueRecipient(result);
+				addUniqueRecipient("displayCC", result);
 			}
 			break;
 		case PidTagDisplayBcc:
 			foreach (QString name, property.value().toString().split(QChar::fromAscii(';'))) {
-				MapiRecipient result;
+				MapiRecipient result(MapiRecipient::BCC);
 
 				result.name = name.trimmed();
-		error() << "add result:" << __LINE__ << result.name << result.email;
-				result.setType(MapiRecipient::BCC);
-				addUniqueRecipient(result);
+				addUniqueRecipient("displayBCC", result);
 			}
+			break;
+		case PidTagSenderEmailAddress:
+		case PidTagSenderSmtpAddress:
+			sender.email = property.value().toString();
+			break;
+		case PidTagSenderName:
+		case PidTagSenderSimpleDisplayName:
+			sender.name = property.value().toString();
+			break;
+		case PidTagOriginalSenderEmailAddress:
+			originalSender.email = property.value().toString();
+			break;
+		case PidTagOriginalSenderName:
+			originalSender.name = property.value().toString();
 			break;
 		case PidTagSentRepresentingEmailAddress:
 			sentRepresenting.email = property.value().toString();
@@ -858,16 +892,18 @@ void MapiMessage::recipientPopulate(const char *phase, SRow &recipient, MapiReci
 		}
 	}
 
-	// Step 3. Add the sent-on-behalf-of (not the sender!).
-	if (!originalSentRepresenting.name.isEmpty()) {
-		error() << "add result:" << __LINE__ << sentRepresenting.name << sentRepresenting.email;
-		originalSentRepresenting.setType(MapiRecipient::Sender);
-		addUniqueRecipient(originalSentRepresenting);
+	// Step 3. Add the sent-on-behalf-of as well as the sender.
+	if (!sender.name.isEmpty()) {
+		addUniqueRecipient("sender", sender);
+	}
+	if (!originalSender.name.isEmpty()) {
+		addUniqueRecipient("originalSender", originalSender);
 	}
 	if (!sentRepresenting.name.isEmpty()) {
-		error() << "add result:" << __LINE__ << sentRepresenting.name << sentRepresenting.email;
-		sentRepresenting.setType(MapiRecipient::Sender);
-		addUniqueRecipient(sentRepresenting);
+		addUniqueRecipient("sentRepresenting", sentRepresenting);
+	}
+	if (!originalSentRepresenting.name.isEmpty()) {
+		addUniqueRecipient("originalSentRepresenting", originalSentRepresenting);
 	}
 
 	// We have all the recipients; find any that need resolution.
@@ -942,12 +978,23 @@ void MapiMessage::recipientPopulate(const char *phase, SRow &recipient, MapiReci
 		// that when we are done with this loop, it only contains
 		// entries which need more work.
 		for (unsigned i = 0, unresolveds = 0; i < statuses->cValues; i++) {
+			MapiRecipient &to = m_recipients[needingResolution.at(unresolveds)];
+
 			if (MAPI_RESOLVED == statuses->aulPropTag[i]) {
 				struct SRow &recipient = results->aRow[i - unresolveds];
 				MapiRecipient result;
 
 				recipientPopulate("resolution", recipient, result);
-				addUniqueRecipient(result);
+				// TODO: instead of adding the resolved name, replace the item we resolved.
+				//addUniqueRecipient("resolution", result);
+				
+				// A resolved value is better than an unresolved one.
+				if (!result.name.isEmpty()) {
+					to.name = result.name;
+				}
+				if (isGoodEmailAddress(to.email) < isGoodEmailAddress(result.email)) {
+					to.email = result.email;
+				}
 				needingResolution.removeAt(unresolveds);
 			} else {
 				unresolveds++;
@@ -1014,7 +1061,7 @@ void MapiMessage::recipientPopulate(const char *phase, SRow &recipient, MapiReci
 	m_recipients.clear();
 	foreach (MapiRecipient recipient, uniqueResolvedRecipients) {
 		m_recipients.append(recipient);
-	error() << "recipient name:" << recipient.name << "email:" << recipient.email;
+	error() << "recipient name:" << recipient.toString();
 	}
 	debug() << "recipients after resolution:" << m_recipients.size();
 	return true;
