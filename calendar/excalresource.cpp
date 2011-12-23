@@ -92,7 +92,12 @@ bool ExCalResource::retrieveItem( const Akonadi::Item &itemOrig, const QSet<QByt
 	event->setCreated(KDateTime(message->created));
 	event->setLastModified(KDateTime(message->modified));
 	event->setDescription(message->text);
-	event->setOrganizer(message->sender);
+	foreach (Recipient attendee, message->recipients()) {
+		if (attendee.type() == Recipient::Sender) {
+			event->setOrganizer(attendee.name);
+			break;
+		}
+	}
 	event->setLocation(message->location);
 	if (message->reminderActive) {
 		KCal::Alarm* alarm = new KCal::Alarm(dynamic_cast<KCal::Incidence*>(event));
@@ -220,7 +225,7 @@ void ExCalResource::itemChangedContinue(KJob* job)
 	}
 	message->modified = item.modificationTime();
 	message->text = event->description();
-	message->sender = event->organizer().name();
+	//message->sender = event->organizer().name();
 	message->location = event->location();
 	if (event->alarms().count()) {
 		KCal::Alarm* alarm = event->alarms().first();

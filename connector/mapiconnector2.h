@@ -110,20 +110,44 @@ private:
 class Recipient
 {
 public:
-	Recipient()
+	typedef enum Type {
+		Sender = 0,
+		To = 1,
+		CC = 2,
+		BCC = 3
+	} Type;
+
+	Recipient(unsigned type = To) :
+		m_type(type)
 	{
 		trackStatus = 0;
 		flags = 0;
-		type = 0;
 		order = 0;
+	}
+
+	void setType(unsigned type)
+	{
+		m_type = type;
+	}
+
+	Type type()
+	{
+		return (Type)(m_type & 0x3);
 	}
 
 	QString name;
 	QString email;
 	unsigned trackStatus;
 	unsigned flags;
-	unsigned type;
 	unsigned order;
+
+protected:
+	// 0x00000000 - The recipient is the message originator.
+	// 0x00000001 - The recipient is a primary recipient.
+	// 0x00000002 - The recipient is a Cc recipient.
+	// 0x00000003 - The recipient is a Bcc recipient.
+	// Other bits in high nibble.
+	unsigned m_type;
 };
 
 class Attendee : public Recipient
@@ -141,15 +165,16 @@ public:
 
 	bool isOrganizer()
 	{
-		return ((flags & 0x0000002) != 0);
+		return ((m_type & 0x3) == 0);
 	}
 
 	void setOrganizer(bool organizer)
 	{
 		if (organizer) {
-			flags |= 0x0000002;
+			m_type &= ~0x3;
 		} else {
-			flags &= ~0x0000002;
+			m_type &= ~0x3;
+			m_type |= To;
 		}
 	}
 };
@@ -365,16 +390,6 @@ public:
 	unsigned propertyCount() const;
 
 	/**
-	 * Fetch a set of properties.
-	 * 
-	 * @return Whether the pull succeeds, irrespective of whether the tags
-	 * were matched.
-	 */
-	bool propertiesPull(QVector<int> &tags);
-
-	bool propertiesPull(SPropTagArray *tags);
-
-	/**
 	 * Fetch all properties.
 	 */
 	virtual bool propertiesPull();
@@ -422,11 +437,22 @@ protected:
 	uint32_t m_propertyCount;
 	mutable mapi_object_t m_object;
 
+	/**
+	 * Fetch a set of properties.
+	 * 
+	 * @return Whether the pull succeeds, irrespective of whether the tags
+	 * were matched.
+	 */
+	virtual bool propertiesPull(QVector<int> &tags, bool tagsAppended);
+
 private:
 	/**
 	 * Add a property with the given value, using an immediate assignment.
 	 */
 	bool propertyWrite(int tag, void *data, bool idempotent = true);
+
+	int *m_ourTagList;
+	SPropTagArray m_ourTags;
 };
 
 /**
@@ -521,27 +547,32 @@ public:
 	mapi_id_t folderId() const;
 
 	/**
-	 * How many recipients do we have?
+	 * Fetch all properties.
 	 */
-	unsigned recipientCount() const;
+	virtual bool propertiesPull();
+
+	/**
+	 * Lists of To, CC and BCC, as well as the sender (the last will have 
+	 * 0 or 1 items only).
+	 */
+	const QList<Recipient> &recipients();
+
+protected:
+	const mapi_id_t m_folderId;
+	QList<Recipient> m_recipients;
+
+	virtual bool propertiesPull(QVector<int> &tags, const bool tagsAppended);
+
+private:
+	virtual QDebug debug() const;
+	virtual QDebug error() const;
 
 	/**
 	 * Fetch all recipients.
 	 */
 	bool recipientsPull();
 
-	/**
-	 * Fetch a property by index.
-	 */
-	Recipient recipientAt(unsigned i) const;
-
-protected:
-	const mapi_id_t m_folderId;
-	SRowSet m_recipients;
-
-private:
-	virtual QDebug debug() const;
-	virtual QDebug error() const;
+	void addUniqueRecipient(Recipient &candidate, QList<Recipient> &list);
 };
 
 /**
@@ -553,7 +584,7 @@ public:
 	MapiAppointment(MapiConnector2 *connection, const char *tallocName, mapi_id_t folderId, mapi_id_t id);
 
 	/**
-	 * Fetch all calendar properties.
+	 * Fetch all properties.
 	 */
 	virtual bool propertiesPull();
 
@@ -565,7 +596,6 @@ public:
 	QString title;
 	QString text;
 	QString location;
-	QString sender;
 	QDateTime created;
 	QDateTime begin;
 	QDateTime end;
@@ -584,9 +614,12 @@ public:
 private:
 	bool debugRecurrencyPattern(RecurrencePattern *pattern);
 
-	void addUniqueAttendee(Attendee candidate);
+	void addUniqueAttendee(Recipient &candidate);
 
-	static unsigned isGoodEmailAddress(QString &email);
+	/**
+	 * Fetch calendar properties.
+	 */
+	virtual bool propertiesPull(QVector<int> &tags, const bool tagsAppended);
 
 	virtual QDebug debug() const;
 	virtual QDebug error() const;

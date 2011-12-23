@@ -78,6 +78,11 @@ private:
 	bool preparePayload();
 
 	/**
+	 * Fetch email properties.
+	 */
+	virtual bool propertiesPull(QVector<int> &tags, const bool tagsAppended);
+
+	/**
 	 * Dump a change to a header.
 	 */
 	void dumpChange(KMime::Headers::Base *header, const char *item, MapiProperty &property);
@@ -87,113 +92,6 @@ private:
 	mapi_object_t m_attachment;
 	mapi_object_t m_stream;
 };
-
-/**
- * Add an attendee to the list. We:
- *
- *  1. Check whether the name has an embedded email address, and if it does
- *     use it (if it is better than the one we have).
- *
- *  2. If the name matches an existing entry in the list, just pick the
- *     better email address.
- *
- *  3. If the email matches, just pick the better name.
- *
- * Otherwise, we have a new entry.
- */
-static unsigned isGoodEmailAddress(QString &email)
-{
-	static QChar at(QChar::fromAscii('@'));
-	static QChar x500Prefix(QChar::fromAscii('/'));
-
-	// Anything is better than an empty address!
-	if (email.isEmpty()) {
-		return 0;
-	}
-
-	// KDEPIM does not currently handle anything like this:
-	//
-	// "/O=CISCO SYSTEMS/OU=FIRST ADMINISTRATIVE GROUP/CN=RECIPIENTS/CN=name"
-	//
-	// but for the user, it is still better than nothing, so we give it a
-	// low priority.
-	if (email[0] == x500Prefix) {
-		return 1;
-	}
-
-	// An @ sign is better than no @ sign.
-	if (!email.contains(at)) {
-		return 2;
-	} else {
-		return 3;
-	}
-}
-
-static void parseEmail(QString &candidate, QString &email, QString &name)
-{
-	// See if we can deduce a better email address from the name than we 
-	// have in the explicit value. Look for the last possible starting 
-	// delimiter, and work forward from there. Thus:
-	//
-	//       "blah (blah) <blah> <result>"
-	//
-	// should return "result". Note that we don't remove this from the name
-	// so as to give the resolution process as much to work with as possible.
-	static QRegExp firstRE(QString::fromAscii("[(<]"));
-	static QRegExp lastRE(QString::fromAscii("[)>]"));
-
-	candidate = candidate.trimmed();
-	int first = candidate.lastIndexOf(firstRE);
-	int last = candidate.indexOf(lastRE, first);
-
-	name = candidate;
-	kError() << "parsing" << candidate << email << name;
-	if ((first > -1) && (last > first + 1)) {
-		QString mid = candidate.mid(first + 1, last - first - 1);
-		if (isGoodEmailAddress(email) < isGoodEmailAddress(mid)) {
-			email = mid;
-		}
-	}
-#if 0
-	for (int i = 0; i < list.size(); i++) {
-		KMime::Types::Mailbox &entry = list[i];
-
-		// If we find a name match, fill in a missing email if we can.
-		if (!name.isEmpty() && (entry.name() == name)) {
-			if (isGoodEmailAddress(entry.email()) < isGoodEmailAddress(email)) {
-				entry.email = email;
-				return;
-			}
-		}
-
-		// If we find an email match, fill in a missing name if we can.
-		if (!email.isEmpty() && (entry.email == email)) {
-			if (entry.name.length() < name.length()) {
-				entry.name = name;
-				return;
-			}
-		}
-	}
-
-	// Add the entry if it did not match.
-	list.append(candidate);
-#endif
-}
-
-
-/**
- * The list of tags used to fetch a Note.
- */
-static int noteTagList[] = {
-	PidTagMessageClass,
-	PidTagDisplayTo,
-	PidTagConversationTopic,
-	PidTagBody,
-	0 };
-static SPropTagArray noteTags = {
-	(sizeof(noteTagList) / sizeof(noteTagList[0])) - 1,
-	(MAPITAGS *)noteTagList };
-
 
 /**
  * The list of tags used to fetch an attachment.
@@ -246,6 +144,7 @@ bool MapiNote::preparePayload()
 	
 	QStringList displayTo;
 */
+
 	bool hasAttachments = false;
 	unsigned index;
 	KMime::Content *body;
@@ -318,45 +217,6 @@ bool MapiNote::preparePayload()
 			break;
 		case PidTagHasAttachments:
 			hasAttachments = true;
-			break;
-		case PidTagSentRepresentingName:
-			dumpChange(replyTo(), "replyTo", property);
-			KPIMUtils::extractEmailAddressAndName(property.value().toString(), email, name);
-			replyTo()->addAddress(email.toUtf8(), name);
-			break;
-/*
-		case PidTagSentRepresentingAddressType:
-			sentRepresentingAddressType = property.value().toString();
-			break;
-		case PidTagSentRepresentingEmailAddress:
-			sentRepresentingEmail = property.value().toString();
-			break;
-*/
-		case PidTagSenderName:
-			dumpChange(sender(), "sender", property);
-			KPIMUtils::extractEmailAddressAndName(property.value().toString(), email, name);
-			sender()->addAddress(email.toUtf8(), name);
-			break;
-/*
-		case PidTagSenderAddressType:
-			senderAddressType = property.value().toString();
-			break;
-		case PidTagSenderEmailAddress:
-			senderEmail = property.value().toString();
-			break;
-*/
-
-		case PidTagDisplayTo:
-			foreach (QString displayTo, property.value().toString().split(QChar::fromAscii(';'))) {
-				dumpChange(to(), "to", property, displayTo);
-				if (!KPIMUtils::extractEmailAddressAndName(displayTo, email, name))
-				{
-				kError() << "pre-parsed" << email << name;
-					parseEmail(displayTo, email, name);
-				}
-				kError() << "parsed" << email << name;
-				to()->addAddress(email.toUtf8(), name);
-			}
 			break;
 
 		case PidTagConversationTopic:
@@ -511,8 +371,28 @@ PidTagObjectType ([MS-OXCPRPT] section 2.2.1.7)
 			break;
 		}
 	}
-	kError() << "kErr !!!!!!!!!!!! has attachments:" << hasAttachments; 
+
+	foreach (Recipient item, MapiMessage::recipients()) {
+		switch (item.type()) {
+		case Recipient::Sender:
+			sender()->addAddress(item.email.toUtf8(), item.name);
+			break;
+		case Recipient::To:
+			to()->addAddress(item.email.toUtf8(), item.name);
+			replyTo()->addAddress(item.email.toUtf8(), item.name);
+			break;
+		case Recipient::CC:
+			cc()->addAddress(item.email.toUtf8(), item.name);
+			break;
+		case Recipient::BCC:
+			bcc()->addAddress(item.email.toUtf8(), item.name);
+			break;
+		}
+	}
+
+	// Short circuit exit if there are no attachments.
 	if (!hasAttachments) {
+		assemble();
 		return true;
 	}
 	if (MAPI_E_SUCCESS != GetAttachmentTable(&m_object, &m_attachments)) {
@@ -946,21 +826,49 @@ QDebug MapiNote::error() const
 	return MapiObject::error(prefix.arg(m_folderId, 0, ID_BASE).arg(m_id, 0, ID_BASE)) /*<< title*/;
 }
 
-bool MapiNote::propertiesPull()
+bool MapiNote::propertiesPull(QVector<int> &tags, const bool tagsAppended)
 {
-#if (DEBUG_NOTE_PROPERTIES)
-	if (!MapiMessage::propertiesPull()) {
-		return false;
-	}
-#else
-	if (!MapiMessage::propertiesPull(&noteTags)) {
-		return false;
-	}
-#endif
+	/**
+	 * The list of tags used to fetch a Note.
+	 */
+	static int ourTagList[] = {
+		PidTagMessageClass,
+		PidTagDisplayTo,
+		PidTagConversationTopic,
+		PidTagBody,
+		0 };
+	static SPropTagArray ourTags = {
+		(sizeof(ourTagList) / sizeof(ourTagList[0])) - 1,
+		(MAPITAGS *)ourTagList };
 
+	if (!tagsAppended) {
+		for (unsigned i = 0; i < ourTags.cValues; i++) {
+			int newTag = ourTags.aulPropTag[i];
+			
+			if (!tags.contains(newTag)) {
+				tags.append(newTag);
+			}
+		}
+	}
+	if (!MapiMessage::propertiesPull(tags, tagsAppended)) {
+		return false;
+	}
 	if (!preparePayload()) {
 		return false;
 	}
+	return true;
+}
+
+bool MapiNote::propertiesPull()
+{
+	static bool tagsAppended = false;
+	static QVector<int> tags;
+
+	if (!propertiesPull(tags, tagsAppended)) {
+		tagsAppended = true;
+		return false;
+	}
+	tagsAppended = true;
 	return true;
 }
 

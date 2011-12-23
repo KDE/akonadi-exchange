@@ -22,6 +22,7 @@ target_link_libraries(akonadi_exgal_resource
 			${KDE4_AKONADI_LIBS} 
 			${KDEPIMLIBS_KABC_LIBS}
 			${KDEPIMLIBS_KMIME_LIBS}
+			${KDEPIMLIBS_KPIMUTILS_LIBS}
 			${LIBMAPI_LIBRARY}
 			${LIBDCERPC_LIBRARY}
 			${QT_QTCORE_LIBRARY} 

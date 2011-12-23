@@ -11,6 +11,7 @@ qt4_automoc(${mapibrowser_SRCS})
 add_executable(mapibrowser ${mapibrowser_SRCS})
 target_link_libraries(mapibrowser 
 		${LIBMAPI_LIBRARY}
+		${KDEPIMLIBS_KPIMUTILS_LIBS}
 		${LIBDCERPC_LIBRARY}
 		${QT_QTCORE_LIBRARY} 
 		${QT_QTGUI_LIBRARY})

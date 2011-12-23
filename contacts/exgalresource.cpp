@@ -62,6 +62,8 @@ public:
 private:
 	virtual QDebug debug() const;
 	virtual QDebug error() const;
+
+	bool propertiesPull(QVector<int> &tags, const bool tagsAppended);
 };
 
 /**
@@ -724,21 +726,36 @@ QDebug MapiContact::error() const
 	return MapiObject::error(prefix.arg(m_folderId, 0, ID_BASE).arg(m_id, 0, ID_BASE)) /*<< title*/;
 }
 
-bool MapiContact::propertiesPull()
+bool MapiContact::propertiesPull(QVector<int> &tags, const bool tagsAppended)
 {
-#if (DEBUG_CONTACT_PROPERTIES)
-	if (!MapiMessage::propertiesPull()) {
+	if (!tagsAppended) {
+		for (unsigned i = 0; i < contactTags.cValues; i++) {
+			int newTag = contactTags.aulPropTag[i];
+			
+			if (!tags.contains(newTag)) {
+				tags.append(newTag);
+			}
+		}
+	}
+	if (!MapiMessage::propertiesPull(tags, tagsAppended)) {
 		return false;
 	}
-#else
-	if (!MapiMessage::propertiesPull(&contactTags)) {
-		return false;
-	}
-#endif
-
 	if (!preparePayload(m_properties, m_propertyCount, *this)) {
 		return false;
 	}
+	return true;
+}
+
+bool MapiContact::propertiesPull()
+{
+	static bool tagsAppended = false;
+	static QVector<int> tags;
+
+	if (!propertiesPull(tags, tagsAppended)) {
+		tagsAppended = true;
+		return false;
+	}
+	tagsAppended = true;
 	return true;
 }
 
