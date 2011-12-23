@@ -46,6 +46,8 @@ case unicode: \
 
 #define UNDOCUMENTED_PR_EMAIL 0x6001001e
 #define UNDOCUMENTED_PR_EMAIL_UNICODE 0x6001001f
+#define UNDOCUMENTED_PR_EMAIL2 0x403e001e
+#define UNDOCUMENTED_PR_EMAIL2_UNICODE 0x403e001f
 
 /**
  * Set this to 1 to pull all the properties, e.g. to see what a server has
@@ -861,7 +863,7 @@ void MapiMessage::addUniqueRecipient(Recipient &candidate, QList<Recipient> &lis
 		// should return "result". Note that we don't remove this from 
 		// the name so as to give the resolution process as much to work
 		// with as possible.
-	error() << "retry address" << candidate.name << candidate.email;
+		error() << "retry address" << candidate.name << candidate.email;
 		static QRegExp firstRE(QString::fromAscii("[(<]"));
 		static QRegExp lastRE(QString::fromAscii("[)>]"));
 
@@ -884,10 +886,18 @@ void MapiMessage::addUniqueRecipient(Recipient &candidate, QList<Recipient> &lis
 		if (!candidate.name.isEmpty() && (entry.name == candidate.name)) {
 			if (isGoodEmailAddress(entry.email) < isGoodEmailAddress(candidate.email)) {
 				entry.email = candidate.email;
-				// Promote the type if needed.
+				// Promote the type if needed to more specific type.
 				if (entry.type() > candidate.type()) {
 					entry.setType(candidate.type());
 				}
+				// Promote the object and displkay type to a non-default value.
+				if (entry.displayType() == Recipient::DtMailuser) {
+					entry.setDisplayType(candidate.displayType());
+				}
+				if (entry.objectType() == Recipient::OtMailuser) {
+					entry.setObjectType(candidate.objectType());
+				}
+				error() << "updated address" << entry.toString();
 				return;
 			}
 		}
@@ -896,17 +906,25 @@ void MapiMessage::addUniqueRecipient(Recipient &candidate, QList<Recipient> &lis
 		if (!candidate.email.isEmpty() && (entry.email == candidate.email)) {
 			if (entry.name.length() < candidate.name.length()) {
 				entry.name = candidate.name;
-				// Promote the type if needed.
+				// Promote the type if needed to more specific type.
 				if (entry.type() > candidate.type()) {
 					entry.setType(candidate.type());
 				}
+				// Promote the object and displkay type to a non-default value.
+				if (entry.displayType() == Recipient::DtMailuser) {
+					entry.setDisplayType(candidate.displayType());
+				}
+				if (entry.objectType() == Recipient::OtMailuser) {
+					entry.setObjectType(candidate.objectType());
+				}
+				error() << "updated address" << entry.toString();
 				return;
 			}
 		}
 	}
 
 	// Add the entry if it did not match.
-	error() << "add new address" << candidate.name << candidate.email;
+	error() << "add new address" << candidate.toString();
 	list.append(candidate);
 }
 
@@ -983,6 +1001,59 @@ bool MapiMessage::propertiesPull()
 	return true;
 }
 
+void MapiMessage::recipientPopulate(const char *phase, SRow &recipient, Recipient &result)
+{
+	for (unsigned j = 0; j < recipient.cValues; j++) {
+		MapiProperty property(recipient.lpProps[j]);
+		QString tmp;
+
+		// Note that the set of properties fetched here must be aligned
+		// with those fetched in MapiConnector::resolveNames().
+		switch (property.tag()) {
+		case PidTag7BitDisplayName_string8:
+		case PidTagDisplayName:
+		case PidTagRecipientDisplayName:
+			result.name = property.value().toString();
+			break;
+		case PidTagPrimarySmtpAddress:
+		case UNDOCUMENTED_PR_EMAIL:
+		case UNDOCUMENTED_PR_EMAIL_UNICODE:
+		case UNDOCUMENTED_PR_EMAIL2:
+		case UNDOCUMENTED_PR_EMAIL2_UNICODE:
+			tmp = property.value().toString();
+			if (isGoodEmailAddress(result.email) < isGoodEmailAddress(tmp)) {
+				result.email = tmp;
+			}
+			break;
+		case PidTagRecipientTrackStatus:
+			result.trackStatus = property.value().toInt();
+			break;
+		case PidTagRecipientFlags:
+			result.flags = property.value().toInt();
+			break;
+		case PidTagRecipientType:
+			result.setType(property.value().toUInt());
+			break;
+		case PidTagRecipientOrder:
+			result.order = property.value().toInt();
+			break;
+		case PidTagDisplayType:
+			result.setDisplayType((Recipient::DisplayType)property.value().toUInt());
+			break;
+		case PidTagObjectType:
+			result.setObjectType((Recipient::ObjectType)property.value().toUInt());
+			break;
+		default:
+#if (DEBUG_MESSAGE_PROPERTIES)
+			debug() << "ignoring " << phase << " property:" << tagName(property.tag()) << property.value();
+#else
+			Q_UNUSED(phase);
+#endif
+			break;
+		}
+	}
+}
+
 bool MapiMessage::recipientsPull()
 {
 #if 0
@@ -1049,40 +1120,7 @@ bool MapiMessage::recipientsPull()
 		SRow &recipient = rowset.aRow[i];
 		Recipient result;
 
-		for (unsigned j = 0; j < recipient.cValues; j++) {
-			MapiProperty property(recipient.lpProps[j]);
-
-			// Note that the set of properties fetched here must be aligned
-			// with those fetched in MapiConnector::resolveNames().
-			debug() << "recipient property:" << tagName(property.tag()) << property.value();
-			switch (property.tag()) {
-			case PidTag7BitDisplayName:
-			case PidTagDisplayName:
-			case PidTagRecipientDisplayName:
-				result.name = property.value().toString();
-				break;
-			case PidTagPrimarySmtpAddress:
-			case UNDOCUMENTED_PR_EMAIL_UNICODE:
-				result.email = property.value().toString();
-				break;
-			case PidTagRecipientTrackStatus:
-				result.trackStatus = property.value().toInt();
-				break;
-			case PidTagRecipientFlags:
-				result.flags = property.value().toInt();
-				break;
-			case PidTagRecipientType:
-				result.setType(property.value().toUInt());
-				break;
-			case PidTagRecipientOrder:
-				result.order = property.value().toInt();
-				break;
-			default:
-				debug() << "ignoring recipient property:" << tagName(property.tag()) << property.value();
-				break;
-			}
-		}
-		error() << "add result:" << __LINE__ << result.name << result.email;
+		recipientPopulate("recipient table", recipient, result);
 		addUniqueRecipient(result, m_recipients);
 	}
 
@@ -1200,16 +1238,23 @@ bool MapiMessage::recipientsPull()
 
 	// Server round trip here!
 	static int recipientTagList[] = {
-		PidTag7BitDisplayName,
+		PidTag7BitDisplayName_string8,
 		PidTagDisplayName,
 		PidTagRecipientDisplayName, 
 		PidTagPrimarySmtpAddress,
+		UNDOCUMENTED_PR_EMAIL,
 		UNDOCUMENTED_PR_EMAIL_UNICODE,
+		UNDOCUMENTED_PR_EMAIL,
+		UNDOCUMENTED_PR_EMAIL_UNICODE,
+		UNDOCUMENTED_PR_EMAIL2,
+		UNDOCUMENTED_PR_EMAIL2_UNICODE,
 		0x60010018,
 		PidTagRecipientTrackStatus,
 		PidTagRecipientFlags,
 		PidTagRecipientType,
 		PidTagRecipientOrder,
+		PidTagDisplayType,
+		PidTagObjectType,
 		0 };
 	static SPropTagArray recipientTags = {
 		(sizeof(recipientTagList) / sizeof(recipientTagList[0])) - 1,
@@ -1225,54 +1270,12 @@ bool MapiMessage::recipientsPull()
 		// that when we are done with this loop, it only contains
 		// entries which need more work.
 		for (unsigned i = 0, unresolveds = 0; i < statuses->cValues; i++) {
-			Recipient &to = m_recipients[needingResolution.at(unresolveds)];
-
 			if (MAPI_RESOLVED == statuses->aulPropTag[i]) {
 				struct SRow &recipient = results->aRow[i - unresolveds];
 				Recipient result;
 
-				for (unsigned j = 0; j < recipient.cValues; j++) {
-					MapiProperty property(recipient.lpProps[j]);
-
-					// Note that the set of properties fetched here must be aligned
-					// with those fetched in MapiMessage::recipientAt(), as well
-					// as the array above.
-					switch (property.tag()) {
-					case PidTag7BitDisplayName:
-					case PidTagDisplayName:
-					case PidTagRecipientDisplayName:
-						result.name = property.value().toString();
-						break;
-					case PidTagPrimarySmtpAddress:
-					case UNDOCUMENTED_PR_EMAIL_UNICODE:
-						result.email = property.value().toString();
-						break;
-					case PidTagRecipientTrackStatus:
-						result.trackStatus = property.value().toInt();
-						break;
-					case PidTagRecipientFlags:
-						result.flags = property.value().toInt();
-						break;
-					case PidTagRecipientType:
-						result.setType(property.value().toUInt());
-						break;
-					case PidTagRecipientOrder:
-						result.order = property.value().toInt();
-						break;
-					default:
-						debug() << "ignoring resolution property:" << tagName(property.tag()) << property.value();
-						break;
-					}
-				}
-
-				// A resolved value is better than an unresolved one.
-				if (!result.name.isEmpty()) {
-					to.name = result.name;
-				}
-		error() << "compare:" << __LINE__ << to.email << result.email;
-				if (isGoodEmailAddress(to.email) < isGoodEmailAddress(result.email)) {
-					to.email = result.email;
-				}
+				recipientPopulate("resolution", recipient, result);
+				addUniqueRecipient(result, m_recipients);
 				needingResolution.removeAt(unresolveds);
 			} else {
 				unresolveds++;

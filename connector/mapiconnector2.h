@@ -110,15 +110,50 @@ private:
 class Recipient
 {
 public:
-	typedef enum Type {
+	typedef enum {
 		Sender = 0,
 		To = 1,
 		CC = 2,
 		BCC = 3
 	} Type;
 
+	/**
+	 * Legal values for the display type. Other values are not valid,
+	 * but will be stringified by @ref displayTypeString.
+	 */
+	typedef enum {
+		DtAgent =		DT_AGENT,
+		DtDistlist =		DT_DISTLIST,
+		DtForum =		DT_FORUM,
+		DtMailuser =		DT_MAILUSER,
+		DtOrganization =	DT_ORGANIZATION,
+		DtPrivateDistlist =	DT_PRIVATE_DISTLIST,
+		DtRemoteMailuser =	DT_REMOTE_MAILUSER,
+	} DisplayType;
+
+	/**
+	 * Legal values for the type of object. Other values are not valid,
+	 * but will be stringified by @ref objectTypeString.
+	 */
+	typedef enum {
+		OtABcont =		MAPI_ABCONT,
+		OtAddrbook =		MAPI_ADDRBOOK,
+		OtAttach =		MAPI_ATTACH,
+		OtDistlist =		MAPI_DISTLIST,
+		OtFolder =		MAPI_FOLDER,
+		OtForminfo =		MAPI_FORMINFO,
+		OtMailuser =		MAPI_MAILUSER,
+		OtMessage =		MAPI_MESSAGE,
+		OtProfsect =		MAPI_PROFSECT,
+		OtSession =		MAPI_SESSION,
+		OtStatus =		MAPI_STATUS,
+		OtStore =		MAPI_STORE,
+	} ObjectType;
+
 	Recipient(unsigned type = To) :
-		m_type(type)
+		m_type(type),
+		m_displayType(DtMailuser),
+		m_objectType(OtMailuser)
 	{
 		trackStatus = 0;
 		flags = 0;
@@ -130,9 +165,107 @@ public:
 		m_type = type;
 	}
 
-	Type type()
+	Type type() const
 	{
 		return (Type)(m_type & 0x3);
+	}
+
+	QString typeString() const
+	{
+		switch (type())
+		{
+		case Sender:
+			return QString::fromAscii("Sender");
+		case To:
+			return QString::fromAscii("To");
+		case CC:
+			return QString::fromAscii("CC");
+		case BCC:
+			return QString::fromAscii("BCC");
+		}
+		return QString();
+	}
+
+	void setObjectType(ObjectType type)
+	{
+		m_objectType = type;
+	}
+
+	ObjectType objectType() const
+	{
+		return m_objectType;
+	}
+
+	/**
+	 * Map all MAPI object types to strings.
+	 */
+	QString objectTypeString() const
+	{
+		switch (m_objectType)
+		{
+		case OtABcont:
+			return QString::fromAscii("Address book container");
+		case OtAddrbook:
+			return QString::fromAscii("Address book");
+		case OtAttach:
+			return QString::fromAscii("Message attachment");
+		case OtDistlist:
+			return QString::fromAscii("Distribution list");
+		case OtFolder:
+			return QString::fromAscii("Folder");
+		case OtForminfo:
+			return QString::fromAscii("Form");
+		case OtMailuser:
+			return QString::fromAscii("Messaging user");
+		case OtMessage:
+			return QString::fromAscii("Message");
+		case OtProfsect:
+			return QString::fromAscii("Profile section");
+		case OtSession:
+			return QString::fromAscii("Session");
+		case OtStatus:
+			return QString::fromAscii("Status");
+		case OtStore:
+			return QString::fromAscii("Message store");
+		default:
+			return QString::fromAscii("MAPI_0x%1 object type").arg(m_displayType, 0, 16);
+		}
+	}
+
+	void setDisplayType(DisplayType type)
+	{
+		m_displayType = type;
+	}
+
+	DisplayType displayType() const
+	{
+		return m_displayType;
+	}
+
+	/**
+	 * Map all MAPI object types to strings.
+	 */
+	QString displayTypeString() const
+	{
+		switch (m_displayType)
+		{
+		case DtAgent:
+			return QString::fromAscii("Automated agent");
+		case DtDistlist:
+			return QString::fromAscii("Distribution list");
+		case DtForum:
+			return QString::fromAscii("Forum");
+		case DtMailuser:
+			return QString::fromAscii("Messaging user");
+		case DtOrganization:
+			return QString::fromAscii("Group alias");
+		case DtPrivateDistlist:
+			return QString::fromAscii("Private distribution list");
+		case DtRemoteMailuser:
+			return QString::fromAscii("Foreign/remote messaging user");
+		default:
+			return QString::fromAscii("MAPI_0x%1 display type").arg(m_objectType, 0, 16);
+		}
 	}
 
 	QString name;
@@ -141,6 +274,13 @@ public:
 	unsigned flags;
 	unsigned order;
 
+	QString toString() const
+	{
+		static QString format = QString::fromAscii("%1 <%2>, %3, %4, %5");
+
+		return format.arg(name).arg(email).arg(typeString()).arg(objectTypeString()).arg(displayTypeString());
+	}
+
 protected:
 	// 0x00000000 - The recipient is the message originator.
 	// 0x00000001 - The recipient is a primary recipient.
@@ -148,6 +288,8 @@ protected:
 	// 0x00000003 - The recipient is a Bcc recipient.
 	// Other bits in high nibble.
 	unsigned m_type;
+	DisplayType m_displayType;
+	ObjectType m_objectType;
 };
 
 class Attendee : public Recipient
@@ -571,6 +713,11 @@ private:
 	 * Fetch all recipients.
 	 */
 	bool recipientsPull();
+
+	/**
+	 * Flesh out a recipient.
+	 */
+	void recipientPopulate(const char *phase, SRow &recipient, Recipient &result);
 
 	void addUniqueRecipient(Recipient &candidate, QList<Recipient> &list);
 };

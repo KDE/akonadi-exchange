@@ -67,68 +67,6 @@ private:
 };
 
 /**
- * Map all MAPI object types to strings.
- */
-static QString mapiDisplayType(unsigned type)
-{
-	switch (type)
-	{
-	case DT_AGENT:
-		return QString::fromAscii("automated agent");
-	case DT_DISTLIST:
-		return QString::fromAscii("distribution list");
-	case DT_FORUM:
-		return QString::fromAscii("forum");
-	case DT_MAILUSER:
-		return QString::fromAscii("normal messaging user");
-	case DT_ORGANIZATION:
-		return QString::fromAscii("alias for a large group");
-	case DT_PRIVATE_DISTLIST:
-		return QString::fromAscii("private distribution list");
-	case DT_REMOTE_MAILUSER:
-		return QString::fromAscii("foreign/remote messaging user");
-	default:
-		return QString::fromAscii("MAPI_0x%1 display type").arg(type, 0, 16);
-	}
-}
-
-/**
- * Map all MAPI object types to strings.
- */
-static QString mapiObjectType(unsigned type)
-{
-	switch (type)
-	{
-	case MAPI_ABCONT:
-		return QString::fromAscii("Address book container");
-	case MAPI_ADDRBOOK:
-		return QString::fromAscii("Address book");
-	case MAPI_ATTACH:
-		return QString::fromAscii("Message attachment");
-	case MAPI_DISTLIST:
-		return QString::fromAscii("Distribution list");
-	case MAPI_FOLDER:
-		return QString::fromAscii("Folder");
-	case MAPI_FORMINFO:
-		return QString::fromAscii("Form");
-	case MAPI_MAILUSER:
-		return QString::fromAscii("Messaging user");
-	case MAPI_MESSAGE:
-		return QString::fromAscii("Message");
-	case MAPI_PROFSECT:
-		return QString::fromAscii("Profile section");
-	case MAPI_SESSION:
-		return QString::fromAscii("Session");
-	case MAPI_STATUS:
-		return QString::fromAscii("Status");
-	case MAPI_STORE:
-		return QString::fromAscii("Message store");
-	default:
-		return QString::fromAscii("MAPI_0x%1 object type").arg(type, 0, 16);
-	}
-}
-
-/**
  * The list of tags used to fetch data from the GAL or for a Contact. This list
  * must be kept synchronised with the body of @ref preparePayload.
  *
