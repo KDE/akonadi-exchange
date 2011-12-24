@@ -486,9 +486,9 @@ MapiMessage::MapiMessage(MapiConnector2 *connection, const char *tallocName, map
 
 void MapiMessage::addUniqueRecipient(const char *source, MapiRecipient &candidate)
 {
-	error() << "add" << source << candidate.name << candidate.email;
+	debug() << "candidate address:" << source << candidate.toString();
 	if (candidate.name.isEmpty() && candidate.email.isEmpty()) {
-		error() << "ignore garbage";
+		debug() << "ignore garbage";
 		return;
 	}
 
@@ -509,7 +509,6 @@ void MapiMessage::addUniqueRecipient(const char *source, MapiRecipient &candidat
 		// should return "result". Note that we don't remove this from 
 		// the name so as to give the resolution process as much to work
 		// with as possible.
-		error() << "retry address" << candidate.name << candidate.email;
 		static QRegExp firstRE(QString::fromAscii("[(<]"));
 		static QRegExp lastRE(QString::fromAscii("[)>]"));
 
@@ -535,13 +534,17 @@ void MapiMessage::addUniqueRecipient(const char *source, MapiRecipient &candidat
 			}
 		}
 	}
-	error() << "trying address" << candidate.name << candidate.email;
+	debug() << "transformed candidate:" << candidate.toString();
 
 	for (int i = 0; i < m_recipients.size(); i++) {
 		MapiRecipient &entry = m_recipients[i];
 
+		// A ReplyTo item only matches other ReplyTo items.
+		if ((candidate.type() == MapiRecipient::ReplyTo) && (entry.type() != MapiRecipient::ReplyTo)) {
+			continue;
+		}
+
 		// If we find a name match, fill in a missing email if we can.
-	error() << "compare names" << entry.name << candidate.name << entry.name.compare(candidate.name, Qt::CaseInsensitive);
 		if (!candidate.name.isEmpty() && (0 == entry.name.compare(candidate.name, Qt::CaseInsensitive))) {
 			if (isGoodEmailAddress(entry.email) < isGoodEmailAddress(candidate.email)) {
 				entry.email = candidate.email;
@@ -557,7 +560,7 @@ void MapiMessage::addUniqueRecipient(const char *source, MapiRecipient &candidat
 				if (entry.objectType() == MapiRecipient::OtMailuser) {
 					entry.setObjectType(candidate.objectType());
 				}
-				error() << "updated address" << entry.toString();
+				debug() << "updated address" << entry.toString();
 			}
 			return;
 		}
@@ -578,14 +581,14 @@ void MapiMessage::addUniqueRecipient(const char *source, MapiRecipient &candidat
 				if (entry.objectType() == MapiRecipient::OtMailuser) {
 					entry.setObjectType(candidate.objectType());
 				}
-				error() << "updated address" << entry.toString();
+				debug() << "updated address" << entry.toString();
 			}
 			return;
 		}
 	}
 
 	// Add the entry if it did not match.
-	error() << "add new address" << candidate.toString();
+	debug() << "add new address" << candidate.toString();
 	m_recipients.append(candidate);
 }
 
@@ -702,7 +705,8 @@ void MapiMessage::recipientPopulate(const char *phase, SRow &recipient, MapiReci
 			result.flags = property.value().toInt();
 			break;
 		case PidTagRecipientType:
-			result.setType((MapiRecipient::Type)property.value().toUInt());
+			// Mask off bits we don't want.
+			result.setType((MapiRecipient::Type)(property.value().toUInt() & 0x3));
 			break;
 		case PidTagRecipientOrder:
 			result.order = property.value().toInt();
@@ -814,7 +818,7 @@ void MapiMessage::recipientPopulate(const char *phase, SRow &recipient, MapiReci
 
 	for (unsigned i = 0; i < rowset.cRows; i++) {
 		SRow &recipient = rowset.aRow[i];
-		MapiRecipient result;
+		MapiRecipient result(MapiRecipient::To);
 
 		recipientPopulate("recipient table", recipient, result);
 		addUniqueRecipient("recipient table", result);
@@ -831,8 +835,8 @@ void MapiMessage::recipientPopulate(const char *phase, SRow &recipient, MapiReci
 	// workaround.
 	MapiRecipient sender(MapiRecipient::Sender);
 	MapiRecipient originalSender(MapiRecipient::Sender);
-	MapiRecipient sentRepresenting(MapiRecipient::Sender);
-	MapiRecipient originalSentRepresenting(MapiRecipient::Sender);
+	MapiRecipient sentRepresenting(MapiRecipient::ReplyTo);
+	MapiRecipient originalSentRepresenting(MapiRecipient::ReplyTo);
 
 	for (unsigned i = 0; i < m_propertyCount; i++) {
 		MapiProperty property(m_properties[i]);
@@ -900,10 +904,10 @@ void MapiMessage::recipientPopulate(const char *phase, SRow &recipient, MapiReci
 		addUniqueRecipient("originalSender", originalSender);
 	}
 	if (!sentRepresenting.name.isEmpty()) {
-		addUniqueRecipient("sentRepresenting", sentRepresenting);
+		addUniqueRecipient("replyTo", sentRepresenting);
 	}
 	if (!originalSentRepresenting.name.isEmpty()) {
-		addUniqueRecipient("originalSentRepresenting", originalSentRepresenting);
+		addUniqueRecipient("originalReplyTo", originalSentRepresenting);
 	}
 
 	// We have all the recipients; find any that need resolution.
@@ -917,7 +921,7 @@ void MapiMessage::recipientPopulate(const char *phase, SRow &recipient, MapiReci
 		if (isGoodEmailAddress(recipient.email) < perfect) {
 			needingResolution << i;
 		}
-		error() << "add result:" << __LINE__ << recipient.name << recipient.email;
+		error() << "needs resolution:" << recipient.toString();
 	}
 	debug() << "recipients needing primary resolution:" << needingResolution.size() << "from a total:" << m_recipients.size();
 
@@ -982,12 +986,9 @@ void MapiMessage::recipientPopulate(const char *phase, SRow &recipient, MapiReci
 
 			if (MAPI_RESOLVED == statuses->aulPropTag[i]) {
 				struct SRow &recipient = results->aRow[i - unresolveds];
-				MapiRecipient result;
+				MapiRecipient result(MapiRecipient::To);
 
 				recipientPopulate("resolution", recipient, result);
-				// TODO: instead of adding the resolved name, replace the item we resolved.
-				//addUniqueRecipient("resolution", result);
-				
 				// A resolved value is better than an unresolved one.
 				if (!result.name.isEmpty()) {
 					to.name = result.name;
@@ -1013,12 +1014,18 @@ void MapiMessage::recipientPopulate(const char *phase, SRow &recipient, MapiReci
 		MapiRecipient &recipient = m_recipients[i];
 
 		if (!recipient.email.isEmpty()) {
-			// If we have duplicates, keep the one with the longer 
-			// name in the hopes that it will be the more 
-			// descriptive.
 			QMap<QString, MapiRecipient>::const_iterator i = uniqueResolvedRecipients.constFind(recipient.email);
 			if (i != uniqueResolvedRecipients.constEnd()) {
+				// If we have duplicates, keep the one with the longer 
+				// name in the hopes that it will be the more descriptive.
 				if (recipient.name.length() < i.value().name.length()) {
+					continue;
+				}
+				
+				// Don't allow different types to collide to preserve ReplyTo
+				// distinctiveness.
+				if (recipient.type() != i.value().type()) {
+					uniqueResolvedRecipients.insertMulti(recipient.email, recipient);
 					continue;
 				}
 			}
@@ -1771,7 +1778,7 @@ QString MapiRecipient::objectTypeString() const
 
 QString MapiRecipient::typeString() const
 {
-	switch (type())
+	switch (m_type)
 	{
 	case Sender:
 		return QString::fromAscii("Sender");
@@ -1781,8 +1788,11 @@ QString MapiRecipient::typeString() const
 		return QString::fromAscii("CC");
 	case BCC:
 		return QString::fromAscii("BCC");
+	case ReplyTo:
+		return QString::fromAscii("ReplyTo");
+	default:
+		return QString::fromAscii("MAPI_0x%1 type").arg(m_type, 0, 16);
 	}
-	return QString();
 }
 
 bool MapiRecurrencyPattern::setData(RecurrencePattern* pattern)

@@ -114,7 +114,8 @@ public:
 		Sender = 0,
 		To = 1,
 		CC = 2,
-		BCC = 3
+		BCC = 3,
+		ReplyTo = 4
 	} Type;
 
 	/**
@@ -153,7 +154,7 @@ public:
 		OtForminfo =		MAPI_FORMINFO,
 	} ObjectType;
 
-	MapiRecipient(unsigned type = To) :
+	MapiRecipient(Type type) :
 		m_type(type),
 		m_displayType(DtMailuser),
 		m_objectType(OtMailuser)
@@ -165,13 +166,12 @@ public:
 
 	void setType(Type type)
 	{
-		m_type &= ~0x3;
-		m_type |= type;
+		m_type = type;
 	}
 
 	Type type() const
 	{
-		return (Type)(m_type & 0x3);
+		return m_type;
 	}
 
 	/**
@@ -221,12 +221,7 @@ public:
 	QString toString() const;
 
 protected:
-	// 0x00000000 - The recipient is the message originator.
-	// 0x00000001 - The recipient is a primary recipient.
-	// 0x00000002 - The recipient is a Cc recipient.
-	// 0x00000003 - The recipient is a Bcc recipient.
-	// Other bits in high nibble.
-	unsigned m_type;
+	Type m_type;
 	DisplayType m_displayType;
 	ObjectType m_objectType;
 };
