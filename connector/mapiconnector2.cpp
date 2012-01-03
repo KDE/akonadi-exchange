@@ -34,16 +34,6 @@
  */
 #define ID_BASE 36
 
-#define CASE_PREFER_UNICODE(unicode, lvalue, rvalue) \
-case unicode ## _string8: \
-	if (lvalue.isEmpty()) { \
-		lvalue = rvalue; \
-	} \
-	break; \
-case unicode: \
-	lvalue = rvalue; \
-	break;
-
 #define UNDOCUMENTED_PR_EMAIL 0x6001001e
 #define UNDOCUMENTED_PR_EMAIL_UNICODE 0x6001001f
 #define UNDOCUMENTED_PR_EMAIL2 0x403e001e
