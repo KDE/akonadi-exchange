@@ -96,7 +96,13 @@ void mapibrowser::onRefreshTree()
 		return;
 	}
 
-	MapiFolder rootFolder(&con, "mapibrowser::onRefreshTree", 0);
+	mapi_id_t rootId;
+	if (!con.defaultFolder(TopInformationStore, &rootId))
+	{
+		QMessageBox::warning(this, QString::fromLocal8Bit("Error"), QString::fromLocal8Bit("cannot find Exchange folder root"));
+		return;
+	}
+	MapiFolder rootFolder(&con, "mapibrowser::onRefreshTree", rootId);
 	if (!rootFolder.open()) {
 		return;
 	}
