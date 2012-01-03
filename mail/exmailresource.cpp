@@ -189,7 +189,7 @@ bool MapiNote::preparePayload()
 			// Sanity check the message class.
 			if ((QLatin1String("IPM.Note") != property.value().toString()) &&
 				(QLatin1String("Remote.IPM.Note") != property.value().toString())){
-				kError() << "retrieved item is not an email or a header:" << property.value().toString();
+				error() << "retrieved item is not an email or a header:" << property.value().toString();
 				return false;
 			}
 			break;

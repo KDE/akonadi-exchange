@@ -34,6 +34,15 @@
  */
 #define ID_BASE 36
 
+#define CASE_PREFER_A_OVER_B(a, b, lvalue, rvalue) \
+case b: \
+	if (lvalue.isEmpty()) { \
+		lvalue = rvalue; \
+	} \
+	break; \
+case a: \
+	lvalue = rvalue; \
+
 #define UNDOCUMENTED_PR_EMAIL 0x6001001e
 #define UNDOCUMENTED_PR_EMAIL_UNICODE 0x6001001f
 #define UNDOCUMENTED_PR_EMAIL2 0x403e001e
@@ -520,7 +529,7 @@ void MapiMessage::addUniqueRecipient(const char *source, MapiRecipient &candidat
 		if (lastCn > -1) {
 			email = candidate.email.mid(lastCn + 4);
 			if (isGoodEmailAddress(candidate.email) < isGoodEmailAddress(email)) {
-				candidate.email = email.toLower();
+				candidate.email = email;
 			}
 		}
 	}
@@ -860,9 +869,7 @@ void MapiMessage::recipientPopulate(const char *phase, SRow &recipient, MapiReci
 		case PidTagSenderSmtpAddress:
 			sender.email = property.value().toString();
 			break;
-		case PidTagSenderName:
-		case PidTagSenderSimpleDisplayName:
-			sender.name = property.value().toString();
+		CASE_PREFER_A_OVER_B(PidTagSenderName, PidTagSenderSimpleDisplayName, sender.name, property.value().toString());
 			break;
 		case PidTagOriginalSenderEmailAddress:
 			originalSender.email = property.value().toString();
@@ -873,9 +880,7 @@ void MapiMessage::recipientPopulate(const char *phase, SRow &recipient, MapiReci
 		case PidTagSentRepresentingEmailAddress:
 			sentRepresenting.email = property.value().toString();
 			break;
-		case PidTagSentRepresentingName:
-		case PidTagSentRepresentingSimpleDisplayName:
-			sentRepresenting.name = property.value().toString();
+		CASE_PREFER_A_OVER_B(PidTagSentRepresentingName, PidTagSentRepresentingSimpleDisplayName, sentRepresenting.name, property.value().toString());
 			break;
 		case PidTagOriginalSentRepresentingEmailAddress:
 			originalSentRepresenting.email = property.value().toString();
@@ -911,7 +916,6 @@ void MapiMessage::recipientPopulate(const char *phase, SRow &recipient, MapiReci
 		if (isGoodEmailAddress(recipient.email) < perfect) {
 			needingResolution << i;
 		}
-		error() << "needs resolution:" << recipient.toString();
 	}
 	debug() << "recipients needing primary resolution:" << needingResolution.size() << "from a total:" << m_recipients.size();
 

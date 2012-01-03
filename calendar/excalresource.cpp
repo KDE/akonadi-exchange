@@ -473,21 +473,6 @@ bool MapiAppointment::propertiesPull(QVector<int> &tags, const bool tagsAppended
 		PidLidReminderDelta,
 		PidLidRecurrenceType,
 		PidLidAppointmentRecur,
-
-		PidTagSentRepresentingEmailAddress,
-		PidTagSentRepresentingEmailAddress_string8,
-
-		PidTagSentRepresentingName,
-		PidTagSentRepresentingName_string8,
-
-		PidTagSentRepresentingSimpleDisplayName,
-		PidTagSentRepresentingSimpleDisplayName_string8,
-
-		PidTagOriginalSentRepresentingEmailAddress,
-		PidTagOriginalSentRepresentingEmailAddress_string8,
-
-		PidTagOriginalSentRepresentingName,
-		PidTagOriginalSentRepresentingName_string8,
 		0 };
 	static SPropTagArray ourTags = {
 		(sizeof(ourTagList) / sizeof(ourTagList[0])) - 1,
@@ -521,7 +506,7 @@ bool MapiAppointment::propertiesPull(QVector<int> &tags, const bool tagsAppended
 		case PidTagMessageClass:
 			// Sanity check the message class.
 			if (QLatin1String("IPM.Appointment") != property.value().toString()) {
-				// this one is not an appointment
+				error() << "retrieved item is not an appointment:" << property.value().toString();
 				return false;
 			}
 			break;
