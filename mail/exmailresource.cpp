@@ -229,7 +229,7 @@ bool MapiNote::preparePayload()
 				subject()->fromUnicodeString(property.value().toString(), "utf-8");
 			}
 			break;
-		case PidTagOriginalSubject:
+		case PidTagSubject:
 			dumpChange(subject(true), "subject", property);
 			subject()->fromUnicodeString(property.value().toString(), "utf-8");
 			break;
@@ -839,8 +839,7 @@ bool MapiNote::propertiesPull(QVector<int> &tags, const bool tagsAppended)
 	 */
 	static int ourTagList[] = {
 		PidTagMessageClass,
-		PidTagDisplayTo,
-		PidTagConversationTopic,
+		PidTagSubject,
 		PidTagBody,
 		0 };
 	static SPropTagArray ourTags = {
