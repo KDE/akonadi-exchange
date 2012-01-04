@@ -98,25 +98,6 @@ private:
 };
 
 /**
- * The list of tags used to fetch an attachment.
- */
-static int attachmentTagList[] = {
-	PidTagAttachNumber,
-	PidTagRenderingPosition,
-	PidTagAttachMimeTag,
-	PidTagAttachMethod,
-	PidTagAttachLongFilename,
-	PidTagAttachFilename,
-	PidTagAttachSize,
-	PidTagAttachDataBinary,
-	PidTagAttachDataObject,
-	0 };
-static SPropTagArray attachmentTags = {
-	(sizeof(attachmentTagList) / sizeof(attachmentTagList[0])) - 1,
-	(MAPITAGS *)attachmentTagList };
-
-	
-/**
  * Take a set of properties, and attempt to apply them to the given addressee.
  * 
  * The switch statement at the heart of this routine must be kept synchronised
@@ -139,15 +120,21 @@ void MapiNote::dumpChange(KMime::Headers::Base *header, const char *item, MapiPr
 
 bool MapiNote::preparePayload()
 {
-/*
-	QString title;
-	QString text;
-	QString sender;
-	QDateTime created;
-
-	
-	QStringList displayTo;
-*/
+	// The list of tags used to fetch an attachment.
+	static int attachmentTagList[] = {
+		PidTagAttachNumber,
+		PidTagRenderingPosition,
+		PidTagAttachMimeTag,
+		PidTagAttachMethod,
+		PidTagAttachLongFilename,
+		PidTagAttachFilename,
+		PidTagAttachSize,
+		PidTagAttachDataBinary,
+		PidTagAttachDataObject,
+		0 };
+	static SPropTagArray attachmentTags = {
+		(sizeof(attachmentTagList) / sizeof(attachmentTagList[0])) - 1,
+		(MAPITAGS *)attachmentTagList };
 
 	bool hasAttachments = false;
 	unsigned index;
@@ -224,10 +211,8 @@ bool MapiNote::preparePayload()
 			break;
 
 		case PidTagConversationTopic:
-			if (!subject() || subject()->isEmpty()) {
-				dumpChange(subject(true), "subject", property);
-				subject()->fromUnicodeString(property.value().toString(), "utf-8");
-			}
+		case PidTagNormalizedSubject:
+			setHeader(new KMime::Headers::Generic("Thread-Topic", this, property.value().toString(), "utf-8"));
 			break;
 		case PidTagSubject:
 			dumpChange(subject(true), "subject", property);
@@ -243,131 +228,6 @@ bool MapiNote::preparePayload()
 			//dumpChange(references(true), "references", property);
 			references()->fromUnicodeString(property.value().toString(), "utf-8");
 			break;
-
-			
-/*
-		case PidTagSubject:
-			break;
-			
-PidTagCreationTime (section 2.2.2.3)
-
-PidTagLastModificationTime (section 2.2.2.2)
-
-PidTagLastModifierName ([MS-OXCPRPT] section 2.2.1.5)
-
-PidTagObjectType ([MS-OXCPRPT] section 2.2.1.7)
-
-
-
-
-2.2.1.2 PidTagHasAttachments Property
-
-
-2.2.1.4 PidTagMessageCodepage Property
-
-2.2.1.5 PidTagMessageLocaleId Property
-
-2.2.1.6 PidTagMessageFlags Property
-
-2.2.1.7 PidTagMessageSize Property
-
-2.2.1.8 PidTagMessageStatus Property
-
-2.2.1.9 PidTagSubjectPrefix Property
-
-2.2.1.10 PidTagNormalizedSubject Property
-
-2.2.1.11 PidTagImportance Property
-
-2.2.1.12 PidTagPriority Property
-
-2.2.1.13 PidTagSensitivity Property
-
-2.2.1.14 PidLidSmartNoAttach Property
-
-2.2.1.15 PidLidPrivate Property
-
-2.2.1.16 PidLidSideEffects Property
-
-2.2.1.17 PidNameKeywords Property
-
-2.2.1.18 PidLidCommonStart Property
-
-2.2.1.19 PidLidCommonEnd Property
-
-2.2.1.20 PidTagAutoForwarded Property
-
-2.2.1.21 PidTagAutoForwardComment Property
-
-2.2.1.22 PidLidCategories Property
-
-2.2.1.23 PidLidClassification
-
-2.2.1.24 PidLidClassificationDescription Property
-
-2.2.1.25 PidLidClassified Property
-
-2.2.1.26 PidTagInternetReferences Property
-
-2.2.1.27 PidLidInfoPathFormName Property
-
-2.2.1.28 PidTagMimeSkeleton Property
-
-2.2.1.29 PidTagTnefCorrelationKey Property
-
-2.2.1.30 PidTagAddressBookDisplayNamePrintable Property
-
-2.2.1.31 PidTagCreatorEntryId Property
-
-2.2.1.32 PidTagLastModifierEntryId Property
-
-2.2.1.33 PidLidAgingDontAgeMe Property
-
-2.2.1.34 PidLidCurrentVersion Property
-
-2.2.1.35 PidLidCurrentVersionName Property
-
-2.2.1.36 PidTagAlternateMapiRecipientAllowed Property
-
-2.2.1.37 PidTagResponsibility Property
-
-2.2.1.38 PidTagRowid Property
-
-2.2.1.39 PidTagHasNamedProperties Property
-
-2.2.1.40 PidTagMapiRecipientOrder Property
-
-2.2.1.41 PidNameContentBase Property
-
-2.2.1.42 PidNameAcceptLanguage Property
-
-2.2.1.43 PidTagPurportedSenderDomain Property
-
-2.2.1.44 PidTagStoreEntryId Property
-
-2.2.1.45 PidTagTrustSender
-
-2.2.1.46  Property
-
-2.2.1.47 PidTagMessageMapiRecipients Property
-
-2.2.1.48 Body Properties
-
-2.2.1.49 Contact Linking Properties
-
-2.2.1.50 Retention and Archive Properties
-
-*/
-
-
-
-/*
-			text = property.value().toString();
-			break;
-		case PidTagCreationTime:
-			created = property.value().toDateTime();
-			break;
-*/
 		default:
 #if (DEBUG_NOTE_PROPERTIES)
 			debug() << "ignoring note property:" << tagName(property.tag()) << property.toString();
@@ -605,11 +465,11 @@ void ExMailResource::retrieveItems(const Akonadi::Collection &collection)
 	
 	fetchItems(collection, items, deletedItems);
 	kError() << "new/changed items:" << items.size() << "deleted items:" << deletedItems.size();
-#if (DEBUG_NOTE_PROPERTIES)
+//#if (DEBUG_NOTE_PROPERTIES)
 	while (items.size() > 3) {
 		items.removeLast();
 	}
-#endif
+//#endif
 	itemsRetrievedIncremental(items, deletedItems);
 }
 
@@ -853,9 +713,9 @@ bool MapiNote::propertiesPull(QVector<int> &tags, const bool tagsAppended, bool 
 		// 2.2.1.8  
 		PidTagMessageStatus,
 		// 2.2.1.9  
-		//PidTagSubjectPrefix,
+		PidTagSubjectPrefix,
 		// 2.2.1.10 
-		//PidTagNormalizedSubject,
+		PidTagNormalizedSubject,
 		// 2.2.1.11 
 		PidTagImportance,
 		// 2.2.1.12 
