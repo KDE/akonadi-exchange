@@ -67,7 +67,7 @@ private:
 	virtual QDebug debug() const;
 	virtual QDebug error() const;
 
-	bool propertiesPull(QVector<int> &tags, const bool tagsAppended);
+	bool propertiesPull(QVector<int> &tags, const bool tagsAppended, bool pullAll);
 };
 
 /**
@@ -668,7 +668,7 @@ QDebug MapiContact::error() const
 	return MapiObject::error(prefix.arg(m_folderId, 0, ID_BASE).arg(m_id, 0, ID_BASE)) /*<< title*/;
 }
 
-bool MapiContact::propertiesPull(QVector<int> &tags, const bool tagsAppended)
+bool MapiContact::propertiesPull(QVector<int> &tags, const bool tagsAppended, bool pullAll)
 {
 	if (!tagsAppended) {
 		for (unsigned i = 0; i < contactTags.cValues; i++) {
@@ -679,7 +679,7 @@ bool MapiContact::propertiesPull(QVector<int> &tags, const bool tagsAppended)
 			}
 		}
 	}
-	if (!MapiMessage::propertiesPull(tags, tagsAppended)) {
+	if (!MapiMessage::propertiesPull(tags, tagsAppended, pullAll)) {
 		return false;
 	}
 	if (!preparePayload(m_properties, m_propertyCount, *this)) {
@@ -693,7 +693,7 @@ bool MapiContact::propertiesPull()
 	static bool tagsAppended = false;
 	static QVector<int> tags;
 
-	if (!propertiesPull(tags, tagsAppended)) {
+	if (!propertiesPull(tags, tagsAppended, (DEBUG_CONTACT_PROPERTIES) != 0)) {
 		tagsAppended = true;
 		return false;
 	}

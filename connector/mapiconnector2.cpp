@@ -620,7 +620,7 @@ bool MapiMessage::open()
 /**
  * We collect recipients as well as properties.
  */
-bool MapiMessage::propertiesPull(QVector<int> &tags, const bool tagsAppended)
+bool MapiMessage::propertiesPull(QVector<int> &tags, const bool tagsAppended, bool pullAll)
 {
 	static int ourTagList[] = {
 		PidTagDisplayTo,
@@ -651,7 +651,7 @@ bool MapiMessage::propertiesPull(QVector<int> &tags, const bool tagsAppended)
 			}
 		}
 	}
-	if (!MapiObject::propertiesPull(tags, tagsAppended)) {
+	if (!MapiObject::propertiesPull(tags, tagsAppended, pullAll)) {
 		return false;
 	}
 	if (!recipientsPull()) {
@@ -665,7 +665,7 @@ bool MapiMessage::propertiesPull()
 	static bool tagsAppended = false;
 	static QVector<int> tags;
 
-	if (!propertiesPull(tags, tagsAppended)) {
+	if (!propertiesPull(tags, tagsAppended, (DEBUG_MESSAGE_PROPERTIES) != 0)) {
 		tagsAppended = true;
 		return false;
 	}
@@ -1110,7 +1110,7 @@ bool MapiObject::propertiesPush()
 	return true;
 }
 
-bool MapiObject::propertiesPull(QVector<int> &tags, const bool tagsAppended)
+bool MapiObject::propertiesPull(QVector<int> &tags, const bool tagsAppended, bool pullAll)
 {
 	if (!tagsAppended || !m_ourTagList) {
 		m_ourTagList = talloc_array(ctx(), int, tags.size() + 1);
@@ -1129,7 +1129,9 @@ bool MapiObject::propertiesPull(QVector<int> &tags, const bool tagsAppended)
 
 	m_properties = 0;
 	m_propertyCount = 0;
-	error() << "pulling" << m_ourTags.cValues;
+	if (pullAll) {
+		return MapiObject::propertiesPull();
+	}
 	if (MAPI_E_SUCCESS != GetProps(&m_object, MAPI_UNICODE, &m_ourTags, &m_properties, &m_propertyCount)) {
 		error() << "cannot pull properties:" << mapiError();
 		return false;

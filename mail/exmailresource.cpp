@@ -50,7 +50,7 @@
  * available.
  */
 #ifndef DEBUG_NOTE_PROPERTIES
-#define DEBUG_NOTE_PROPERTIES 1
+#define DEBUG_NOTE_PROPERTIES 0
 #endif
 
 using namespace Akonadi;
@@ -84,7 +84,7 @@ private:
 	/**
 	 * Fetch email properties.
 	 */
-	virtual bool propertiesPull(QVector<int> &tags, const bool tagsAppended);
+	virtual bool propertiesPull(QVector<int> &tags, const bool tagsAppended, bool pullAll);
 
 	/**
 	 * Dump a change to a header.
@@ -379,7 +379,7 @@ PidTagObjectType ([MS-OXCPRPT] section 2.2.1.7)
 	foreach (MapiRecipient item, MapiMessage::recipients()) {
 		switch (item.type()) {
 		case MapiRecipient::Sender:
-			sender()->addAddress(item.email.toUtf8(), item.name);
+			from()->addAddress(item.email.toUtf8(), item.name);
 			break;
 		case MapiRecipient::To:
 			to()->addAddress(item.email.toUtf8(), item.name);
@@ -832,15 +832,124 @@ QDebug MapiNote::error() const
 	return MapiObject::error(prefix.arg(m_folderId, 0, ID_BASE).arg(m_id, 0, ID_BASE)) /*<< title*/;
 }
 
-bool MapiNote::propertiesPull(QVector<int> &tags, const bool tagsAppended)
+bool MapiNote::propertiesPull(QVector<int> &tags, const bool tagsAppended, bool pullAll)
 {
 	/**
-	 * The list of tags used to fetch a Note.
+	 * The list of tags used to fetch a Note, based on [MS-OXCMSG].
 	 */
 	static int ourTagList[] = {
+		// 2.2.1.2  
+		PidTagHasAttachments,
+		// 2.2.1.3  
 		PidTagMessageClass,
+		// 2.2.1.4  
+		PidTagMessageCodepage,
+		// 2.2.1.5  
+		PidTagMessageLocaleId,
+		// 2.2.1.6  
+		PidTagMessageFlags,
+		// 2.2.1.7  
+		PidTagMessageSize,
+		// 2.2.1.8  
+		PidTagMessageStatus,
+		// 2.2.1.9  
+		//PidTagSubjectPrefix,
+		// 2.2.1.10 
+		//PidTagNormalizedSubject,
+		// 2.2.1.11 
+		PidTagImportance,
+		// 2.2.1.12 
+		PidTagPriority,
+		// 2.2.1.13 
+		PidTagSensitivity,
+		// 2.2.1.14 
+		PidLidSmartNoAttach,
+		// 2.2.1.15 
+		PidLidPrivate,
+		// 2.2.1.16 
+		PidLidSideEffects,
+		// 2.2.1.17 
+		PidNameKeywords,
+		// 2.2.1.18 
+		PidLidCommonStart,
+		// 2.2.1.19 
+		PidLidCommonEnd,
+		// 2.2.1.20 
+		PidTagAutoForwarded,
+		// 2.2.1.21 
+		PidTagAutoForwardComment,
+		// 2.2.1.22 
+		PidLidCategories,
+		// 2.2.1.23 
+		PidLidClassification,
+		// 2.2.1.24 
+		PidLidClassificationDescription,
+		// 2.2.1.25 
+		PidLidClassified,
+		// 2.2.1.26 
+		PidTagInternetReferences,
+		// 2.2.1.27 
+		PidLidInfoPathFormName,
+		// 2.2.1.28 
+		PidTagMimeSkeleton,
+		// 2.2.1.29 
+		PidTagTnefCorrelationKey,
+		// 2.2.1.30 
+		PidTagAddressBookDisplayNamePrintable,
+		// 2.2.1.31 
+		PidTagCreatorEntryId,
+		// 2.2.1.32 
+		PidTagLastModifierEntryId,
+		// 2.2.1.33 
+		PidLidAgingDontAgeMe,
+		// 2.2.1.34 
+		PidLidCurrentVersion,
+		// 2.2.1.35 
+		PidLidCurrentVersionName,
+		// 2.2.1.36 
+		PidTagAlternateRecipientAllowed,
+		// 2.2.1.37 
+		PidTagResponsibility,
+		// 2.2.1.38 
+		PidTagRowid,
+		// 2.2.1.39 
+		PidTagHasNamedProperties,
+		// 2.2.1.40 
+		PidTagRecipientOrder,
+		// 2.2.1.41 
+		PidNameContentBase,
+		// 2.2.1.42 
+		PidNameAcceptLanguage,
+		// 2.2.1.43 
+		PidTagPurportedSenderDomain,
+		// 2.2.1.44 
+		PidTagStoreEntryId,
+		// 2.2.1.45 
+		PidTagTrustSender,
+		// 2.2.1.46 
 		PidTagSubject,
+		// 2.2.1.47 
+		PidTagMessageRecipients,
+		// 2.2.1.48.1
 		PidTagBody,
+		// 2.2.1.48.2
+		//PidTagNativeBody,
+		// 2.2.1.48.3
+		//PidTagBodyHtml,
+		// 2.2.1.48.4
+		//PidTagRtfCompressed,
+		// 2.2.1.48.5
+		//PidTagRtfInSync,
+		// 2.2.1.48.6
+		PidTagInternetCodepage,
+		// 2.2.1.48.7
+		PidTagBodyContentId,
+		// 2.2.1.48.8
+		PidTagBodyContentLocation,
+		// 2.2.1.48.9
+		PidTagHtml,
+		// 2.2.2.3 
+		PidTagCreationTime,
 		0 };
 	static SPropTagArray ourTags = {
 		(sizeof(ourTagList) / sizeof(ourTagList[0])) - 1,
@@ -855,7 +964,7 @@ bool MapiNote::propertiesPull(QVector<int> &tags, const bool tagsAppended)
 			}
 		}
 	}
-	if (!MapiMessage::propertiesPull(tags, tagsAppended)) {
+	if (!MapiMessage::propertiesPull(tags, tagsAppended, pullAll)) {
 		return false;
 	}
 	if (!preparePayload()) {
@@ -869,7 +978,7 @@ bool MapiNote::propertiesPull()
 	static bool tagsAppended = false;
 	static QVector<int> tags;
 
-	if (!propertiesPull(tags, tagsAppended)) {
+	if (!propertiesPull(tags, tagsAppended, (DEBUG_NOTE_PROPERTIES) != 0)) {
 		tagsAppended = true;
 		return false;
 	}

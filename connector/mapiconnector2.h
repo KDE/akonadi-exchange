@@ -437,11 +437,6 @@ public:
 	unsigned propertyCount() const;
 
 	/**
-	 * Fetch all properties.
-	 */
-	virtual bool propertiesPull();
-
-	/**
 	 * Find a property by tag.
 	 * 
 	 * @return The index, or UINT_MAX if not found.
@@ -490,9 +485,14 @@ protected:
 	 * @return Whether the pull succeeds, irrespective of whether the tags
 	 * were matched.
 	 */
-	virtual bool propertiesPull(QVector<int> &tags, bool tagsAppended);
+	virtual bool propertiesPull(QVector<int> &tags, bool tagsAppended, bool pullAll);
 
 private:
+	/**
+	 * Fetch all properties.
+	 */
+	virtual bool propertiesPull();
+
 	/**
 	 * Add a property with the given value, using an immediate assignment.
 	 */
@@ -619,7 +619,18 @@ protected:
 	const mapi_id_t m_folderId;
 	QList<MapiRecipient> m_recipients;
 
-	virtual bool propertiesPull(QVector<int> &tags, const bool tagsAppended);
+	/**
+	 * Pull a given set of properties, plus any we need internally.
+	 * 
+	 * @param tags		Properties to pull.
+	 * @param tagsAppended	False if the set of tags given have not already
+	 * 			been augmented with the one we need need.
+	 * 			Used by the caller to turn the construction of 
+	 * 			the set of tags into a one-time operation.
+	 * @param pullAll	If true, all available properties will be pulled
+	 * 			rather than just the given @ref tags.
+	 */
+	virtual bool propertiesPull(QVector<int> &tags, const bool tagsAppended, bool pullAll);
 
 private:
 	virtual QDebug debug() const;

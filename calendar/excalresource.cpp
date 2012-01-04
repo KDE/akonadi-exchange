@@ -91,7 +91,7 @@ private:
 	/**
 	 * Fetch calendar properties.
 	 */
-	virtual bool propertiesPull(QVector<int> &tags, const bool tagsAppended);
+	virtual bool propertiesPull(QVector<int> &tags, const bool tagsAppended, bool pullAll);
 
 	virtual QDebug debug() const;
 	virtual QDebug error() const;
@@ -453,7 +453,7 @@ bool MapiAppointment::debugRecurrencyPattern(RecurrencePattern *pattern)
 	return true;
 }
 
-bool MapiAppointment::propertiesPull(QVector<int> &tags, const bool tagsAppended)
+bool MapiAppointment::propertiesPull(QVector<int> &tags, const bool tagsAppended, bool pullAll)
 {
 	/**
 	 * The list of tags used to fetch an Appointment.
@@ -487,7 +487,7 @@ bool MapiAppointment::propertiesPull(QVector<int> &tags, const bool tagsAppended
 			}
 		}
 	}
-	if (!MapiMessage::propertiesPull(tags, tagsAppended)) {
+	if (!MapiMessage::propertiesPull(tags, tagsAppended, pullAll)) {
 		return false;
 	}
 
@@ -573,7 +573,7 @@ bool MapiAppointment::propertiesPull()
 	static bool tagsAppended = false;
 	static QVector<int> tags;
 
-	if (!propertiesPull(tags, tagsAppended)) {
+	if (!propertiesPull(tags, tagsAppended, (DEBUG_APPOINTMENT_PROPERTIES) != 0)) {
 		tagsAppended = true;
 		return false;
 	}
