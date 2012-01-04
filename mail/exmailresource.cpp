@@ -97,6 +97,265 @@ private:
 	mapi_object_t m_stream;
 };
 
+ExMailResource::ExMailResource(const QString &id) :
+	MapiResource(id, i18n("Exchange Mail"), IPF_NOTE, "IPM.Note", KMime::Message::mimeType())
+{
+	new SettingsAdaptor(Settings::self());
+	QDBusConnection::sessionBus().registerObject(QLatin1String("/Settings"),
+						     Settings::self(),
+						     QDBusConnection::ExportAdaptors);
+}
+
+ExMailResource::~ExMailResource()
+{
+}
+
+void ExMailResource::retrieveCollections()
+{
+	// First select who to log in as.
+	profileSet(Settings::self()->profileName());
+
+	Collection::List collections;
+	fetchCollections(TopInformationStore, collections);
+
+	// Notify Akonadi about the new collections.
+	collectionsRetrieved(collections);
+}
+
+void ExMailResource::retrieveItems(const Akonadi::Collection &collection)
+{
+	Item::List items;
+	Item::List deletedItems;
+	
+	fetchItems(collection, items, deletedItems);
+	kError() << "new/changed items:" << items.size() << "deleted items:" << deletedItems.size();
+//#if (DEBUG_NOTE_PROPERTIES)
+	while (items.size() > 3) {
+		items.removeLast();
+	}
+//#endif
+	itemsRetrievedIncremental(items, deletedItems);
+}
+
+bool ExMailResource::retrieveItem(const Akonadi::Item &itemOrig, const QSet<QByteArray> &parts)
+{
+	Q_UNUSED(parts);
+
+	MapiNote *message = fetchItem<MapiNote>(itemOrig);
+	if (!message) {
+		return false;
+	}
+
+	KMime::Message::Ptr ptr(message);
+
+	// Create a clone of the passed in const Item and fill it with the payload.
+	Akonadi::Item item(itemOrig);
+/*
+	item.setMimeType(KMime::Message::mimeType());
+	item.setPayload(KMime::Message::Ptr(message));
+
+	// update status flags
+	if (KMime::isSigned(message.get())) {
+		item.setFlag(Akonadi::MessageFlags::Signed);
+	}
+	if (KMime::isEncrypted(message.get())) {
+		item.setFlag(Akonadi::MessageFlags::Encrypted);
+	}
+	if (KMime::isInvitation(message.get())) {
+		item.setFlag(Akonadi::MessageFlags::HasInvitation);
+	}
+	if (KMime::hasAttachment(message.get())) {
+		item.setFlag(Akonadi::MessageFlags::HasAttachment);
+	}
+	// TODO add further message properties.
+//	item.setModificationTime(message->modified);
+*/
+	item.setPayload<KMime::Message::Ptr>(ptr);
+
+	// Not needed!
+	//delete message;
+
+	// Notify Akonadi about the new data.
+	itemRetrieved(item);
+	return true;
+}
+
+void ExMailResource::aboutToQuit()
+{
+  // TODO: any cleanup you need to do while there is still an active
+  // event loop. The resource will terminate after this method returns
+}
+
+void ExMailResource::configure( WId windowId )
+{
+	ProfileDialog dlgConfig(Settings::self()->profileName());
+  	if (windowId)
+		KWindowSystem::setMainWindow(&dlgConfig, windowId);
+
+	if (dlgConfig.exec() == KDialog::Accepted) {
+
+		QString profile = dlgConfig.getProfileName();
+		Settings::self()->setProfileName( profile );
+		Settings::self()->writeConfig();
+
+		synchronize();
+		emit configurationDialogAccepted();
+	} else {
+		emit configurationDialogRejected();
+	}
+}
+
+void ExMailResource::itemAdded( const Akonadi::Item &item, const Akonadi::Collection &collection )
+{
+  Q_UNUSED( item );
+  Q_UNUSED( collection );
+
+  // TODO: this method is called when somebody else, e.g. a client application,
+  // has created an item in a collection managed by your resource.
+
+  // NOTE: There is an equivalent method for collections, but it isn't part
+  // of this template code to keep it simple
+}
+
+/**
+ * Called when somebody else, e.g. a client application, has changed an item 
+ * managed this resource.
+ */
+void ExMailResource::itemChanged(const Akonadi::Item &item, const QSet<QByteArray> &parts)
+{
+        Q_UNUSED(parts);
+
+        // Get the payload for the item.
+	kWarning() << "fetch cached item: {" <<
+		currentCollection().name() << "," << item.id() << "} = {" <<
+		currentCollection().remoteId() << "," << item.remoteId() << "}";
+        Akonadi::ItemFetchJob *job = new Akonadi::ItemFetchJob(item);
+        connect(job, SIGNAL(result(KJob*)), SLOT(itemChangedContinue(KJob*)));
+        job->fetchScope().fetchFullPayload();
+}
+
+/**
+ * Finish changing an item, now that we (hopefully!) have its payload in hand.
+ */
+void ExMailResource::itemChangedContinue(KJob* job)
+{
+        if (job->error()) {
+            emit status(Broken, i18n("Failed to get cached data"));
+            return;
+        }
+        Akonadi::ItemFetchJob *fetchJob = qobject_cast<Akonadi::ItemFetchJob*>(job);
+        const Akonadi::Item item = fetchJob->items().first();
+
+	MapiNote *message = fetchItem<MapiNote>(item);
+	if (!message) {
+		return;
+	}
+
+	// Extract the event from the item.
+#if 0
+	KCal::Event::Ptr event = item.payload<KCal::Event::Ptr>();
+	Q_ASSERT(event->setUid == item.remoteId());
+	message.title = event->summary();
+	message.begin.setTime_t(event->dtStart().toTime_t());
+	message.end.setTime_t(event->dtEnd().toTime_t());
+	Q_ASSERT(message.created == event->created());
+
+	// Check that between the item being modified, and this update attempt
+	// that no conflicting update happened on the server.
+	if (event->lastModified() < KDateTime(message.modified)) {
+		kWarning() << "Exchange data modified more recently" << event->lastModified()
+			<< "than cached data" << KDateTime(message.modified);
+		// TBD: Update cache with data from Exchange.
+		return;
+	}
+	message.modified = item.modificationTime();
+	message.text = event->description();
+	message.sender = event->organizer().name();
+	message.location = event->location();
+	if (event->alarms().count()) {
+		KCal::Alarm* alarm = event->alarms().first();
+		message.reminderActive = true;
+		// TODO Maybe we should check which one is set and then use either the time or the delte
+		// KDateTime reminder(message.reminderTime);
+		// reminder.setTimeSpec( KDateTime::Spec(KDateTime::UTC) );
+		// alarm->setTime( reminder );
+		message.reminderMinutes = alarm->startOffset() / -60;
+	} else {
+		message.reminderActive = false;
+	}
+
+	message.attendees.clear();
+	Attendee att;
+	att.name = event->organizer().name();
+	att.email = event->organizer().email();
+	att.setOrganizer(true);
+	message.attendees.append(att);
+	att.setOrganizer(false);
+	foreach (KCal::Attendee *person, event->attendees()) {
+	att.name = person->name();
+	att.email = person->email();
+	message.attendees.append(att);
+	}
+
+	if (message.recurrency.isRecurring()) {
+		// if this event is a recurring event create the recurrency
+//                createKCalRecurrency(event->recurrence(), message.recurrency);
+	}
+
+	// TODO add further data
+
+	// Update exchange with the new message.
+	kWarning() << "updating item: {" << 
+		currentCollection().name() << "," << item.id() << "} = {" << 
+		folderId << "," << messageId << "}";
+	emit status(Running, i18n("Updating item: { %1, %2 }", currentCollection().name(), messageId));
+	if (!message.propertiesPush()) {
+		kError() << "propertiesPush failed!";
+		emit status(Running, i18n("Failed to update: { %1, %2 }", currentCollection().name(), messageId));
+		return;
+	}
+	changeCommitted(item);
+#endif
+}
+
+void ExMailResource::itemRemoved( const Akonadi::Item &item )
+{
+  Q_UNUSED( item );
+
+  // TODO: this method is called when somebody else, e.g. a client application,
+  // has deleted an item managed by your resource.
+
+  // NOTE: There is an equivalent method for collections, but it isn't part
+  // of this template code to keep it simple
+}
+
+MapiNote::MapiNote(MapiConnector2 *connector, const char *tallocName, mapi_id_t folderId, mapi_id_t id) :
+	MapiMessage(connector, tallocName, folderId, id)
+{
+	mapi_object_init(&m_attachments);
+	mapi_object_init(&m_attachment);
+	mapi_object_init(&m_stream);
+}
+
+MapiNote::~MapiNote()
+{
+	mapi_object_release(&m_stream);
+	mapi_object_release(&m_attachment);
+	mapi_object_release(&m_attachments);
+}
+
+QDebug MapiNote::debug() const
+{
+	static QString prefix = QString::fromAscii("MapiNote: %1/%2:");
+	return MapiObject::debug(prefix.arg(m_folderId, 0, ID_BASE).arg(m_id, 0, ID_BASE)) /*<< title*/;
+}
+
+QDebug MapiNote::error() const
+{
+	static QString prefix = QString::fromAscii("MapiNote: %1/%2");
+	return MapiObject::error(prefix.arg(m_folderId, 0, ID_BASE).arg(m_id, 0, ID_BASE)) /*<< title*/;
+}
+
 /**
  * Take a set of properties, and attempt to apply them to the given addressee.
  * 
@@ -433,362 +692,103 @@ bool MapiNote::preparePayload()
 	return true;
 }
 
-ExMailResource::ExMailResource(const QString &id) :
-	MapiResource(id, i18n("Exchange Mail"), IPF_NOTE, "IPM.Note", KMime::Message::mimeType())
-{
-	new SettingsAdaptor(Settings::self());
-	QDBusConnection::sessionBus().registerObject(QLatin1String("/Settings"),
-						     Settings::self(),
-						     QDBusConnection::ExportAdaptors);
-}
-
-ExMailResource::~ExMailResource()
-{
-}
-
-void ExMailResource::retrieveCollections()
-{
-	// First select who to log in as.
-	profileSet(Settings::self()->profileName());
-
-	Collection::List collections;
-	fetchCollections(TopInformationStore, collections);
-
-	// Notify Akonadi about the new collections.
-	collectionsRetrieved(collections);
-}
-
-void ExMailResource::retrieveItems(const Akonadi::Collection &collection)
-{
-	Item::List items;
-	Item::List deletedItems;
-	
-	fetchItems(collection, items, deletedItems);
-	kError() << "new/changed items:" << items.size() << "deleted items:" << deletedItems.size();
-//#if (DEBUG_NOTE_PROPERTIES)
-	while (items.size() > 3) {
-		items.removeLast();
-	}
-//#endif
-	itemsRetrievedIncremental(items, deletedItems);
-}
-
-bool ExMailResource::retrieveItem(const Akonadi::Item &itemOrig, const QSet<QByteArray> &parts)
-{
-	Q_UNUSED(parts);
-
-	MapiNote *message = fetchItem<MapiNote>(itemOrig);
-	if (!message) {
-		return false;
-	}
-
-	KMime::Message::Ptr ptr(message);
-
-	// Create a clone of the passed in const Item and fill it with the payload.
-	Akonadi::Item item(itemOrig);
-/*
-	item.setMimeType(KMime::Message::mimeType());
-	item.setPayload(KMime::Message::Ptr(message));
-
-	// update status flags
-	if (KMime::isSigned(message.get())) {
-		item.setFlag(Akonadi::MessageFlags::Signed);
-	}
-	if (KMime::isEncrypted(message.get())) {
-		item.setFlag(Akonadi::MessageFlags::Encrypted);
-	}
-	if (KMime::isInvitation(message.get())) {
-		item.setFlag(Akonadi::MessageFlags::HasInvitation);
-	}
-	if (KMime::hasAttachment(message.get())) {
-		item.setFlag(Akonadi::MessageFlags::HasAttachment);
-	}
-	// TODO add further message properties.
-//	item.setModificationTime(message->modified);
-*/
-	item.setPayload<KMime::Message::Ptr>(ptr);
-
-	// Not needed!
-	//delete message;
-
-	// Notify Akonadi about the new data.
-	itemRetrieved(item);
-	return true;
-}
-
-void ExMailResource::aboutToQuit()
-{
-  // TODO: any cleanup you need to do while there is still an active
-  // event loop. The resource will terminate after this method returns
-}
-
-void ExMailResource::configure( WId windowId )
-{
-	ProfileDialog dlgConfig(Settings::self()->profileName());
-  	if (windowId)
-		KWindowSystem::setMainWindow(&dlgConfig, windowId);
-
-	if (dlgConfig.exec() == KDialog::Accepted) {
-
-		QString profile = dlgConfig.getProfileName();
-		Settings::self()->setProfileName( profile );
-		Settings::self()->writeConfig();
-
-		synchronize();
-		emit configurationDialogAccepted();
-	} else {
-		emit configurationDialogRejected();
-	}
-}
-
-void ExMailResource::itemAdded( const Akonadi::Item &item, const Akonadi::Collection &collection )
-{
-  Q_UNUSED( item );
-  Q_UNUSED( collection );
-
-  // TODO: this method is called when somebody else, e.g. a client application,
-  // has created an item in a collection managed by your resource.
-
-  // NOTE: There is an equivalent method for collections, but it isn't part
-  // of this template code to keep it simple
-}
-
-/**
- * Called when somebody else, e.g. a client application, has changed an item 
- * managed this resource.
- */
-void ExMailResource::itemChanged(const Akonadi::Item &item, const QSet<QByteArray> &parts)
-{
-        Q_UNUSED(parts);
-
-        // Get the payload for the item.
-	kWarning() << "fetch cached item: {" <<
-		currentCollection().name() << "," << item.id() << "} = {" <<
-		currentCollection().remoteId() << "," << item.remoteId() << "}";
-        Akonadi::ItemFetchJob *job = new Akonadi::ItemFetchJob(item);
-        connect(job, SIGNAL(result(KJob*)), SLOT(itemChangedContinue(KJob*)));
-        job->fetchScope().fetchFullPayload();
-}
-
-/**
- * Finish changing an item, now that we (hopefully!) have its payload in hand.
- */
-void ExMailResource::itemChangedContinue(KJob* job)
-{
-        if (job->error()) {
-            emit status(Broken, i18n("Failed to get cached data"));
-            return;
-        }
-        Akonadi::ItemFetchJob *fetchJob = qobject_cast<Akonadi::ItemFetchJob*>(job);
-        const Akonadi::Item item = fetchJob->items().first();
-
-	MapiNote *message = fetchItem<MapiNote>(item);
-	if (!message) {
-		return;
-	}
-
-	// Extract the event from the item.
-#if 0
-	KCal::Event::Ptr event = item.payload<KCal::Event::Ptr>();
-	Q_ASSERT(event->setUid == item.remoteId());
-	message.title = event->summary();
-	message.begin.setTime_t(event->dtStart().toTime_t());
-	message.end.setTime_t(event->dtEnd().toTime_t());
-	Q_ASSERT(message.created == event->created());
-
-	// Check that between the item being modified, and this update attempt
-	// that no conflicting update happened on the server.
-	if (event->lastModified() < KDateTime(message.modified)) {
-		kWarning() << "Exchange data modified more recently" << event->lastModified()
-			<< "than cached data" << KDateTime(message.modified);
-		// TBD: Update cache with data from Exchange.
-		return;
-	}
-	message.modified = item.modificationTime();
-	message.text = event->description();
-	message.sender = event->organizer().name();
-	message.location = event->location();
-	if (event->alarms().count()) {
-		KCal::Alarm* alarm = event->alarms().first();
-		message.reminderActive = true;
-		// TODO Maybe we should check which one is set and then use either the time or the delte
-		// KDateTime reminder(message.reminderTime);
-		// reminder.setTimeSpec( KDateTime::Spec(KDateTime::UTC) );
-		// alarm->setTime( reminder );
-		message.reminderMinutes = alarm->startOffset() / -60;
-	} else {
-		message.reminderActive = false;
-	}
-
-	message.attendees.clear();
-	Attendee att;
-	att.name = event->organizer().name();
-	att.email = event->organizer().email();
-	att.setOrganizer(true);
-	message.attendees.append(att);
-	att.setOrganizer(false);
-	foreach (KCal::Attendee *person, event->attendees()) {
-	att.name = person->name();
-	att.email = person->email();
-	message.attendees.append(att);
-	}
-
-	if (message.recurrency.isRecurring()) {
-		// if this event is a recurring event create the recurrency
-//                createKCalRecurrency(event->recurrence(), message.recurrency);
-	}
-
-	// TODO add further data
-
-	// Update exchange with the new message.
-	kWarning() << "updating item: {" << 
-		currentCollection().name() << "," << item.id() << "} = {" << 
-		folderId << "," << messageId << "}";
-	emit status(Running, i18n("Updating item: { %1, %2 }", currentCollection().name(), messageId));
-	if (!message.propertiesPush()) {
-		kError() << "propertiesPush failed!";
-		emit status(Running, i18n("Failed to update: { %1, %2 }", currentCollection().name(), messageId));
-		return;
-	}
-	changeCommitted(item);
-#endif
-}
-
-void ExMailResource::itemRemoved( const Akonadi::Item &item )
-{
-  Q_UNUSED( item );
-
-  // TODO: this method is called when somebody else, e.g. a client application,
-  // has deleted an item managed by your resource.
-
-  // NOTE: There is an equivalent method for collections, but it isn't part
-  // of this template code to keep it simple
-}
-
-MapiNote::MapiNote(MapiConnector2 *connector, const char *tallocName, mapi_id_t folderId, mapi_id_t id) :
-	MapiMessage(connector, tallocName, folderId, id)
-{
-	mapi_object_init(&m_attachments);
-	mapi_object_init(&m_attachment);
-	mapi_object_init(&m_stream);
-}
-
-MapiNote::~MapiNote()
-{
-	mapi_object_release(&m_stream);
-	mapi_object_release(&m_attachment);
-	mapi_object_release(&m_attachments);
-}
-
-QDebug MapiNote::debug() const
-{
-	static QString prefix = QString::fromAscii("MapiNote: %1/%2:");
-	return MapiObject::debug(prefix.arg(m_folderId, 0, ID_BASE).arg(m_id, 0, ID_BASE)) /*<< title*/;
-}
-
-QDebug MapiNote::error() const
-{
-	static QString prefix = QString::fromAscii("MapiNote: %1/%2");
-	return MapiObject::error(prefix.arg(m_folderId, 0, ID_BASE).arg(m_id, 0, ID_BASE)) /*<< title*/;
-}
-
 bool MapiNote::propertiesPull(QVector<int> &tags, const bool tagsAppended, bool pullAll)
 {
 	/**
 	 * The list of tags used to fetch a Note, based on [MS-OXCMSG].
 	 */
 	static int ourTagList[] = {
-		// 2.2.1.2  
+		// 2.2.1.2
 		PidTagHasAttachments,
-		// 2.2.1.3  
+		// 2.2.1.3
 		PidTagMessageClass,
-		// 2.2.1.4  
+		// 2.2.1.4
 		PidTagMessageCodepage,
-		// 2.2.1.5  
+		// 2.2.1.5
 		PidTagMessageLocaleId,
-		// 2.2.1.6  
+		// 2.2.1.6
 		PidTagMessageFlags,
-		// 2.2.1.7  
+		// 2.2.1.7
 		PidTagMessageSize,
-		// 2.2.1.8  
+		// 2.2.1.8
 		PidTagMessageStatus,
-		// 2.2.1.9  
+		// 2.2.1.9
 		PidTagSubjectPrefix,
-		// 2.2.1.10 
+		// 2.2.1.10
 		PidTagNormalizedSubject,
-		// 2.2.1.11 
+		// 2.2.1.11
 		PidTagImportance,
-		// 2.2.1.12 
+		// 2.2.1.12
 		PidTagPriority,
-		// 2.2.1.13 
+		// 2.2.1.13
 		PidTagSensitivity,
-		// 2.2.1.14 
+		// 2.2.1.14
 		PidLidSmartNoAttach,
-		// 2.2.1.15 
+		// 2.2.1.15
 		PidLidPrivate,
-		// 2.2.1.16 
+		// 2.2.1.16
 		PidLidSideEffects,
-		// 2.2.1.17 
+		// 2.2.1.17
 		PidNameKeywords,
-		// 2.2.1.18 
+		// 2.2.1.18
 		PidLidCommonStart,
-		// 2.2.1.19 
+		// 2.2.1.19
 		PidLidCommonEnd,
-		// 2.2.1.20 
+		// 2.2.1.20
 		PidTagAutoForwarded,
-		// 2.2.1.21 
+		// 2.2.1.21
 		PidTagAutoForwardComment,
-		// 2.2.1.22 
+		// 2.2.1.22
 		PidLidCategories,
-		// 2.2.1.23 
+		// 2.2.1.23
 		PidLidClassification,
-		// 2.2.1.24 
+		// 2.2.1.24
 		PidLidClassificationDescription,
-		// 2.2.1.25 
+		// 2.2.1.25
 		PidLidClassified,
-		// 2.2.1.26 
+		// 2.2.1.26
 		PidTagInternetReferences,
-		// 2.2.1.27 
+		// 2.2.1.27
 		PidLidInfoPathFormName,
-		// 2.2.1.28 
+		// 2.2.1.28
 		PidTagMimeSkeleton,
-		// 2.2.1.29 
+		// 2.2.1.29
 		PidTagTnefCorrelationKey,
-		// 2.2.1.30 
+		// 2.2.1.30
 		PidTagAddressBookDisplayNamePrintable,
-		// 2.2.1.31 
+		// 2.2.1.31
 		PidTagCreatorEntryId,
-		// 2.2.1.32 
+		// 2.2.1.32
 		PidTagLastModifierEntryId,
-		// 2.2.1.33 
+		// 2.2.1.33
 		PidLidAgingDontAgeMe,
-		// 2.2.1.34 
+		// 2.2.1.34
 		PidLidCurrentVersion,
-		// 2.2.1.35 
+		// 2.2.1.35
 		PidLidCurrentVersionName,
-		// 2.2.1.36 
+		// 2.2.1.36
 		PidTagAlternateRecipientAllowed,
-		// 2.2.1.37 
+		// 2.2.1.37
 		PidTagResponsibility,
-		// 2.2.1.38 
+		// 2.2.1.38
 		PidTagRowid,
-		// 2.2.1.39 
+		// 2.2.1.39
 		PidTagHasNamedProperties,
-		// 2.2.1.40 
+		// 2.2.1.40
 		PidTagRecipientOrder,
-		// 2.2.1.41 
+		// 2.2.1.41
 		PidNameContentBase,
-		// 2.2.1.42 
+		// 2.2.1.42
 		PidNameAcceptLanguage,
-		// 2.2.1.43 
+		// 2.2.1.43
 		PidTagPurportedSenderDomain,
-		// 2.2.1.44 
+		// 2.2.1.44
 		PidTagStoreEntryId,
-		// 2.2.1.45 
+		// 2.2.1.45
 		PidTagTrustSender,
-		// 2.2.1.46 
+		// 2.2.1.46
 		PidTagSubject,
-		// 2.2.1.47 
+		// 2.2.1.47
 		PidTagMessageRecipients,
 		// 2.2.1.48.1
 		PidTagBody,
@@ -808,7 +808,7 @@ bool MapiNote::propertiesPull(QVector<int> &tags, const bool tagsAppended, bool 
 		PidTagBodyContentLocation,
 		// 2.2.1.48.9
 		PidTagHtml,
-		// 2.2.2.3 
+		// 2.2.2.3
 		PidTagCreationTime,
 		0 };
 	static SPropTagArray ourTags = {
