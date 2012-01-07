@@ -56,7 +56,12 @@
 using namespace Akonadi;
 
 /**
- * An Email.
+ * An Email. Note that the MAPI service offered by Exchange does not give us
+ * access to the raw message that might have worked its way across the Internet.
+ * 
+ * For example, where the top level has multipart/alternatives for HTML and
+ * text, it'll only give us the former. Therefore, the model of KMime::Content
+ * we'll be able to provide will not, in general match the IMAP interface.
  */
 class MapiNote : public MapiMessage, public KMime::Message
 {
@@ -377,27 +382,15 @@ void MapiNote::dumpChange(KMime::Headers::Base *header, const char *item, MapiPr
 	}
 }
 
+/**
+ * Create the "raw source" as well as all the properties we need.
+ */
 bool MapiNote::preparePayload()
 {
-	// The list of tags used to fetch an attachment.
-	static int attachmentTagList[] = {
-		PidTagAttachNumber,
-		PidTagRenderingPosition,
-		PidTagAttachMimeTag,
-		PidTagAttachMethod,
-		PidTagAttachLongFilename,
-		PidTagAttachFilename,
-		PidTagAttachSize,
-		PidTagAttachDataBinary,
-		PidTagAttachDataObject,
-		0 };
-	static SPropTagArray attachmentTags = {
-		(sizeof(attachmentTagList) / sizeof(attachmentTagList[0])) - 1,
-		(MAPITAGS *)attachmentTagList };
-
-	bool hasAttachments = false;
 	unsigned index;
-	KMime::Content *body;
+	QString textBody;
+	QString htmlBody;
+	bool hasAttachments = false;
 
 	// First set the header content, and parse what we can from it. Note
 	// this anything beyond the header will return the last value only. For
@@ -408,7 +401,7 @@ bool MapiNote::preparePayload()
 	// boundary="----_=_NextPart_001_01CC9A5A.689896D8"^M
 	// Subject: ...^M
 	// ...
-	// Return-Path: owner-build-guru@mtv-core-1.cisco.com^M
+	// Return-Path: build-guru@example.com^M
 	// ^M
 	// ------_=_NextPart_001_01CC9A5A.689896D8^M
 	// Content-Type: text/plain;^M
@@ -418,17 +411,39 @@ bool MapiNote::preparePayload()
 	// ------_=_NextPart_001_01CC9A5A.689896D8^M
 	// Content-Type: text/html;^M
 	//         charset="US-ASCII"^M
+	//
+	// However, we cannot in general provide the user with all the content
+	// as Exchange's MAPI limits us in that regard. So, we'll just ditch
+	// all notions of content contained in the header, and rework it below.
 	if (UINT_MAX > (index = propertyFind(PidTagTransportMessageHeaders))) {
-		//setHead(propertyAt(index).value().toString().toUtf8());
-		//parse();
+		QString header = propertyAt(index).toString();
+		int bodyStart = header.indexOf(QString::fromAscii("\r\n\r\n"));
+
+		// Set up all the headers that Exchange didn't care about.
+		if (bodyStart >= 0) {
+			bodyStart++;
+		}
+		setHead(header.left(bodyStart).toUtf8());
+		parse();
+
+		// Now remove any content-related properties.
+		error() << "original property:" << contentType()->asUnicodeString();
+		while (removeHeader("Content-Type")) {
+		}
+		while (removeHeader("Content-Transfer-Encoding")) {
+		}
+		while (removeHeader("Content-Disposition")) {
+		}
+		while (removeHeader("Content-Description")) {
+		}
+		while (removeHeader("Content-class")) {
+		}
 	}
-	kError() << "+++++++++ before" << contentType()->asUnicodeString();
+
 	// Walk through the properties and extract the values of interest. The
 	// properties here should be aligned with the list pulled above.
 	for (unsigned i = 0; i < m_propertyCount; i++) {
 		MapiProperty property(m_properties[i]);
-		QString email;
-		QString name;
 
 		switch (property.tag()) {
 		case PidTagMessageClass:
@@ -441,44 +456,30 @@ bool MapiNote::preparePayload()
 			break;
 		// 2.2.2.3
 		case PidTagCreationTime:
-			dumpChange(date(true), "date", property);
+			dumpChange(date(), "date", property);
 			date()->setDateTime(KDateTime(property.value().toDateTime()));
 			break;
 		case PidTagTransportMessageHeaders:
-			kError() << "headers:" << property.value().toString();
-			setHead(property.value().toString().toUtf8());
-	kError() << "+++++++++ before parse" << contentType()->asUnicodeString();
-	//parse();
-	kError() << "+++++++++ after parse" << contentType()->asUnicodeString();
 			break;
 		case PidTagBody:
-			kError() << "text body:" << property.value().toString();
-			body = new KMime::Content;
-			body->contentType()->setMimeType("text/plain");
-			body->setBody(property.value().toString().toUtf8());
-			addContent(body);
+			textBody = property.value().toString();
+			error() << "body property:" << tagName(property.tag()) << textBody.size();
 			break;
 		case PidTagHtml:
-			kError() << "html body:" << property.value().toString();
-			body = new KMime::Content;
-			body->contentType()->setMimeType("text/html");
-			body->setBody(property.value().toString().toUtf8());
-			addContent(body);
+			htmlBody = property.value().toString();
+			error() << "body property:" << tagName(property.tag()) << htmlBody.size();
 			break;
-		case PidTagHasAttachments:
-			hasAttachments = true;
+		case PidTagMessageFlags:
+			hasAttachments = (property.value().toUInt() & MSGFLAG_HASATTACH) != 0;
 			break;
-
 		case PidTagConversationTopic:
-		case PidTagNormalizedSubject:
+		//case PidTagNormalizedSubject:
 			setHeader(new KMime::Headers::Generic("Thread-Topic", this, property.value().toString(), "utf-8"));
 			break;
 		case PidTagSubject:
-			dumpChange(subject(true), "subject", property);
+			dumpChange(subject(), "subject", property);
 			subject()->fromUnicodeString(property.value().toString(), "utf-8");
 			break;
-
-			
 		case PidTagInternetMessageId:
 			//dumpChange(messageID(true), "messageID", property);
 			messageID()->fromUnicodeString(property.value().toString(), "utf-8");
@@ -488,9 +489,9 @@ bool MapiNote::preparePayload()
 			references()->fromUnicodeString(property.value().toString(), "utf-8");
 			break;
 		default:
-#if (DEBUG_NOTE_PROPERTIES)
+//#if (DEBUG_NOTE_PROPERTIES)
 			debug() << "ignoring note property:" << tagName(property.tag()) << property.toString();
-#endif
+//#endif
 			break;
 		}
 	}
@@ -515,6 +516,45 @@ bool MapiNote::preparePayload()
 		}
 	}
 
+	KMime::Content *parent = this;
+	KMime::Content *body;
+	if (hasAttachments) {
+		parent->contentType()->setMimeType("multipart/mixed");
+		parent->contentType()->setBoundary("------_=_NextPart_001");
+		body = new KMime::Content;
+		parent->addContent(body);
+		parent = body;
+	}
+
+	// Even though Exchange only ever seems to give one body, don't rely on that.
+	if (!textBody.isEmpty() && !htmlBody.isEmpty()) {
+		body = new KMime::Content;
+		body->contentType()->setMimeType("multipart/alternative");
+		body->contentType()->setBoundary("------_=_NextPart_001.001");
+		parent->addContent(body);
+		parent = body;
+
+		body = new KMime::Content;
+		body->contentType()->setMimeType("text/plain");
+		body->setBody(textBody.toUtf8());
+		parent->addContent(body);
+
+		body = new KMime::Content;
+		body->contentType()->setMimeType("text/html");
+		body->setBody(htmlBody.toUtf8());
+		parent->addContent(body);
+	} else if (!textBody.isEmpty()) {
+		parent->contentType()->setMimeType("text/plain");
+		parent->setBody(textBody.toUtf8());
+	} else if (!htmlBody.isEmpty()) {
+		parent->contentType()->setMimeType("text/html");
+		parent->setBody(htmlBody.toUtf8());
+	} else {
+		// No body to speak of...
+		parent->contentType()->setMimeType("text/plain");
+		parent->setBody("\n\n");
+	}
+
 	// Short circuit exit if there are no attachments.
 	if (!hasAttachments) {
 		assemble();
@@ -525,40 +565,53 @@ bool MapiNote::preparePayload()
 		return false;
 	}
 	error() << "eErr got attachment table";
+	// The list of tags used to fetch an attachment, from [MS-OXCMSG].
+	static int attachmentTagList[] = {
+		// 2.2.2.6
+		PidTagAttachNumber,
+		// 2.2.2.7
+		PidTagAttachDataBinary,
+		// 2.2.2.8
+		PidTagAttachDataObject,
+		// 2.2.2.9
+		PidTagAttachMethod,
+		// 2.2.2.10
+		PidTagAttachLongFilename,
+		// 2.2.2.11
+		PidTagAttachFilename,
+		// 2.2.2.16
+		PidTagRenderingPosition,
+		// 2.2.2.26
+		PidTagAttachMimeTag,
+		0 };
+	static SPropTagArray attachmentTags = {
+		(sizeof(attachmentTagList) / sizeof(attachmentTagList[0])) - 1,
+		(MAPITAGS *)attachmentTagList };
+
 	if (MAPI_E_SUCCESS != SetColumns(&m_attachments, &attachmentTags)) {
 		error() << "cannot set attachment table columns:" << mapiError();
 		return false;
 	}
 	error() << "eErr set cols table";
 
-	while (true) {
-		// Get current cursor position.
-		uint32_t cursor;
-		if (MAPI_E_SUCCESS != QueryPosition(&m_attachments, NULL, &cursor)) {
-			error() << "cannot query attachments position:" << mapiError();
-			return false;
-		}
-		// Iterate through sets of rows.
-		SRowSet rowset;
+	// Get current cursor position.
+	uint32_t cursor;
+	if (MAPI_E_SUCCESS != QueryPosition(&m_attachments, NULL, &cursor)) {
+		error() << "cannot query attachments position:" << mapiError();
+		return false;
+	}
 
-		error() << "get attachments from row:" << cursor;
-		if (MAPI_E_SUCCESS != QueryRows(&m_attachments, cursor, TBL_ADVANCE, &rowset)) {
-			error() << "cannot query attachments" << mapiError();
-			return false;
-		}
-		if (!rowset.cRows) {
-			error() << "attachment count" << cursor;
-			break;
-		}
+	// Iterate through sets of rows.
+	SRowSet rowset;
+	while ((QueryRows(&m_attachments, 4, TBL_ADVANCE, &rowset) < 4 /*MAPI_E_SUCCESS*/) && rowset.cRows) {
 		error() << "got rows" << rowset.cRows;
 		for (unsigned i = 0; i < rowset.cRows; i++) {
 			SRow &row = rowset.aRow[i];
 			unsigned number = 0;
 			unsigned renderingPosition = 0;
-			QString mimeTag;
 			QString file;
 			unsigned method = 0;
-			unsigned dataSize;
+			QString mimeTag = QString::fromAscii("text/plain");
 
 			for (unsigned j = 0; j < row.cValues; j++) {
 				MapiProperty property(row.lpProps[j]); 
@@ -569,11 +622,11 @@ bool MapiNote::preparePayload()
 				case PidTagAttachNumber: 
 					number = property.value().toUInt();
 					break;
-				case PidTagRenderingPosition: 
-					renderingPosition = property.value().toUInt();
+				case PidTagAttachDataBinary: 
+				case PidTagAttachDataObject: 
 					break;
-				case PidTagAttachMimeTag: 
-					mimeTag = property.value().toString();
+				case PidTagAttachMethod: 
+					method = property.value().toUInt();
 					break;
 				case PidTagAttachLongFilename: 
 					file = property.value().toString();
@@ -583,16 +636,11 @@ bool MapiNote::preparePayload()
 						file = property.value().toString();
 					}
 					break;
-				case PidTagAttachMethod: 
-					method = property.value().toUInt();
+				case PidTagRenderingPosition: 
+					renderingPosition = property.value().toUInt();
 					break;
-				case PidTagAttachSize: 
-					dataSize = property.value().toUInt();
-					error() << "read data size" << dataSize;
-					break;
-				case PidTagAttachDataBinary: 
-					break;
-				case PidTagAttachDataObject: 
+				case PidTagAttachMimeTag: 
+					mimeTag = property.value().toString();
 					break;
 				default:
 					debug() << "ignoring attachment property:" << tagName(property.tag()) << property.toString();
@@ -600,18 +648,27 @@ bool MapiNote::preparePayload()
 				}
 			}
 
-			QByteArray attachment;
+			QByteArray bytes;
+			unsigned dataSize;
+			unsigned tag;
 			unsigned offset;
 			uint16_t readSize;
 			debug() << "attachment method:" << method;
 			switch (method)
 			{
+			case 5:
+				if (UINT_MAX > (index = propertyFind(PidTagAttachDataBinary))) {
+					bytes = propertyAt(index).toByteArray();
+					break;
+				}
+				// Fall through...
 			case 1:
 				if (MAPI_E_SUCCESS != OpenAttach(&m_object, number, &m_attachment)) {
 					error() << "cannot open attachment" << mapiError();
 					return false;
 				}
-				if (MAPI_E_SUCCESS != OpenStream(&m_attachment, (MAPITAGS)PidTagAttachDataBinary, OpenStream_ReadOnly, &m_stream)) {
+				tag = (method == 1) ? PidTagAttachDataBinary : PidTagAttachDataObject;
+				if (MAPI_E_SUCCESS != OpenStream(&m_attachment, (MAPITAGS)tag, OpenStream_ReadOnly, &m_stream)) {
 					error() << "cannot open stream" << mapiError();
 					return false;
 				}
@@ -619,75 +676,32 @@ bool MapiNote::preparePayload()
 					error() << "cannot get stream size" << mapiError();
 					return false;
 				}
-				error() << "fetched stream size" << dataSize;
-				attachment.reserve(dataSize);
+				debug() << "attachment:" << tagName(tag) << "size:" << dataSize;
+				bytes.reserve(dataSize);
 				offset = 0;
 				do {
-					if (MAPI_E_SUCCESS != ReadStream(&m_stream, (uchar *)attachment.data() + offset, 1024, &readSize)) {
+					if (MAPI_E_SUCCESS != ReadStream(&m_stream, (uchar *)bytes.data() + offset, 1024, &readSize)) {
 						error() << "cannot read stream" << mapiError();
 						return false;
 					}
 					offset += readSize;
 				} while (readSize && (offset < dataSize));
-				attachment.resize(dataSize);
-				error() << "stream attachment size:" << attachment.size();
-				body = new KMime::Content;
-				body->contentType()->setMimeType(mimeTag.toUtf8());
-				if (!file.isEmpty()) {
-					body->contentDescription(true)->fromUnicodeString(file, "utf-8");
-				}
-				body->setBody(attachment);
-				addContent(body);
-				break;
-			case 5:
-				error() << "PidTagAttachDataBinary" << propertyFind(PidTagAttachDataBinary);
-				error() << "PidTagAttachDataObject" << propertyFind(PidTagAttachDataObject);
-				error() << "PidTagAttachDataBinary_Error" << propertyFind(PidTagAttachDataBinary_Error);
-				error() << "PidTagAttachDataObject_Error" << propertyFind(PidTagAttachDataObject_Error);
-				
-				if (UINT_MAX > (index = propertyFind(PidTagAttachDataBinary))) {
-					attachment = propertyAt(index).toByteArray();
-				error() << mimeTag << "attachment object:" << attachment.toHex();
-				} else {
-					if (MAPI_E_SUCCESS != OpenAttach(&m_object, number, &m_attachment)) {
-						error() << "cannot open attachment" << mapiError();
-						return false;
-					}
-					if (MAPI_E_SUCCESS != OpenStream(&m_attachment, (MAPITAGS)PidTagAttachDataObject, OpenStream_ReadOnly, &m_stream)) {
-						error() << "cannot open stream" << mapiError();
-						return false;
-					}
-					if (MAPI_E_SUCCESS != GetStreamSize(&m_stream, &dataSize)) {
-						error() << "cannot get stream size" << mapiError();
-						return false;
-					}
-					attachment.reserve(dataSize);
-					offset = 0;
-					do {
-						if (MAPI_E_SUCCESS != ReadStream(&m_stream, (uchar *)attachment.data() + offset, 1024, &readSize)) {
-							error() << "cannot read stream" << mapiError();
-							return false;
-						}
-						offset += readSize;
-					} while (readSize && (offset < dataSize));
-					attachment.resize(dataSize);
-					error() << mimeTag << "binary attachment size:" << attachment.size();
-				}
-				kError() << mimeTag << "attachment object:" << attachment.toHex();
-				body = new KMime::Content;
-				body->contentType()->setMimeType(mimeTag.toUtf8());
-				if (!file.isEmpty()) {
-					body->contentDescription(true)->fromUnicodeString(file, "utf-8");
-				}
-				body->setBody(attachment);
-				addContent(body);
+				bytes.resize(dataSize);
 				break;
 			default:
 				error() << "ignoring attachment method:" << method;
 				break;
 			}
+			KMime::Content *attachment = new KMime::Content;
+			attachment->contentType()->setMimeType(mimeTag.toUtf8());
+			if (!file.isEmpty()) {
+				attachment->contentDescription(true)->fromUnicodeString(file, "utf-8");
+			}
+			attachment->setBody(bytes);
+			addContent(attachment);
 		}
 	}
+		error() << "got rows final" << rowset.cRows;
 	assemble();
 	return true;
 }
@@ -699,7 +713,7 @@ bool MapiNote::propertiesPull(QVector<int> &tags, const bool tagsAppended, bool 
 	 */
 	static int ourTagList[] = {
 		// 2.2.1.2
-		PidTagHasAttachments,
+		//PidTagHasAttachments,
 		// 2.2.1.3
 		PidTagMessageClass,
 		// 2.2.1.4
@@ -709,87 +723,87 @@ bool MapiNote::propertiesPull(QVector<int> &tags, const bool tagsAppended, bool 
 		// 2.2.1.6
 		PidTagMessageFlags,
 		// 2.2.1.7
-		PidTagMessageSize,
+		//PidTagMessageSize,
 		// 2.2.1.8
-		PidTagMessageStatus,
+		//PidTagMessageStatus,
 		// 2.2.1.9
-		PidTagSubjectPrefix,
+		//PidTagSubjectPrefix,
 		// 2.2.1.10
-		PidTagNormalizedSubject,
+		//PidTagNormalizedSubject,
 		// 2.2.1.11
-		PidTagImportance,
+		//PidTagImportance,
 		// 2.2.1.12
-		PidTagPriority,
+		//PidTagPriority,
 		// 2.2.1.13
-		PidTagSensitivity,
+		//PidTagSensitivity,
 		// 2.2.1.14
-		PidLidSmartNoAttach,
+		//PidLidSmartNoAttach,
 		// 2.2.1.15
-		PidLidPrivate,
+		//PidLidPrivate,
 		// 2.2.1.16
-		PidLidSideEffects,
+		//PidLidSideEffects,
 		// 2.2.1.17
-		PidNameKeywords,
+		//PidNameKeywords,
 		// 2.2.1.18
-		PidLidCommonStart,
+		//PidLidCommonStart,
 		// 2.2.1.19
-		PidLidCommonEnd,
+		//PidLidCommonEnd,
 		// 2.2.1.20
-		PidTagAutoForwarded,
+		//PidTagAutoForwarded,
 		// 2.2.1.21
-		PidTagAutoForwardComment,
+		//PidTagAutoForwardComment,
 		// 2.2.1.22
-		PidLidCategories,
+		//PidLidCategories,
 		// 2.2.1.23
-		PidLidClassification,
+		//PidLidClassification,
 		// 2.2.1.24
-		PidLidClassificationDescription,
+		//PidLidClassificationDescription,
 		// 2.2.1.25
-		PidLidClassified,
+		//PidLidClassified,
 		// 2.2.1.26
-		PidTagInternetReferences,
+	//	PidTagInternetReferences,
 		// 2.2.1.27
-		PidLidInfoPathFormName,
+		//PidLidInfoPathFormName,
 		// 2.2.1.28
-		PidTagMimeSkeleton,
+		//PidTagMimeSkeleton,
 		// 2.2.1.29
-		PidTagTnefCorrelationKey,
+		//PidTagTnefCorrelationKey,
 		// 2.2.1.30
-		PidTagAddressBookDisplayNamePrintable,
+		//PidTagAddressBookDisplayNamePrintable,
 		// 2.2.1.31
-		PidTagCreatorEntryId,
+		//PidTagCreatorEntryId,
 		// 2.2.1.32
-		PidTagLastModifierEntryId,
+		//PidTagLastModifierEntryId,
 		// 2.2.1.33
-		PidLidAgingDontAgeMe,
+		//PidLidAgingDontAgeMe,
 		// 2.2.1.34
-		PidLidCurrentVersion,
+		//PidLidCurrentVersion,
 		// 2.2.1.35
-		PidLidCurrentVersionName,
+		//PidLidCurrentVersionName,
 		// 2.2.1.36
-		PidTagAlternateRecipientAllowed,
+		//PidTagAlternateRecipientAllowed,
 		// 2.2.1.37
-		PidTagResponsibility,
+		//PidTagResponsibility,
 		// 2.2.1.38
-		PidTagRowid,
+		//PidTagRowid,
 		// 2.2.1.39
-		PidTagHasNamedProperties,
+		//PidTagHasNamedProperties,
 		// 2.2.1.40
-		PidTagRecipientOrder,
+		//PidTagRecipientOrder,
 		// 2.2.1.41
-		PidNameContentBase,
+		//PidNameContentBase,
 		// 2.2.1.42
-		PidNameAcceptLanguage,
+		//PidNameAcceptLanguage,
 		// 2.2.1.43
-		PidTagPurportedSenderDomain,
+		//PidTagPurportedSenderDomain,
 		// 2.2.1.44
-		PidTagStoreEntryId,
+		//PidTagStoreEntryId,
 		// 2.2.1.45
-		PidTagTrustSender,
+		//PidTagTrustSender,
 		// 2.2.1.46
 		PidTagSubject,
 		// 2.2.1.47
-		PidTagMessageRecipients,
+		//PidTagMessageRecipients,
 		// 2.2.1.48.1
 		PidTagBody,
 		// 2.2.1.48.2
@@ -801,11 +815,11 @@ bool MapiNote::propertiesPull(QVector<int> &tags, const bool tagsAppended, bool 
 		// 2.2.1.48.5
 		//PidTagRtfInSync,
 		// 2.2.1.48.6
-		PidTagInternetCodepage,
+	//	PidTagInternetCodepage,
 		// 2.2.1.48.7
-		PidTagBodyContentId,
+	//	PidTagBodyContentId,
 		// 2.2.1.48.8
-		PidTagBodyContentLocation,
+	//	PidTagBodyContentLocation,
 		// 2.2.1.48.9
 		PidTagHtml,
 		// 2.2.2.3
