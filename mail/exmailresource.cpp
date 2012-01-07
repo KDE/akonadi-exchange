@@ -99,7 +99,57 @@ private:
 
 	mapi_object_t m_attachments;
 	mapi_object_t m_attachment;
-	mapi_object_t m_stream;
+
+	/**
+	 * Read a stream as a byte array.
+	 */
+	bool streamRead(mapi_object_t *parent, int tag, QByteArray &bytes)
+	{
+		mapi_object_t stream;
+		unsigned dataSize;
+		unsigned offset;
+		uint16_t readSize;
+
+		mapi_object_init(&stream);
+		if (MAPI_E_SUCCESS != OpenStream(parent, (MAPITAGS)tag, OpenStream_ReadOnly, &stream)) {
+			error() << "cannot open stream" << mapiError();
+			mapi_object_release(&stream);
+			return false;
+		}
+		if (MAPI_E_SUCCESS != GetStreamSize(&stream, &dataSize)) {
+			error() << "cannot get stream size" << mapiError();
+			mapi_object_release(&stream);
+			return false;
+		}
+		bytes.reserve(dataSize);
+		offset = 0;
+		do {
+			if (MAPI_E_SUCCESS != ReadStream(&stream, (uchar *)bytes.data() + offset, 1024, &readSize)) {
+				error() << "cannot read stream" << mapiError();
+				mapi_object_release(&stream);
+				return false;
+			}
+			offset += readSize;
+		} while (readSize && (offset < dataSize));
+		bytes.resize(dataSize);
+		mapi_object_release(&stream);
+		return true;
+	}
+
+	/**
+	 * Read a stream as a string.
+	 */
+	bool streamRead(mapi_object_t *parent, int tag, QTextCodec *(*codecFor)(const QByteArray &), QString &string)
+	{
+		QByteArray bytes;
+
+		if (!streamRead(parent, tag, bytes)) {
+			return false;
+		}
+		QTextCodec *codec = codecFor(bytes);
+		string = codec->toUnicode(bytes);
+		return true;
+	}
 };
 
 ExMailResource::ExMailResource(const QString &id) :
@@ -339,12 +389,10 @@ MapiNote::MapiNote(MapiConnector2 *connector, const char *tallocName, mapi_id_t 
 {
 	mapi_object_init(&m_attachments);
 	mapi_object_init(&m_attachment);
-	mapi_object_init(&m_stream);
 }
 
 MapiNote::~MapiNote()
 {
-	mapi_object_release(&m_stream);
 	mapi_object_release(&m_attachment);
 	mapi_object_release(&m_attachments);
 }
@@ -489,6 +537,20 @@ bool MapiNote::preparePayload()
 			references()->fromUnicodeString(property.value().toString(), "utf-8");
 			break;
 		default:
+			// Handle oversize objects.
+			if (MAPI_E_NOT_ENOUGH_MEMORY == property.value().toInt()) {
+				if (PidTagBody_Error == property.tag()) {
+					if (!streamRead(&m_object, PidTagBody, QTextCodec::codecForUtfText, textBody)) {
+						return false;
+					}
+					break;
+				} else if (PidTagHtml_Error == property.tag()) {
+					if (!streamRead(&m_object, PidTagBody, QTextCodec::codecForHtml, htmlBody)) {
+						return false;
+					}
+					break;
+				}
+			}
 //#if (DEBUG_NOTE_PROPERTIES)
 			debug() << "ignoring note property:" << tagName(property.tag()) << property.toString();
 //#endif
@@ -603,7 +665,7 @@ bool MapiNote::preparePayload()
 
 	// Iterate through sets of rows.
 	SRowSet rowset;
-	while ((QueryRows(&m_attachments, 4, TBL_ADVANCE, &rowset) < 4 /*MAPI_E_SUCCESS*/) && rowset.cRows) {
+	while ((QueryRows(&m_attachments, cursor, TBL_ADVANCE, &rowset) == MAPI_E_SUCCESS) && rowset.cRows) {
 		error() << "got rows" << rowset.cRows;
 		for (unsigned i = 0; i < rowset.cRows; i++) {
 			SRow &row = rowset.aRow[i];
@@ -649,10 +711,7 @@ bool MapiNote::preparePayload()
 			}
 
 			QByteArray bytes;
-			unsigned dataSize;
 			unsigned tag;
-			unsigned offset;
-			uint16_t readSize;
 			debug() << "attachment method:" << method;
 			switch (method)
 			{
@@ -668,25 +727,9 @@ bool MapiNote::preparePayload()
 					return false;
 				}
 				tag = (method == 1) ? PidTagAttachDataBinary : PidTagAttachDataObject;
-				if (MAPI_E_SUCCESS != OpenStream(&m_attachment, (MAPITAGS)tag, OpenStream_ReadOnly, &m_stream)) {
-					error() << "cannot open stream" << mapiError();
+				if (!streamRead(&m_attachment, tag, bytes)) {
 					return false;
 				}
-				if (MAPI_E_SUCCESS != GetStreamSize(&m_stream, &dataSize)) {
-					error() << "cannot get stream size" << mapiError();
-					return false;
-				}
-				debug() << "attachment:" << tagName(tag) << "size:" << dataSize;
-				bytes.reserve(dataSize);
-				offset = 0;
-				do {
-					if (MAPI_E_SUCCESS != ReadStream(&m_stream, (uchar *)bytes.data() + offset, 1024, &readSize)) {
-						error() << "cannot read stream" << mapiError();
-						return false;
-					}
-					offset += readSize;
-				} while (readSize && (offset < dataSize));
-				bytes.resize(dataSize);
 				break;
 			default:
 				error() << "ignoring attachment method:" << method;
