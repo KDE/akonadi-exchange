@@ -54,6 +54,81 @@
 #define DEBUG_NOTE_PROPERTIES 0
 #endif
 
+
+// Map QTextCodec names to Microsoft Code Pages
+typedef struct
+{
+	unsigned codepage;
+	const char *codec;
+} codepage2codec;
+
+#define UTF16 1200
+
+static codepage2codec map[] =
+{
+	{ 10000,	"Apple Roman" },
+	{ 950,		"Big5" },
+	{ 950,		"Big5-HKSCS" },
+	{ 949,		"CP949" },
+	{ 20932,	"EUC-JP" },
+	{ 51949,	"EUC-KR" },
+	{ 54936,	"GB18030-0" },
+	{ 850,		"IBM 850" },
+	{ 866,		"IBM 866" },
+	{ 874,		"IBM 874" },
+	{ 50220,	"ISO 2022-JP" },
+	{ 28591,	"ISO 8859-1" },
+	{ 28592,	"ISO 8859-2" },
+	{ 28593,	"ISO 8859-3" },
+	{ 28594,	"ISO 8859-4" },
+	{ 28595,	"ISO 8859-5" },
+	{ 28596,	"ISO 8859-6" },
+	{ 28597,	"ISO 8859-7" },
+	{ 28598,	"ISO 8859-8" },
+	{ 28599,	"ISO 8859-9" },
+	{ 28600,	"ISO 8859-10" },
+	{ 28603,	"ISO 8859-13" },
+	{ 28604,	"ISO 8859-14" },
+	{ 28605,	"ISO 8859-15" },
+	{ 28606,	"ISO 8859-16" },
+	{ 57003,	"Iscii-Bng" },
+	{ 57002,	"Iscii-Dev" },
+	{ 57010,	"Iscii-Gjr" },
+	{ 57008,	"Iscii-Knd" },
+	{ 57009,	"Iscii-Mlm" },
+	{ 57007,	"Iscii-Ori" },
+	{ 57011,	"Iscii-Pnj" },
+	{ 57005,	"Iscii-Tlg" },
+	{ 57004,	"Iscii-Tml" },
+	{ 50222,	"JIS X 0201" },
+	{ 20932,	"JIS X 0208" },
+	{ 20866,	"KOI8-R" },
+	{ 21866,	"KOI8-U" },
+	//{,		"MuleLao-1" },
+	//{,		"ROMAN8" },
+	{ 932,		"Shift-JIS" },
+	{ 874,		"TIS-620" },
+	{ 57004,	"TSCII" },
+	{ 65001,	"UTF-8" },
+	{ UTF16,	"UTF-16" },
+	{ 1201,		"UTF-16BE" },
+	{ 1200,		"UTF-16LE" },
+	{ 12000,	"UTF-32" },
+	{ 12001,	"UTF-32BE" },
+	{ 12000,	"UTF-32LE" },
+	{ 1250,		"Windows-1250" },
+	{ 1251,		"Windows-1251" },
+	{ 1252,		"Windows-1252" },
+	{ 1253,		"Windows-1253" },
+	{ 1254,		"Windows-1254" },
+	{ 1255,		"Windows-1255" },
+	{ 1256,		"Windows-1256" },
+	{ 1257,		"Windows-1257" },
+	{ 1258,		"Windows-1258" },
+	//{,		"WINSAMI2" },
+	{ 0, 0 }
+};
+
 using namespace Akonadi;
 
 /**
@@ -140,14 +215,22 @@ private:
 	/**
 	 * Read a stream as a string.
 	 */
-	bool streamRead(mapi_object_t *parent, int tag, QTextCodec *(*codecFor)(const QByteArray &), QString &string)
+	bool streamRead(mapi_object_t *parent, int tag, unsigned codepage, QString &string)
 	{
 		QByteArray bytes;
+		codepage2codec *entry = &map[0];
 
+		while (entry->codepage && entry->codepage != codepage) {
+			entry++;
+		}
+		if (!entry->codec) {
+			error() << "codec name not found for codepage:" << codepage;
+			return false;
+		}
 		if (!streamRead(parent, tag, bytes)) {
 			return false;
 		}
-		QTextCodec *codec = codecFor(bytes);
+		QTextCodec *codec = QTextCodec::codecForName(entry->codec);
 		string = codec->toUnicode(bytes);
 		return true;
 	}
@@ -437,6 +520,7 @@ void MapiNote::dumpChange(KMime::Headers::Base *header, const char *item, MapiPr
 bool MapiNote::preparePayload()
 {
 	unsigned index;
+	unsigned codepage = 0;
 	QString textBody;
 	QString htmlBody;
 	bool hasAttachments = false;
@@ -528,6 +612,8 @@ DONE:
 
 	// Walk through the properties and extract the values of interest. The
 	// properties here should be aligned with the list pulled above.
+	bool textStream = false;
+	bool htmlStream = false;
 	for (unsigned i = 0; i < m_propertyCount; i++) {
 		MapiProperty property(m_properties[i]);
 
@@ -540,16 +626,17 @@ DONE:
 				return false;
 			}
 			break;
+		case PidTagMessageCodepage:
+			codepage = property.value().toUInt();
+			break;
 		case PidTagMessageFlags:
 			hasAttachments = (property.value().toUInt() & MSGFLAG_HASATTACH) != 0;
 			break;
 		case PidTagBody:
 			textBody = property.value().toString();
-			error() << "body property:" << tagName(property.tag()) << textBody.size();
 			break;
 		case PidTagHtml:
 			htmlBody = property.value().toString();
-			error() << "body property:" << tagName(property.tag()) << htmlBody.size();
 			break;
 		case PidTagTransportMessageHeaders:
 			break;
@@ -558,14 +645,10 @@ DONE:
 			if (MAPI_E_NOT_ENOUGH_MEMORY == property.value().toInt()) {
 				switch (property.tag()) {
 				case PidTagBody_Error:
-					if (!streamRead(&m_object, PidTagBody, QTextCodec::codecForUtfText, textBody)) {
-						return false;
-					}
+					textStream = true;
 					break;
 				case PidTagHtml_Error:
-					if (!streamRead(&m_object, PidTagHtml, QTextCodec::codecForHtml, htmlBody)) {
-						return false;
-					}
+					htmlStream = true;
 					break;
 				default:
 					error() << "missing oversize support:" << tagName(property.tag());
@@ -575,11 +658,17 @@ DONE:
 				// Carry on with next property...
 				break;
 			}
-#if (DEBUG_NOTE_PROPERTIES)
+//#if (DEBUG_NOTE_PROPERTIES)
 			debug() << "ignoring note property:" << tagName(property.tag()) << property.toString();
-#endif
+//#endif
 			break;
 		}
+	}
+	if (textStream && !streamRead(&m_object, PidTagBody, UTF16, textBody)) {
+		return false;
+	}
+	if (htmlStream && !streamRead(&m_object, PidTagHtml, codepage, htmlBody)) {
+		return false;
 	}
 
 	foreach (MapiRecipient item, MapiMessage::recipients()) {
@@ -772,7 +861,7 @@ bool MapiNote::propertiesPull(QVector<int> &tags, const bool tagsAppended, bool 
 		// 2.2.1.3
 		PidTagMessageClass,
 		// 2.2.1.4
-	//	PidTagMessageCodepage,
+		PidTagMessageCodepage,
 		// 2.2.1.5
 	//	PidTagMessageLocaleId,
 		// 2.2.1.6
