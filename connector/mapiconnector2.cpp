@@ -717,6 +717,17 @@ void MapiMessage::recipientPopulate(const char *phase, SRow &recipient, MapiReci
 			result.setObjectType((MapiRecipient::ObjectType)property.value().toUInt());
 			break;
 		default:
+			// Handle oversize objects.
+			if (MAPI_E_NOT_ENOUGH_MEMORY == property.value().toInt()) {
+				switch (property.tag()) {
+				default:
+					error() << "missing oversize support:" << tagName(property.tag());
+					break;
+				}
+
+				// Carry on with next property...
+				break;
+			}
 #if (DEBUG_MESSAGE_PROPERTIES)
 			debug() << "ignoring " << phase << " property:" << tagName(property.tag()) << property.value();
 #else

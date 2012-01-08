@@ -547,6 +547,17 @@ bool MapiAppointment::propertiesPull(QVector<int> &tags, const bool tagsAppended
 			pattern = get_RecurrencePattern(ctx(), &m_properties[i].value.bin);
 			break;
 		default:
+			// Handle oversize objects.
+			if (MAPI_E_NOT_ENOUGH_MEMORY == property.value().toInt()) {
+				switch (property.tag()) {
+				default:
+					error() << "missing oversize support:" << tagName(property.tag());
+					break;
+				}
+
+				// Carry on with next property...
+				break;
+			}
 #if (DEBUG_APPOINTMENT_PROPERTIES)
 			debug() << "ignoring appointment property:" << tagName(property.tag()) << property.value();
 #endif

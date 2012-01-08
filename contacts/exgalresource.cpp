@@ -392,15 +392,29 @@ static bool preparePayload(SPropValue *properties, unsigned propertyCount, KABC:
 			addressee.setPhoto(KABC::Picture(QImage::fromData(property.value().toByteArray())));
 			break;
 		default:
+			const char *str = get_proptag_name(property.tag());
+			QString tagName;
+
+			if (str) {
+				tagName = QString::fromAscii(str).mid(6);
+			} else {
+				tagName = QString::number(property.tag(), 0, 16);
+			}
+
 			if (PT_ERROR != (property.tag() & 0xFFFF)) {
-				const char *str = get_proptag_name(property.tag());
-				QString tagName;
-				if (str) {
-					tagName = QString::fromAscii(str).mid(6);
-				} else {
-					tagName = QString::number(property.tag(), 0, 16);
-				}
 				addressee.insertCustom(i18n("Exchange"), tagName, property.toString());
+			}
+
+			// Handle oversize objects.
+			if (MAPI_E_NOT_ENOUGH_MEMORY == property.value().toInt()) {
+				switch (property.tag()) {
+				default:
+					kError() << "missing oversize support:" << tagName;
+					break;
+				}
+
+				// Carry on with next property...
+				break;
 			}
 			break;
 		}

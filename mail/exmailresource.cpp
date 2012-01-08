@@ -35,6 +35,7 @@
 #include <akonadi/kmime/messageflags.h>
 #include <akonadi/kmime/messageparts.h>
 #include <kmime/kmime_message.h>
+#include <kmime/kmime_util.h>
 #include <kpimutils/email.h>
 
 #include "mapiconnector2.h"
@@ -124,7 +125,7 @@ private:
 		bytes.reserve(dataSize);
 		offset = 0;
 		do {
-			if (MAPI_E_SUCCESS != ReadStream(&stream, (uchar *)bytes.data() + offset, 1024, &readSize)) {
+			if (MAPI_E_SUCCESS != ReadStream(&stream, (uchar *)bytes.data() + offset, 0x1000, &readSize)) {
 				error() << "cannot read stream" << mapiError();
 				mapi_object_release(&stream);
 				return false;
@@ -441,10 +442,15 @@ bool MapiNote::preparePayload()
 	bool hasAttachments = false;
 
 	// First set the header content, and parse what we can from it. Note
-	// this anything beyond the header will return the last value only. For
-	// example, this will result in a contentType of "text/html" instead of
-	// "multipart/alternative":
+	// that the message headers we are given:
 	//
+	//	- Start with some kind of descriptive string.
+	//	- End each line with CRLF.
+	//	- Have all subcontent headers and boundaries.
+	//
+	// like this:
+	//
+	// Microsoft Mail Internet Headers Version 2.0^M
 	// Content-Type: multipart/alternative;^M
 	// boundary="----_=_NextPart_001_01CC9A5A.689896D8"^M
 	// Subject: ...^M
@@ -460,32 +466,64 @@ bool MapiNote::preparePayload()
 	// Content-Type: text/html;^M
 	//         charset="US-ASCII"^M
 	//
-	// However, we cannot in general provide the user with all the content
-	// as Exchange's MAPI limits us in that regard. So, we'll just ditch
-	// all notions of content contained in the header, and rework it below.
+	// However, the parse() routine will return the last value only. For
+	// example, the above will result in a contentType of "text/html" 
+	// instead of "multipart/alternative". For all these reasons, we need 
+	// a fixed-up version to work with.
 	if (UINT_MAX > (index = propertyFind(PidTagTransportMessageHeaders))) {
-		QString header = propertyAt(index).toString();
-		int bodyStart = header.indexOf(QString::fromAscii("\r\n\r\n"));
+		QString header = propertyAt(index).toString().prepend(QString::fromAscii("X-Parsed-By: "));
+		bool lastChWasNl = false;
 
-		// Set up all the headers that Exchange didn't care about.
-		if (bodyStart >= 0) {
-			bodyStart++;
+		// Fixup the header.
+		int j = 0;
+		for (int i = 0; i < header.size(); i++) {
+			QChar ch = header.at(i);
+			bool chIsNl = false;
+
+			switch (ch.toAscii()) {
+			case '\r':
+				// Omit CRs. Propagate the NL state of the 
+				// previous character.
+				chIsNl = lastChWasNl;
+				break;
+			case '\t':
+			case ' ':
+				// Unfold?
+				if (lastChWasNl) {
+					j--;
+					break;
+				}
+				// Copy anything else.
+				header[j] = ch;
+				j++;
+				break;
+			case '\n':
+				// End with the first double NL.
+				if (lastChWasNl) {
+					goto DONE;
+				}
+				chIsNl = true;
+				// Copy anything else.
+				header[j] = ch;
+				j++;
+				break;
+			default:
+				// Copy anything else.
+				header[j] = ch;
+				j++;
+				break;
+			}
+			lastChWasNl = chIsNl;
 		}
-		setHead(header.left(bodyStart).toUtf8());
+DONE:
+		header.resize(j);
+
+		// Set up all the headers. For unknown reasons, parse() gets
+		// the Content-Type wrong, so we have to fix that up by hand.
+		setHead(header.toUtf8());
 		parse();
-
-		// Now remove any content-related properties.
-		error() << "original property:" << contentType()->asUnicodeString();
-		while (removeHeader("Content-Type")) {
-		}
-		while (removeHeader("Content-Transfer-Encoding")) {
-		}
-		while (removeHeader("Content-Disposition")) {
-		}
-		while (removeHeader("Content-Description")) {
-		}
-		while (removeHeader("Content-class")) {
-		}
+		QByteArray tmp = KMime::extractHeader(head(), "Content-Type");
+		contentType()->from7BitString(tmp);
 	}
 
 	// Walk through the properties and extract the values of interest. The
@@ -502,12 +540,8 @@ bool MapiNote::preparePayload()
 				return false;
 			}
 			break;
-		// 2.2.2.3
-		case PidTagCreationTime:
-			dumpChange(date(), "date", property);
-			date()->setDateTime(KDateTime(property.value().toDateTime()));
-			break;
-		case PidTagTransportMessageHeaders:
+		case PidTagMessageFlags:
+			hasAttachments = (property.value().toUInt() & MSGFLAG_HASATTACH) != 0;
 			break;
 		case PidTagBody:
 			textBody = property.value().toString();
@@ -517,39 +551,29 @@ bool MapiNote::preparePayload()
 			htmlBody = property.value().toString();
 			error() << "body property:" << tagName(property.tag()) << htmlBody.size();
 			break;
-		case PidTagMessageFlags:
-			hasAttachments = (property.value().toUInt() & MSGFLAG_HASATTACH) != 0;
-			break;
-		case PidTagConversationTopic:
-		//case PidTagNormalizedSubject:
-			setHeader(new KMime::Headers::Generic("Thread-Topic", this, property.value().toString(), "utf-8"));
-			break;
-		case PidTagSubject:
-			dumpChange(subject(), "subject", property);
-			subject()->fromUnicodeString(property.value().toString(), "utf-8");
-			break;
-		case PidTagInternetMessageId:
-			//dumpChange(messageID(true), "messageID", property);
-			messageID()->fromUnicodeString(property.value().toString(), "utf-8");
-			break;
-		case PidTagInternetReferences:
-			//dumpChange(references(true), "references", property);
-			references()->fromUnicodeString(property.value().toString(), "utf-8");
+		case PidTagTransportMessageHeaders:
 			break;
 		default:
 			// Handle oversize objects.
 			if (MAPI_E_NOT_ENOUGH_MEMORY == property.value().toInt()) {
-				if (PidTagBody_Error == property.tag()) {
+				switch (property.tag()) {
+				case PidTagBody_Error:
 					if (!streamRead(&m_object, PidTagBody, QTextCodec::codecForUtfText, textBody)) {
 						return false;
 					}
 					break;
-				} else if (PidTagHtml_Error == property.tag()) {
-					if (!streamRead(&m_object, PidTagBody, QTextCodec::codecForHtml, htmlBody)) {
+				case PidTagHtml_Error:
+					if (!streamRead(&m_object, PidTagHtml, QTextCodec::codecForHtml, htmlBody)) {
 						return false;
 					}
 					break;
+				default:
+					error() << "missing oversize support:" << tagName(property.tag());
+					break;
 				}
+
+				// Carry on with next property...
+				break;
 			}
 //#if (DEBUG_NOTE_PROPERTIES)
 			debug() << "ignoring note property:" << tagName(property.tag()) << property.toString();
@@ -580,19 +604,10 @@ bool MapiNote::preparePayload()
 
 	KMime::Content *parent = this;
 	KMime::Content *body;
-	if (hasAttachments) {
-		parent->contentType()->setMimeType("multipart/mixed");
-		parent->contentType()->setBoundary("------_=_NextPart_001");
-		body = new KMime::Content;
-		parent->addContent(body);
-		parent = body;
-	}
-
-	// Even though Exchange only ever seems to give one body, don't rely on that.
 	if (!textBody.isEmpty() && !htmlBody.isEmpty()) {
 		body = new KMime::Content;
 		body->contentType()->setMimeType("multipart/alternative");
-		body->contentType()->setBoundary("------_=_NextPart_001.001");
+		body->contentType()->setBoundary(KMime::multiPartBoundary());
 		parent->addContent(body);
 		parent = body;
 
@@ -760,9 +775,9 @@ bool MapiNote::propertiesPull(QVector<int> &tags, const bool tagsAppended, bool 
 		// 2.2.1.3
 		PidTagMessageClass,
 		// 2.2.1.4
-		PidTagMessageCodepage,
+	//	PidTagMessageCodepage,
 		// 2.2.1.5
-		PidTagMessageLocaleId,
+	//	PidTagMessageLocaleId,
 		// 2.2.1.6
 		PidTagMessageFlags,
 		// 2.2.1.7
@@ -804,7 +819,7 @@ bool MapiNote::propertiesPull(QVector<int> &tags, const bool tagsAppended, bool 
 		// 2.2.1.25
 		//PidLidClassified,
 		// 2.2.1.26
-	//	PidTagInternetReferences,
+		//PidTagInternetReferences,
 		// 2.2.1.27
 		//PidLidInfoPathFormName,
 		// 2.2.1.28
@@ -844,7 +859,7 @@ bool MapiNote::propertiesPull(QVector<int> &tags, const bool tagsAppended, bool 
 		// 2.2.1.45
 		//PidTagTrustSender,
 		// 2.2.1.46
-		PidTagSubject,
+		//PidTagSubject,
 		// 2.2.1.47
 		//PidTagMessageRecipients,
 		// 2.2.1.48.1
@@ -858,15 +873,17 @@ bool MapiNote::propertiesPull(QVector<int> &tags, const bool tagsAppended, bool 
 		// 2.2.1.48.5
 		//PidTagRtfInSync,
 		// 2.2.1.48.6
-	//	PidTagInternetCodepage,
+		//PidTagInternetCodepage,
 		// 2.2.1.48.7
-	//	PidTagBodyContentId,
+		//PidTagBodyContentId,
 		// 2.2.1.48.8
-	//	PidTagBodyContentLocation,
+		//PidTagBodyContentLocation,
 		// 2.2.1.48.9
 		PidTagHtml,
 		// 2.2.2.3
-		PidTagCreationTime,
+		//PidTagCreationTime,
+		// ???
+		PidTagTransportMessageHeaders,
 		0 };
 	static SPropTagArray ourTags = {
 		(sizeof(ourTagList) / sizeof(ourTagList[0])) - 1,
