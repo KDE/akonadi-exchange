@@ -575,9 +575,9 @@ DONE:
 				// Carry on with next property...
 				break;
 			}
-//#if (DEBUG_NOTE_PROPERTIES)
+#if (DEBUG_NOTE_PROPERTIES)
 			debug() << "ignoring note property:" << tagName(property.tag()) << property.toString();
-//#endif
+#endif
 			break;
 		}
 	}
@@ -641,7 +641,6 @@ DONE:
 		error() << "cannot get attachment table:" << mapiError();
 		return false;
 	}
-	error() << "eErr got attachment table";
 	// The list of tags used to fetch an attachment, from [MS-OXCMSG].
 	static int attachmentTagList[] = {
 		// 2.2.2.6
@@ -669,7 +668,6 @@ DONE:
 		error() << "cannot set attachment table columns:" << mapiError();
 		return false;
 	}
-	error() << "eErr set cols table";
 
 	// Get current cursor position.
 	uint32_t cursor;
@@ -681,7 +679,6 @@ DONE:
 	// Iterate through sets of rows.
 	SRowSet rowset;
 	while ((QueryRows(&m_attachments, cursor, TBL_ADVANCE, &rowset) == MAPI_E_SUCCESS) && rowset.cRows) {
-		error() << "got rows" << rowset.cRows;
 		for (unsigned i = 0; i < rowset.cRows; i++) {
 			SRow &row = rowset.aRow[i];
 			unsigned number = 0;
@@ -720,14 +717,15 @@ DONE:
 					mimeTag = property.value().toString();
 					break;
 				default:
+#if (DEBUG_NOTE_PROPERTIES)
 					debug() << "ignoring attachment property:" << tagName(property.tag()) << property.toString();
+#endif
 					break;
 				}
 			}
 
 			QByteArray bytes;
 			unsigned tag;
-			debug() << "attachment method:" << method;
 			switch (method)
 			{
 			case 5:
@@ -759,7 +757,6 @@ DONE:
 			addContent(attachment);
 		}
 	}
-		error() << "got rows final" << rowset.cRows;
 	assemble();
 	return true;
 }
