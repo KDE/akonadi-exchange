@@ -664,6 +664,9 @@ DONE:
 			break;
 		}
 	}
+
+	// We get the PidTagBody as Unicode in any event, but we also now know
+	// the codepage for PidTagHtml.
 	if (textStream && !streamRead(&m_object, PidTagBody, UTF16, textBody)) {
 		return false;
 	}
@@ -702,23 +705,28 @@ DONE:
 
 		body = new KMime::Content;
 		body->contentType()->setMimeType("text/plain");
+		body->contentTransferEncoding()->setEncoding(KMime::Headers::CEquPr);
 		body->setBody(textBody.toUtf8());
 		parent->addContent(body);
 
 		body = new KMime::Content;
 		body->contentType()->setMimeType("text/html");
+		body->contentTransferEncoding()->setEncoding(KMime::Headers::CEquPr);
 		body->setBody(htmlBody.toUtf8());
 		parent->addContent(body);
 	} else if (!textBody.isEmpty()) {
 		parent->contentType()->setMimeType("text/plain");
+		parent->contentTransferEncoding()->setEncoding(KMime::Headers::CEquPr);
 		parent->setBody(textBody.toUtf8());
 	} else if (!htmlBody.isEmpty()) {
 		parent->contentType()->setMimeType("text/html");
+		parent->contentTransferEncoding()->setEncoding(KMime::Headers::CEquPr);
 		parent->setBody(htmlBody.toUtf8());
 	} else {
 		// No body to speak of...
 		parent->contentType()->setMimeType("text/plain");
-		parent->setBody("\n\n");
+		parent->contentTransferEncoding()->setEncoding(KMime::Headers::CEquPr);
+		parent->setBody("");
 	}
 
 	// Short circuit exit if there are no attachments.
@@ -746,8 +754,13 @@ DONE:
 		PidTagAttachFilename,
 		// 2.2.2.16
 		PidTagRenderingPosition,
+		// 2.2.2.25
+		PidTagTextAttachmentCharset,
 		// 2.2.2.26
 		PidTagAttachMimeTag,
+		PidTagAttachContentId,
+		PidTagAttachContentLocation,
+		PidTagAttachContentBase,
 		0 };
 	static SPropTagArray attachmentTags = {
 		(sizeof(attachmentTagList) / sizeof(attachmentTagList[0])) - 1,
@@ -774,7 +787,11 @@ DONE:
 			unsigned renderingPosition = 0;
 			QString file;
 			unsigned method = 0;
+			QString charset;
 			QString mimeTag = QString::fromAscii("text/plain");
+			QString contentId;
+			QString contentLocation;
+			QString contentBase;
 
 			for (unsigned j = 0; j < row.cValues; j++) {
 				MapiProperty property(row.lpProps[j]); 
@@ -802,8 +819,20 @@ DONE:
 				case PidTagRenderingPosition: 
 					renderingPosition = property.value().toUInt();
 					break;
+				case PidTagTextAttachmentCharset:
+					charset = property.value().toString();
+					break;
 				case PidTagAttachMimeTag: 
 					mimeTag = property.value().toString();
+					break;
+				case PidTagAttachContentId:
+					contentId = property.value().toString();
+					break;
+				case PidTagAttachContentLocation:
+					contentLocation = property.value().toString();
+					break;
+				case PidTagAttachContentBase:
+					contentBase = property.value().toString();
 					break;
 				default:
 #if (DEBUG_NOTE_PROPERTIES)
@@ -837,11 +866,27 @@ DONE:
 				error() << "ignoring attachment method:" << method;
 				break;
 			}
+
+			// Write the attachment as per the rules in [MS-OXCMAIL] 2.1.3.4.
 			KMime::Content *attachment = new KMime::Content;
 			attachment->contentType()->setMimeType(mimeTag.toUtf8());
-			if (!file.isEmpty()) {
-				attachment->contentDescription(true)->fromUnicodeString(file, "utf-8");
+			if (!charset.isEmpty()) {
+				attachment->contentType()->setCharset(charset.toUtf8());
 			}
+			if (!contentId.isEmpty()) {
+				attachment->contentID()->setIdentifier(contentId.toUtf8());
+			} else {
+				if (!contentLocation.isEmpty()) {
+					attachment->contentLocation()->fromUnicodeString(contentLocation, "utf-8");
+				}
+				if (!contentBase.isEmpty()) {
+					//attachment->contentBase()->setCharset(contentBase.toUtf8());
+				}
+			}
+			if (!file.isEmpty()) {
+				attachment->contentDescription()->fromUnicodeString(file, "utf-8");
+			}
+			attachment->contentTransferEncoding()->setEncoding(KMime::Headers::CEbase64);
 			attachment->setBody(bytes);
 			addContent(attachment);
 		}
