@@ -30,6 +30,7 @@
 #include <QTimer>
 
 #include "mapiconnector2.h"
+#include "profiledialog.h"
 
 /**
  * We store all objects in Akonadi using the densest string representation to hand.
@@ -57,6 +58,11 @@ mapibrowser::mapibrowser()
 	fileMenu->addAction( a );
 
 	a = new QAction(this);
+	a->setText( QString::fromLocal8Bit("Manage Profiles") );
+	connect(a, SIGNAL(triggered()), SLOT(onManageProfiles()) );
+	fileMenu->addAction( a );
+
+	a = new QAction(this);
 	a->setText( QString::fromLocal8Bit("Quit") );
 	connect(a, SIGNAL(triggered()), SLOT(close()) );
 	fileMenu->addAction( a );
@@ -81,7 +87,7 @@ void mapibrowser::checkForDefaultProfile()
 		bool ok;
 		profile = QInputDialog::getItem(this, QString::fromAscii("Select Profile"), QString::fromAscii("Profile:"), profiles.list(), 0, false, &ok);
 		if (!ok || profile.isEmpty()) {
-			this->close();
+			return;
 		}
 		this->selectedProfile = profile;
 	}
@@ -124,6 +130,15 @@ void mapibrowser::onRefreshTree()
 	}
 
 	root->setExpanded(true);
+}
+
+void mapibrowser::onManageProfiles()
+{
+	ProfileDialog dlgConfig(selectedProfile);
+
+	if (dlgConfig.exec() == QDialog::Accepted) {
+		selectedProfile = dlgConfig.getProfileName();
+	}
 }
 
 void mapibrowser::itemDoubleClicked(QTreeWidgetItem* clickedItem, int )

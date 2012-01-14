@@ -34,6 +34,7 @@ public:
 
 public slots:
 	void onRefreshTree();
+	void onManageProfiles();
 	void itemDoubleClicked(QTreeWidgetItem*,int);
 	void itemDoubleClicked(QTableWidgetItem*);
 	void checkForDefaultProfile();
