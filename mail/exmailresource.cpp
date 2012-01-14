@@ -156,7 +156,7 @@ public:
 	 */
 	virtual bool propertiesPush();
 
-private:
+protected:
 	virtual QDebug debug() const;
 	virtual QDebug error() const;
 
@@ -166,12 +166,6 @@ private:
 	 * Fetch email properties.
 	 */
 	virtual bool propertiesPull(QVector<int> &tags, const bool tagsAppended, bool pullAll);
-
-	/**
-	 * Dump a change to a header.
-	 */
-	void dumpChange(KMime::Headers::Base *header, const char *item, MapiProperty &property);
-	void dumpChange(KMime::Headers::Base *header, const char *item, MapiProperty &property, QString &value);
 
 	mapi_object_t m_attachments;
 	mapi_object_t m_attachment;
@@ -188,12 +182,12 @@ private:
 
 		mapi_object_init(&stream);
 		if (MAPI_E_SUCCESS != OpenStream(parent, (MAPITAGS)tag, OpenStream_ReadOnly, &stream)) {
-			error() << "cannot open stream" << mapiError();
+			error() << "cannot open stream:" << tagName(tag) << mapiError();
 			mapi_object_release(&stream);
 			return false;
 		}
 		if (MAPI_E_SUCCESS != GetStreamSize(&stream, &dataSize)) {
-			error() << "cannot get stream size" << mapiError();
+			error() << "cannot get stream size:" << tagName(tag) << mapiError();
 			mapi_object_release(&stream);
 			return false;
 		}
@@ -201,7 +195,7 @@ private:
 		offset = 0;
 		do {
 			if (MAPI_E_SUCCESS != ReadStream(&stream, (uchar *)bytes.data() + offset, 0x1000, &readSize)) {
-				error() << "cannot read stream" << mapiError();
+				error() << "cannot read stream:" << tagName(tag) << mapiError();
 				mapi_object_release(&stream);
 				return false;
 			}
@@ -234,6 +228,22 @@ private:
 		string = codec->toUnicode(bytes);
 		return true;
 	}
+};
+
+/**
+ * An embedded Email. This is exactly the same as @ref MapiNote except that a
+ * different table contains all the properties (and we have a parent attachment
+ * object whose content we embody).
+ */
+class MapiEmbeddedNote: public MapiNote
+{
+public:
+	MapiEmbeddedNote(MapiConnector2 *connector, const char *tallocName, mapi_id_t grandParentId, mapi_id_t parentAttachmentId, mapi_object_t *parentAttachment);
+
+	bool open();
+
+private:
+	mapi_object_t *m_parentAttachment;
 };
 
 ExMailResource::ExMailResource(const QString &id) :
@@ -468,13 +478,29 @@ void ExMailResource::itemRemoved( const Akonadi::Item &item )
   // of this template code to keep it simple
 }
 
+MapiEmbeddedNote::MapiEmbeddedNote(MapiConnector2 *connector, const char *tallocName, mapi_id_t grandParentId, mapi_id_t parentAttachmentId, mapi_object_t *parentAttachment) :
+	MapiNote(connector, tallocName, grandParentId, parentAttachmentId),
+	m_parentAttachment(parentAttachment)
+{
+}
+
+bool MapiEmbeddedNote::open()
+{
+	if (MAPI_E_SUCCESS != OpenEmbeddedMessage(m_parentAttachment, &m_object, MAPI_READONLY)) {
+		error() << "cannot open embedded message, error:" << mapiError();
+		return false;
+	}
+	return true;
+}
+
 MapiNote::MapiNote(MapiConnector2 *connector, const char *tallocName, mapi_id_t folderId, mapi_id_t id) :
-	MapiMessage(connector, tallocName, folderId, id)
+	MapiMessage(connector, tallocName, folderId, id),
+	KMime::Message()
 {
 	mapi_object_init(&m_attachments);
 	mapi_object_init(&m_attachment);
 }
-
+ 
 MapiNote::~MapiNote()
 {
 	mapi_object_release(&m_attachment);
@@ -494,28 +520,12 @@ QDebug MapiNote::error() const
 }
 
 /**
- * Take a set of properties, and attempt to apply them to the given addressee.
+ * Create the "raw source" as well as all the properties we need.
  * 
  * The switch statement at the heart of this routine must be kept synchronised
  * with @ref noteTagList.
  *
  * @return false on error.
- */
-void MapiNote::dumpChange(KMime::Headers::Base *header, const char *item, MapiProperty &property)
-{
-	if (header) {
-		error() << "change" << item << header->asUnicodeString() << "using" << tagName(property.tag()) << property.value().toString();
-	}
-}
-void MapiNote::dumpChange(KMime::Headers::Base *header, const char *item, MapiProperty &property, QString &value)
-{
-	if (header) {
-		error() << "change" << item << header->asUnicodeString() << "using" << tagName(property.tag()) << value;
-	}
-}
-
-/**
- * Create the "raw source" as well as all the properties we need.
  */
 bool MapiNote::preparePayload()
 {
@@ -608,6 +618,15 @@ DONE:
 		parse();
 		QByteArray tmp = KMime::extractHeader(head(), "Content-Type");
 		contentType()->from7BitString(tmp);
+	}
+
+	// If we don't have a Content-Type, then one will be automatically added.
+	// Unfortunately, when that happens, we seem to get some bogus, empty
+	// body parts added. So, let's always make sure we have something.
+	if (!contentType()->mimeType().size()) {
+		error() << "adding a default content type"; 
+		contentType()->setMimeType("multipart/mixed");
+		contentType()->setBoundary(KMime::multiPartBoundary());
 	}
 
 	// Walk through the properties and extract the values of interest. The
@@ -724,9 +743,6 @@ DONE:
 		parent->setBody(htmlBody.toUtf8());
 	} else {
 		// No body to speak of...
-		parent->contentType()->setMimeType("text/plain");
-		parent->contentTransferEncoding()->setEncoding(KMime::Headers::CEquPr);
-		parent->setBody("");
 	}
 
 	// Short circuit exit if there are no attachments.
@@ -843,23 +859,76 @@ DONE:
 			}
 
 			QByteArray bytes;
-			unsigned tag;
+			KMime::Content *attachment;
+			MapiEmbeddedNote *embeddedMsg;
 			switch (method)
 			{
-			case 5:
+			case ATTACH_BY_VALUE:
 				if (UINT_MAX > (index = propertyFind(PidTagAttachDataBinary))) {
 					bytes = propertyAt(index).toByteArray();
-					break;
+				} else {
+					if (MAPI_E_SUCCESS != OpenAttach(&m_object, number, &m_attachment)) {
+						error() << "cannot open attachment" << mapiError();
+						return false;
+					}
+					if (!streamRead(&m_attachment, PidTagAttachDataBinary, bytes)) {
+						return false;
+					}
 				}
-				// Fall through...
-			case 1:
+				attachment = new KMime::Content;
+
+				// Write the attachment as per the rules in [MS-OXCMAIL] 2.1.3.4.
+				attachment->contentType()->setMimeType(mimeTag.toUtf8());
+				attachment->contentTransferEncoding()->setEncoding(KMime::Headers::CEbase64);
+				if (!charset.isEmpty()) {
+					attachment->contentType()->setCharset(charset.toUtf8());
+				}
+				if (!contentId.isEmpty()) {
+					attachment->contentID()->setIdentifier(contentId.toUtf8());
+				} else {
+					if (!contentLocation.isEmpty()) {
+						attachment->contentLocation()->fromUnicodeString(contentLocation, "utf-8");
+					}
+					if (!contentBase.isEmpty()) {
+						//attachment->contentBase()->setCharset(contentBase.toUtf8());
+					}
+				}
+				if (!file.isEmpty()) {
+					attachment->contentDescription()->fromUnicodeString(file, "utf-8");
+				}
+				attachment->setBody(bytes);
+				addContent(attachment);
+				break;
+			case ATTACH_EMBEDDED_MSG:
 				if (MAPI_E_SUCCESS != OpenAttach(&m_object, number, &m_attachment)) {
-					error() << "cannot open attachment" << mapiError();
+					error() << "cannot open embedded attachment" << mapiError();
 					return false;
 				}
-				tag = (method == 1) ? PidTagAttachDataBinary : PidTagAttachDataObject;
-				if (!streamRead(&m_attachment, tag, bytes)) {
+				embeddedMsg = new MapiEmbeddedNote(m_connection, "MapiEmbeddedNote", m_id, (mapi_id_t)number, &m_attachment);
+				if (!embeddedMsg->open()) {
 					return false;
+				}
+				if (!embeddedMsg->propertiesPull()) {
+					return false;
+				}
+
+				// Write the attachment as per the rules in [MS-OXCMAIL] 2.1.3.4.
+				parent = this;
+				if (contentType()->mimeType() == "message/rfc822") {
+					// Unfortunately, in this case, adding anything
+					// with structure causes the Content-Type to be reset,
+					// and, as noted elsewhere, we end up with bogus, empty
+					// body parts. However, this seems to work... 
+					parent->setBody(embeddedMsg->encodedContent());
+					parse();
+					assemble();
+				} else {
+					body = new KMime::Content;
+					body->contentType()->setMimeType(mimeTag.toUtf8());
+					body->contentTransferEncoding()->setEncoding(KMime::Headers::CE7Bit);
+					body->contentDisposition()->from7BitString("inline");
+					parent->addContent(body);
+					body->addContent(embeddedMsg);
 				}
 				break;
 			default:
@@ -867,28 +936,9 @@ DONE:
 				break;
 			}
 
-			// Write the attachment as per the rules in [MS-OXCMAIL] 2.1.3.4.
-			KMime::Content *attachment = new KMime::Content;
-			attachment->contentType()->setMimeType(mimeTag.toUtf8());
-			if (!charset.isEmpty()) {
-				attachment->contentType()->setCharset(charset.toUtf8());
-			}
-			if (!contentId.isEmpty()) {
-				attachment->contentID()->setIdentifier(contentId.toUtf8());
-			} else {
-				if (!contentLocation.isEmpty()) {
-					attachment->contentLocation()->fromUnicodeString(contentLocation, "utf-8");
-				}
-				if (!contentBase.isEmpty()) {
-					//attachment->contentBase()->setCharset(contentBase.toUtf8());
-				}
-			}
-			if (!file.isEmpty()) {
-				attachment->contentDescription()->fromUnicodeString(file, "utf-8");
-			}
-			attachment->contentTransferEncoding()->setEncoding(KMime::Headers::CEbase64);
-			attachment->setBody(bytes);
-			addContent(attachment);
+			// We are going to reuse this object. Make sure we don't leak stuff.
+			mapi_object_release(&m_attachment);
+			mapi_object_init(&m_attachment);
 		}
 	}
 	assemble();
