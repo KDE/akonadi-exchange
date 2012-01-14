@@ -1348,9 +1348,19 @@ bool MapiProfiles::add(QString profile, QString username, QString password, QStr
 		return false;
 	}
 
-	const char *profile8 = profile.toUtf8();
+	// It seams that the QByteArray returned by QString::toUtf8() are not backed up.
+	// calling toUtf8() several times will destroy the data. Therefore I copy them
+	// all to temporary objects in order to preserve them throughout the whole method
+	QByteArray baProfile(profile.toUtf8());
+	QByteArray baUser(username.toUtf8());
+	QByteArray baPass(password.toUtf8());
+	QByteArray baDomain(domain.toUtf8());
+	QByteArray baServer(server.toUtf8());
+	
+	const char *profile8 = baProfile.constData();
+	qDebug() << "New profile is:"<<profile8;
 
-	if (MAPI_E_SUCCESS != CreateProfile(m_context, profile8, username.toUtf8(), password.toUtf8(), 0)) {
+	if (MAPI_E_SUCCESS != CreateProfile(m_context, profile8, baUser.constData(), baPass.constData(), 0)) {
 		error() << "cannot create profile:" << mapiError();
 		return false;
 	}
