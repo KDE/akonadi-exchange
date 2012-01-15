@@ -624,7 +624,6 @@ DONE:
 	// Unfortunately, when that happens, we seem to get some bogus, empty
 	// body parts added. So, let's always make sure we have something.
 	if (!contentType()->mimeType().size()) {
-		error() << "adding a default content type"; 
 		contentType()->setMimeType("multipart/mixed");
 		contentType()->setBoundary(KMime::multiPartBoundary());
 	}
@@ -925,12 +924,11 @@ DONE:
 				}
 
 				// Write the attachment as per the rules in [MS-OXCMAIL] 2.1.3.4.
+				// We need to use setBody() to install the content for
+				// message/rfc822, and if there is no subsequent addContent(),
+				// a parse() + assemble() sequence is needed.
 				parent = this;
 				if (contentType()->mimeType() == "message/rfc822") {
-					// Unfortunately, in this case, adding anything
-					// with structure causes the Content-Type to be reset,
-					// and, as noted elsewhere, we end up with bogus, empty
-					// body parts. However, this seems to work... 
 					parent->setBody(embeddedMsg->encodedContent());
 					parse();
 					assemble();
@@ -939,8 +937,8 @@ DONE:
 					body->contentType()->setMimeType(mimeTag.toUtf8());
 					body->contentTransferEncoding()->setEncoding(KMime::Headers::CE7Bit);
 					body->contentDisposition()->from7BitString("inline");
+					body->setBody(embeddedMsg->encodedContent());
 					parent->addContent(body);
-					body->addContent(embeddedMsg);
 				}
 				break;
 			default:
