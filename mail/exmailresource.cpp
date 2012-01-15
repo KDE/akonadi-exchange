@@ -54,6 +54,7 @@
 #define DEBUG_NOTE_PROPERTIES 0
 #endif
 
+#define GET_SUBJECTS_FOR_EMBEDDED_MSGS 1
 
 // Map QTextCodec names to Microsoft Code Pages
 typedef struct
@@ -147,7 +148,7 @@ public:
 	virtual ~MapiNote();
 
 	/**
-	 * Fetch all note properties.
+	 * Fetch all email properties.
 	 */
 	virtual bool propertiesPull();
 
@@ -241,6 +242,22 @@ public:
 	MapiEmbeddedNote(MapiConnector2 *connector, const char *tallocName, mapi_id_t grandParentId, mapi_id_t parentAttachmentId, mapi_object_t *parentAttachment);
 
 	bool open();
+
+#if (GET_SUBJECTS_FOR_EMBEDDED_MSGS)
+	/**
+	 * Fetch all embedded email properties.
+	 */
+	virtual bool propertiesPull();
+
+protected:
+
+	/**
+	 * Fetch embedded email properties. This is different than for MapiNote
+	 * because that uses PidTagTransportMessageHeaders for maximum fidelity,
+	 * but embedded messages don't come with such luxuries.
+	 */
+	virtual bool propertiesPull(QVector<int> &tags, const bool tagsAppended, bool pullAll);
+#endif
 
 private:
 	mapi_object_t *m_parentAttachment;
@@ -493,6 +510,51 @@ bool MapiEmbeddedNote::open()
 	return true;
 }
 
+#if (GET_SUBJECTS_FOR_EMBEDDED_MSGS)
+bool MapiEmbeddedNote::propertiesPull(QVector<int> &tags, const bool tagsAppended, bool pullAll)
+{
+	/**
+	 * The list of tags used to fetch an embedded Note, based on [MS-OXCMSG].
+	 */
+	static int ourTagList[] = {
+		PidTagSubject,
+		0 };
+	static SPropTagArray ourTags = {
+		(sizeof(ourTagList) / sizeof(ourTagList[0])) - 1,
+		(MAPITAGS *)ourTagList };
+
+	if (!tagsAppended) {
+		for (unsigned i = 0; i < ourTags.cValues; i++) {
+			int newTag = ourTags.aulPropTag[i];
+			
+			if (!tags.contains(newTag)) {
+				tags.append(newTag);
+			}
+		}
+	}
+	if (!MapiNote::propertiesPull(tags, tagsAppended, pullAll)) {
+		return false;
+	}
+	if (!preparePayload()) {
+		return false;
+	}
+	return true;
+}
+
+bool MapiEmbeddedNote::propertiesPull()
+{
+	static bool tagsAppended = false;
+	static QVector<int> tags;
+
+	if (!propertiesPull(tags, tagsAppended, (DEBUG_NOTE_PROPERTIES) != 0)) {
+		tagsAppended = true;
+		return false;
+	}
+	tagsAppended = true;
+	return true;
+}
+#endif
+
 MapiNote::MapiNote(MapiConnector2 *connector, const char *tallocName, mapi_id_t folderId, mapi_id_t id) :
 	MapiMessage(connector, tallocName, folderId, id),
 	KMime::Message()
@@ -650,6 +712,11 @@ DONE:
 		case PidTagMessageFlags:
 			hasAttachments = (property.value().toUInt() & MSGFLAG_HASATTACH) != 0;
 			break;
+#if (GET_SUBJECTS_FOR_EMBEDDED_MSGS)
+		case PidTagSubject:
+			subject()->fromUnicodeString(property.value().toString(), "utf-8");
+			break;
+#endif
 		case PidTagBody:
 			textBody = property.value().toString();
 			break;
