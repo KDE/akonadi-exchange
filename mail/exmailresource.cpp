@@ -734,13 +734,25 @@ DONE:
 		body->setBody(htmlBody.toUtf8());
 		parent->addContent(body);
 	} else if (!textBody.isEmpty()) {
-		parent->contentType()->setMimeType("text/plain");
-		parent->contentTransferEncoding()->setEncoding(KMime::Headers::CEquPr);
-		parent->setBody(textBody.toUtf8());
+		if (parent->contentType()->mimeType() == "text/plain") {
+			parent->setBody(textBody.toUtf8());
+		} else {
+			body = new KMime::Content;
+			body->contentType()->setMimeType("text/plain");
+			body->contentTransferEncoding()->setEncoding(KMime::Headers::CEquPr);
+			body->setBody(textBody.toUtf8());
+			parent->addContent(body);
+		}
 	} else if (!htmlBody.isEmpty()) {
-		parent->contentType()->setMimeType("text/html");
-		parent->contentTransferEncoding()->setEncoding(KMime::Headers::CEquPr);
-		parent->setBody(htmlBody.toUtf8());
+		if (parent->contentType()->mimeType() == "text/html") {
+			parent->setBody(htmlBody.toUtf8());
+		} else {
+			body = new KMime::Content;
+			body->contentType()->setMimeType("text/html");
+			body->contentTransferEncoding()->setEncoding(KMime::Headers::CEquPr);
+			body->setBody(htmlBody.toUtf8());
+			parent->addContent(body);
+		}
 	} else {
 		// No body to speak of...
 	}
