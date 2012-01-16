@@ -784,10 +784,13 @@ DONE:
 			contentType()->setBoundary(KMime::multiPartBoundary());
 		} else if (!textBody.isEmpty()) {
 			contentType()->setMimeType("text/plain");
+			contentTransferEncoding()->setEncoding(KMime::Headers::CE7Bit);
 		} else if (!htmlBody.isEmpty()) {
 			contentType()->setMimeType("text/html");
+			contentTransferEncoding()->setEncoding(KMime::Headers::CE7Bit);
 		} else if (dynamic_cast<MapiEmbeddedNote*>(this)) {
 			contentType()->setMimeType("message/rfc822");
+			contentTransferEncoding()->setEncoding(KMime::Headers::CE7Bit);
 		} else {
 			// Give up.
 		}
@@ -806,13 +809,13 @@ DONE:
 
 		body = new KMime::Content;
 		body->contentType()->setMimeType("text/plain");
-		body->contentTransferEncoding()->setEncoding(KMime::Headers::CEquPr);
+		body->contentTransferEncoding()->setEncoding(KMime::Headers::CE7Bit);
 		body->setBody(textBody.toUtf8());
 		parent->addContent(body);
 
 		body = new KMime::Content;
 		body->contentType()->setMimeType("text/html");
-		body->contentTransferEncoding()->setEncoding(KMime::Headers::CEquPr);
+		body->contentTransferEncoding()->setEncoding(KMime::Headers::CE7Bit);
 		body->setBody(htmlBody.toUtf8());
 		parent->addContent(body);
 	} else if (!textBody.isEmpty()) {
@@ -821,7 +824,7 @@ DONE:
 		} else {
 			body = new KMime::Content;
 			body->contentType()->setMimeType("text/plain");
-			body->contentTransferEncoding()->setEncoding(KMime::Headers::CEquPr);
+			body->contentTransferEncoding()->setEncoding(KMime::Headers::CE7Bit);
 			body->setBody(textBody.toUtf8());
 			parent->addContent(body);
 		}
@@ -831,7 +834,7 @@ DONE:
 		} else {
 			body = new KMime::Content;
 			body->contentType()->setMimeType("text/html");
-			body->contentTransferEncoding()->setEncoding(KMime::Headers::CEquPr);
+			body->contentTransferEncoding()->setEncoding(KMime::Headers::CE7Bit);
 			body->setBody(htmlBody.toUtf8());
 			parent->addContent(body);
 		}
@@ -1010,9 +1013,8 @@ DONE:
 				// We need to use setBody() to install the content for
 				// message/rfc822, and if there is no subsequent addContent(),
 				// a parse() + assemble() sequence is needed.
-				parent = this;
 				if (contentType()->mimeType() == "message/rfc822") {
-					parent->setBody(embeddedMsg->encodedContent());
+					setBody(embeddedMsg->encodedContent());
 					parse();
 					assemble();
 				} else {
@@ -1021,7 +1023,7 @@ DONE:
 					body->contentTransferEncoding()->setEncoding(KMime::Headers::CE7Bit);
 					body->contentDisposition()->from7BitString("inline");
 					body->setBody(embeddedMsg->encodedContent());
-					parent->addContent(body);
+					addContent(body);
 				}
 				break;
 			default:
