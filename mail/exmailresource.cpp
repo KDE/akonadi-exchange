@@ -682,14 +682,6 @@ DONE:
 		contentType()->from7BitString(tmp);
 	}
 
-	// If we don't have a Content-Type, then one will be automatically added.
-	// Unfortunately, when that happens, we seem to get some bogus, empty
-	// body parts added. So, let's always make sure we have something.
-	if (!contentType()->mimeType().size()) {
-		contentType()->setMimeType("multipart/mixed");
-		contentType()->setBoundary(KMime::multiPartBoundary());
-	}
-
 	// Walk through the properties and extract the values of interest. The
 	// properties here should be aligned with the list pulled above.
 	bool textStream = false;
@@ -750,15 +742,6 @@ DONE:
 		}
 	}
 
-	// We get the PidTagBody as Unicode in any event, but we also now know
-	// the codepage for PidTagHtml.
-	if (textStream && !streamRead(&m_object, PidTagBody, UTF16, textBody)) {
-		return false;
-	}
-	if (htmlStream && !streamRead(&m_object, PidTagHtml, codepage, htmlBody)) {
-		return false;
-	}
-
 	foreach (MapiRecipient item, MapiMessage::recipients()) {
 		switch (item.type()) {
 		case MapiRecipient::Sender:
@@ -779,14 +762,47 @@ DONE:
 		}
 	}
 
+	// We get the PidTagBody as Unicode in any event, but we also now know
+	// the codepage for PidTagHtml.
+	if (textStream && !streamRead(&m_object, PidTagBody, UTF16, textBody)) {
+		return false;
+	}
+	if (htmlStream && !streamRead(&m_object, PidTagHtml, codepage, htmlBody)) {
+		return false;
+	}
+	error() << "text size:" << textBody.size() << "html size:" << htmlBody.size() << "attachments:" << hasAttachments << "mimeType:" << contentType()->mimeType() << "isEmbedded:" << dynamic_cast<MapiEmbeddedNote*>(this);
+
+	// If we don't have a Content-Type, then one will be automatically added.
+	// Unfortunately, when that happens, we seem to get some bogus, empty
+	// body parts added. So, let's make sure we have something whenever we can.
+	if (!contentType()->mimeType().size()) {
+		if (hasAttachments) {
+			contentType()->setMimeType("multipart/mixed");
+			contentType()->setBoundary(KMime::multiPartBoundary());
+		} else if (!textBody.isEmpty() && !htmlBody.isEmpty()) {
+			contentType()->setMimeType("multipart/alternative");
+			contentType()->setBoundary(KMime::multiPartBoundary());
+		} else if (!textBody.isEmpty()) {
+			contentType()->setMimeType("text/plain");
+		} else if (!htmlBody.isEmpty()) {
+			contentType()->setMimeType("text/html");
+		} else if (dynamic_cast<MapiEmbeddedNote*>(this)) {
+			contentType()->setMimeType("message/rfc822");
+		} else {
+			// Give up.
+		}
+	}
+
 	KMime::Content *parent = this;
 	KMime::Content *body;
 	if (!textBody.isEmpty() && !htmlBody.isEmpty()) {
-		body = new KMime::Content;
-		body->contentType()->setMimeType("multipart/alternative");
-		body->contentType()->setBoundary(KMime::multiPartBoundary());
-		parent->addContent(body);
-		parent = body;
+		if (parent->contentType()->mimeType() != "multipart/alternative") {
+			body = new KMime::Content;
+			body->contentType()->setMimeType("multipart/alternative");
+			body->contentType()->setBoundary(KMime::multiPartBoundary());
+			parent->addContent(body);
+			parent = body;
+		}
 
 		body = new KMime::Content;
 		body->contentType()->setMimeType("text/plain");
