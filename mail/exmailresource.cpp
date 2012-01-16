@@ -54,7 +54,7 @@
 #define DEBUG_NOTE_PROPERTIES 0
 #endif
 
-#define GET_SUBJECTS_FOR_EMBEDDED_MSGS 1
+#define GET_SUBJECTS_FOR_EMBEDDED_MSGS 0
 
 // Map QTextCodec names to Microsoft Code Pages
 typedef struct
