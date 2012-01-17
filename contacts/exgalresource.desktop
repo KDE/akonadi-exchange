@@ -1,6 +1,7 @@
 [Desktop Entry]
 Name=Exchange Address Lists
 Name[es]=Listas de direcciones de Exchange
+Name[et]=Exchange'i aadressiloendid
 Name[pt]=Listas de Endereços do Exchange
 Name[pt_BR]=Listas de endereço do Exchange
 Name[sv]=Exchange-adresslistor
@@ -8,6 +9,7 @@ Name[uk]=Списки адрес Exchange
 Name[x-test]=xxExchange Address Listsxx
 Comment=Access to personal Contacts and the Global Address List on an Exchange server
 Comment[es]=Acceso a los contactos personales y a la lista global de direcciones en un servidor de Exchange
+Comment[et]=Ligipääs isiklikele kontaktidele ja globaalsele aadressiloendile Exchange'i serveris
 Comment[pt]=Acesso aos Contactos e Lista de Endereços Globais pessoais num servidor de Exchange
 Comment[pt_BR]=Acesso aos contatos e lista de endereços globais pessoais em um servidor Exchange
 Comment[sv]=Åtkomst till personliga kontakter och den globala adresslistan på en Exchange-server
