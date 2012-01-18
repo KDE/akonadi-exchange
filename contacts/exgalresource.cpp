@@ -465,7 +465,8 @@ static bool preparePayload(SPropValue *properties, unsigned propertyCount, KABC:
 
 ExGalResource::ExGalResource(const QString &id) : 
 	MapiResource(id, i18n("Exchange Contacts"), IPF_CONTACT, "IPM.Contact", QString::fromAscii("text/directory")),
-	m_galId(0, 0)
+	m_galId(0, 0),
+	m_totalCount(0)
 {
 	new SettingsAdaptor(Settings::self());
 	QDBusConnection::sessionBus().registerObject(QLatin1String("/Settings"),
@@ -490,6 +491,7 @@ void ExGalResource::retrieveCollections()
 	Collection::List collections;
 	Collection gal;
 
+	setName(i18n("Exchange Contacts for %1", profile()));
 	gal.setName(i18n("Exchange Global Address List for %1", profile()));
 	gal.setRemoteId(m_galId.toString());
 	gal.setParentCollection(Collection::root());
@@ -510,7 +512,12 @@ void ExGalResource::retrieveItems(const Akonadi::Collection &collection)
 	if (collection.remoteId() == m_galId.toString()) {
 		// Assume the GAL is going to take a while to fetch, so use
 		// streaming mode.
-		kDebug() << "fetch items from collection:" << collection.name();
+		if (!m_connection->fetchGALCount(&m_totalCount)) {
+			error(i18n("cannot fetch GAL count from Exchange"));
+			return;
+		}
+		kDebug() << "fetch items from collection:" << collection.name() << m_totalCount;
+		setAutomaticProgressReporting(false);
 		setItemStreamingEnabled(true);
 		m_galCollection = collection;
 		scheduleCustomTask(this, "retrieveGALItems", QVariant((qulonglong)0), ResourceBase::Append);
@@ -518,6 +525,7 @@ void ExGalResource::retrieveItems(const Akonadi::Collection &collection)
 	} else {
 		// This request is NOT for the GAL. We don't bother with 
 		// streaming mode.
+		setAutomaticProgressReporting(true);
 		fetchItems(collection, items, deletedItems);
 		itemsRetrievedIncremental(items, deletedItems);
 		kDebug() << "new/changed items:" << items.size() << "deleted items:" << deletedItems.size();
@@ -536,6 +544,7 @@ void ExGalResource::retrieveGALItems(const QVariant &countVariant)
 	struct SRowSet *results = NULL;
 
 	emit status(Running, i18n("Fetching GAL from Exchange"));
+	emit percent((count + 99) * 100 / m_totalCount);
 	if (!m_connection->fetchGAL(count == 0, requestedCount, &contactTags, &results)) {
 		error(i18n("cannot fetch GAL from Exchange"));
 		return;

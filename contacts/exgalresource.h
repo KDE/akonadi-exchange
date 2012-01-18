@@ -58,6 +58,7 @@ private:
 	 * A reserved id is used to represent the GAL.
 	 */
 	const FullId m_galId;
+	unsigned m_totalCount;
 
 	/**
 	 * A copy of the collection used for the GAL.

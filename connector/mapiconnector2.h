@@ -365,6 +365,11 @@ public:
 	bool defaultFolder(MapiDefaultFolder folderType, mapi_id_t *id);
 
 	/**
+	 * Entries in the GAL.
+	 */
+	bool fetchGALCount(unsigned *totalCount);
+
+	/**
 	 * Fetch upto the requested number of entries from the GAL. The start
 	 * point is either the beginning, or where we previously left off.
 	 */

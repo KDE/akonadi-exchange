@@ -230,9 +230,19 @@ QDebug MapiConnector2::error() const
 	return TallocContext::error(prefix);
 }
 
+bool MapiConnector2::fetchGALCount(unsigned *totalCount)
+{
+	if (MAPI_E_SUCCESS != GetGALTableCount(m_session, totalCount)) {
+		error() << "cannot get GAL count" << mapiError();
+		return false;
+	}
+	return true;
+}
+
 bool MapiConnector2::fetchGAL(bool begin, unsigned requestedCount, SPropTagArray *tags, SRowSet **results)
 {
 	uint8_t ulFlags = begin ? TABLE_START : TABLE_CUR;
+
 	if (MAPI_E_SUCCESS != GetGALTable(m_session, tags, results, requestedCount, ulFlags)) {
 		error() << "cannot read GAL entries" << mapiError();
 		return false;
