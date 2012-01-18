@@ -33,6 +33,8 @@ public:
 	ExCalResource(const QString &id);
 	virtual ~ExCalResource();
 
+	virtual const QString profile();
+
 public Q_SLOTS:
 	virtual void configure(WId windowId);
 

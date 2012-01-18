@@ -70,7 +70,7 @@ protected:
 	/**
 	 * Establish the name of the profile to use to logon to the MAPI server.
 	 */
-	void profileSet(const QString &profileName);
+	virtual const QString profile() = 0;
 
 	/**
 	 * Recursively find all folders starting at the given root which match
@@ -106,6 +106,8 @@ protected:
 	virtual void itemChanged(const Akonadi::Item &item, const QSet<QByteArray> &parts);
 	virtual void itemRemoved(const Akonadi::Item &item);
 */
+	virtual void doSetOnline(bool online);
+
 	/**
 	 * Recurse through a hierarchy of Exchange folders which match the
 	 * given filter.
@@ -139,8 +141,6 @@ private:
 	 * Logout from Exchange.
 	 */
 	void logoff(void);
-
-	QString m_profileName;
 };
 
 /**

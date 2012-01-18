@@ -477,17 +477,20 @@ ExGalResource::~ExGalResource()
 {
 }
 
-void ExGalResource::retrieveCollections()
+const QString ExGalResource::profile()
 {
 	// First select who to log in as.
-	profileSet(Settings::self()->profileName());
+	return Settings::self()->profileName();
+}
 
+void ExGalResource::retrieveCollections()
+{
 	// We are going to return both the user's contacts as well as the GAL.
 	// First, the GAL, then the user's contacts...
 	Collection::List collections;
 	Collection gal;
 
-	gal.setName(i18n("Exchange Global Address List"));
+	gal.setName(i18n("Exchange Global Address List for %1", profile()));
 	gal.setRemoteId(m_galId.toString());
 	gal.setParentCollection(Collection::root());
 	gal.setContentMimeTypes(QStringList(m_itemMimeType));

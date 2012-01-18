@@ -276,12 +276,17 @@ ExMailResource::~ExMailResource()
 {
 }
 
-void ExMailResource::retrieveCollections()
+const QString ExMailResource::profile()
 {
 	// First select who to log in as.
-	profileSet(Settings::self()->profileName());
+	return Settings::self()->profileName();
+}
 
+void ExMailResource::retrieveCollections()
+{
 	Collection::List collections;
+
+	setName(i18n("Exchange Mail for %1", profile()));
 	fetchCollections(TopInformationStore, collections);
 
 	// Notify Akonadi about the new collections.
@@ -292,7 +297,7 @@ void ExMailResource::retrieveItems(const Akonadi::Collection &collection)
 {
 	Item::List items;
 	Item::List deletedItems;
-	
+
 	fetchItems(collection, items, deletedItems);
 	kError() << "new/changed items:" << items.size() << "deleted items:" << deletedItems.size();
 //#if (DEBUG_NOTE_PROPERTIES)

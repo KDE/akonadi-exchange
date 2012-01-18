@@ -36,6 +36,8 @@ public:
 	ExGalResource(const QString &id);
 	virtual ~ExGalResource();
 
+	virtual const QString profile();
+
 public Q_SLOTS:
 	virtual void configure(WId windowId);
 

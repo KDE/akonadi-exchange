@@ -110,12 +110,17 @@ ExCalResource::~ExCalResource()
 {
 }
 
-void ExCalResource::retrieveCollections()
+const QString ExCalResource::profile()
 {
 	// First select who to log in as.
-	profileSet(Settings::self()->profileName());
+	return Settings::self()->profileName();
+}
 
+void ExCalResource::retrieveCollections()
+{
 	Collection::List collections;
+
+	setName(i18n("Exchange Calendar for %1", profile()));
 	fetchCollections(Calendar, collections);
 
 	// Notify Akonadi about the new collections.
@@ -334,7 +339,6 @@ void ExCalResource::itemRemoved( const Akonadi::Item &item )
   // NOTE: There is an equivalent method for collections, but it isn't part
   // of this template code to keep it simple
 }
-
 
 void ExCalResource::createKCalRecurrency(KCal::Recurrence* rec, const MapiRecurrencyPattern& pattern)
 {

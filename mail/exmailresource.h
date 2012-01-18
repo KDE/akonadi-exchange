@@ -31,6 +31,8 @@ public:
 	ExMailResource(const QString &id);
 	virtual ~ExMailResource();
 
+	virtual const QString profile();
+
 public Q_SLOTS:
 	virtual void configure(WId windowId);
 

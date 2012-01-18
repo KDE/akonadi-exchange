@@ -100,6 +100,15 @@ MapiResource::~MapiResource()
 	delete m_connection;
 }
 
+void MapiResource::doSetOnline(bool online)
+{
+	if (online) {
+		logon();
+	} else {
+		logoff();
+	}
+}
+
 void MapiResource::error(const QString &message)
 {
 	kError() << message;
@@ -309,13 +318,15 @@ void MapiResource::fetchItems(const Akonadi::Collection &collection, Item::List 
 
 bool MapiResource::logon(void)
 {
+	const QString &profileName = profile();
+
 	if (!m_connected) {
 		// logon to exchange (if needed)
-		emit status(Running, i18n("Logging in to Exchange as %1").arg(m_profileName));
-		m_connected = m_connection->login(m_profileName);
+		emit status(Running, i18n("Logging in to Exchange as %1").arg(profileName));
+		m_connected = m_connection->login(profileName);
 	}
 	if (!m_connected) {
-		emit status(Broken, i18n("Unable to login as %1").arg(m_profileName));
+		emit status(Broken, i18n("Unable to login as %1").arg(profileName));
 	}
 	return m_connected;
 }
@@ -325,11 +336,6 @@ void MapiResource::logoff(void)
 	// There is no logoff operation. We just want to make sure we retry the
 	// logon next time.
 	m_connected = false;
-}
-
-void MapiResource::profileSet(const QString &profileName)
-{
-	m_profileName = profileName;
 }
 
 #include "mapiresource.moc"
