@@ -699,7 +699,6 @@ void MapiMessage::recipientPopulate(const char *phase, SRow &recipient, MapiReci
 		case UNDOCUMENTED_PR_EMAIL:
 		case UNDOCUMENTED_PR_EMAIL_UNICODE:
 			tmp = property.value().toString();
-			debug() << "comparing " << phase << " property:" << tagName(property.tag()) << tmp << result.email;
 			if (isGoodEmailAddress(result.email) < isGoodEmailAddress(tmp)) {
 				result.email = tmp;
 			}
