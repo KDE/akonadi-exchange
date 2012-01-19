@@ -523,6 +523,7 @@ bool MapiEmbeddedNote::propertiesPull(QVector<int> &tags, const bool tagsAppende
 	 */
 	static int ourTagList[] = {
 		PidTagSubject,
+		PidTagCreationTime,
 		0 };
 	static SPropTagArray ourTags = {
 		(sizeof(ourTagList) / sizeof(ourTagList[0])) - 1,
@@ -722,6 +723,11 @@ DONE:
 			break;
 		case PidTagTransportMessageHeaders:
 			break;
+#if (GET_SUBJECTS_FOR_EMBEDDED_MSGS)
+		case PidTagCreationTime:
+			date()->setDateTime(KDateTime(property.value().toDateTime()));
+			break;
+#endif
 		default:
 			// Handle oversize objects.
 			if (MAPI_E_NOT_ENOUGH_MEMORY == property.value().toInt()) {
