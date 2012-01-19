@@ -495,7 +495,7 @@ void MapiMessage::addUniqueRecipient(const char *source, MapiRecipient &candidat
 {
 	debug() << "candidate address:" << source << candidate.toString();
 	if (candidate.name.isEmpty() && candidate.email.isEmpty()) {
-		debug() << "ignore garbage";
+		// Discard garbage.
 		return;
 	}
 
@@ -541,7 +541,6 @@ void MapiMessage::addUniqueRecipient(const char *source, MapiRecipient &candidat
 			}
 		}
 	}
-	debug() << "transformed candidate:" << candidate.toString();
 
 	for (int i = 0; i < m_recipients.size(); i++) {
 		MapiRecipient &entry = m_recipients[i];
@@ -567,7 +566,6 @@ void MapiMessage::addUniqueRecipient(const char *source, MapiRecipient &candidat
 				if (entry.objectType() == MapiRecipient::OtMailuser) {
 					entry.setObjectType(candidate.objectType());
 				}
-				debug() << "updated address" << entry.toString();
 			}
 			return;
 		}
@@ -588,14 +586,13 @@ void MapiMessage::addUniqueRecipient(const char *source, MapiRecipient &candidat
 				if (entry.objectType() == MapiRecipient::OtMailuser) {
 					entry.setObjectType(candidate.objectType());
 				}
-				debug() << "updated address" << entry.toString();
 			}
 			return;
 		}
 	}
 
 	// Add the entry if it did not match.
-	debug() << "add new address" << candidate.toString();
+	debug() << "add new address:" << source << candidate.toString();
 	m_recipients.append(candidate);
 }
 
