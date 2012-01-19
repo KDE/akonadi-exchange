@@ -45,8 +45,6 @@ case a: \
 
 #define UNDOCUMENTED_PR_EMAIL 0x6001001e
 #define UNDOCUMENTED_PR_EMAIL_UNICODE 0x6001001f
-#define UNDOCUMENTED_PR_EMAIL2 0x403e001e
-#define UNDOCUMENTED_PR_EMAIL2_UNICODE 0x403e001f
 
 /**
  * Set this to 1 to pull all the properties, e.g. to see what a server has
@@ -700,9 +698,8 @@ void MapiMessage::recipientPopulate(const char *phase, SRow &recipient, MapiReci
 		case PidTagPrimarySmtpAddress:
 		case UNDOCUMENTED_PR_EMAIL:
 		case UNDOCUMENTED_PR_EMAIL_UNICODE:
-		case UNDOCUMENTED_PR_EMAIL2:
-		case UNDOCUMENTED_PR_EMAIL2_UNICODE:
 			tmp = property.value().toString();
+			debug() << "comparing " << phase << " property:" << tagName(property.tag()) << tmp << result.email;
 			if (isGoodEmailAddress(result.email) < isGoodEmailAddress(tmp)) {
 				result.email = tmp;
 			}
@@ -971,10 +968,6 @@ void MapiMessage::recipientPopulate(const char *phase, SRow &recipient, MapiReci
 		PidTagPrimarySmtpAddress,
 		UNDOCUMENTED_PR_EMAIL,
 		UNDOCUMENTED_PR_EMAIL_UNICODE,
-		UNDOCUMENTED_PR_EMAIL,
-		UNDOCUMENTED_PR_EMAIL_UNICODE,
-		UNDOCUMENTED_PR_EMAIL2,
-		UNDOCUMENTED_PR_EMAIL2_UNICODE,
 		0x60010018,
 		PidTagRecipientTrackStatus,
 		PidTagRecipientFlags,
