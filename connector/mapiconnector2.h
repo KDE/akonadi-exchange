@@ -77,6 +77,23 @@ typedef enum
 extern QString mapiError();
 
 /**
+ * Try to extract an email address from a string.
+ * 
+ * @param source	The source to extract from.
+ * @param type		The type of source. Conceptually, this is based on the 
+ * 			documented values of PidTagAddressType (3COM, ATT,
+ * 			CCMAIL, COMPUSERVE, EX, FAX, MSFAX, MCI, MHS, MS, MSA, 
+ * 			MSN, PROFS, SMTP, SNADS, TELEX, X400, X500) though we
+ * 			only actually support some of these.
+ * @param emptyDefault	If no email address can be extracted, set the result to
+ * 			an empty string is true, or the original source.
+ * @return An email address if we can, or a default as per @ref emptyDefault.
+ */
+extern QString mapiExtractEmail(const QString &source, const QByteArray &type, bool emptyDefault = false);
+
+extern QString mapiExtractEmail(const class MapiProperty &source, const QByteArray &type, bool emptyDefault = false);
+
+/**
  * A very simple wrapper around a property.
  */
 class MapiProperty : private SPropValue

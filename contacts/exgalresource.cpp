@@ -206,10 +206,12 @@ static bool preparePayload(SPropValue *properties, unsigned propertyCount, KABC:
 			addressType = property.value().toString();
 			break;
 		case PidTagPrimarySmtpAddress:
-			addressee.insertEmail(property.value().toString(), true);
+			addressee.setEmails(QStringList(mapiExtractEmail(property, "SMTP")));
 			break;
 		case PidTagAccount:
-			addressee.insertEmail(property.value().toString());
+			if (!addressee.emails().size()) {
+				addressee.insertEmail(mapiExtractEmail(property, "SMTP"));
+			}
 			break;
 
 		// 2.2.3.10
@@ -428,7 +430,9 @@ static bool preparePayload(SPropValue *properties, unsigned propertyCount, KABC:
 
 	// Don't override an SMTP address.
 	if (!email.isEmpty()) {
-		addressee.insertEmail(addressType.append(separator).append(email));
+		if (!addressee.emails().size()) {
+			addressee.insertEmail(mapiExtractEmail(email, addressType.toAscii()));
+		}
 	}
 
 	// location

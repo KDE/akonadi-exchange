@@ -43,7 +43,6 @@ case b: \
 case a: \
 	lvalue = rvalue; \
 
-#define UNDOCUMENTED_PR_EMAIL 0x6001001e
 #define UNDOCUMENTED_PR_EMAIL_UNICODE 0x6001001f
 
 /**
@@ -141,6 +140,54 @@ QString mapiError()
 	default:
 		return QString::fromAscii("MAPI_E_0x%1").arg((unsigned)code, 0, 16);
 	}
+}
+
+/**
+ * Try to extract an email address from a string.
+ */
+extern QString mapiExtractEmail(const QString &source, const QByteArray &type, bool emptyDefault)
+{
+	QString email;
+	
+	if (!emptyDefault) {
+		email = source;
+	}
+	if (type == "SMTP") {
+		QString name;
+
+		// First, we give the library routines a chance.
+		if (!KPIMUtils::extractEmailAddressAndName(source, email, name)) {
+			// Now for some custom action. Look for the last possible
+			// starting delimiter, and work forward from there. Thus:
+			//
+			//       "blah (blah) <blah> <result>"
+			//
+			// should return "result".
+			static QRegExp firstRE(QString::fromAscii("[(<]"));
+			static QRegExp lastRE(QString::fromAscii("[)>]"));
+
+			int first = source.lastIndexOf(firstRE);
+			int last = source.indexOf(lastRE, first);
+
+			if ((first > -1) && (last > first + 1)) {
+				email = source.mid(first + 1, last - first - 1);
+			}
+		}
+	} else if (type == "EX") {
+		// Convert an "EX"change address to an account name, which 
+		// should be the email alias.
+		int lastCn = source.lastIndexOf(QString::fromAscii("/CN="), -1, Qt::CaseInsensitive);
+
+		if (lastCn > -1) {
+			email = source.mid(lastCn + 4);
+		}
+	}
+	return email;
+}
+
+QString mapiExtractEmail(const class MapiProperty &source, const QByteArray &type, bool emptyDefault)
+{
+	return mapiExtractEmail(source.value().toString(), type, emptyDefault);
 }
 
 static QDateTime convertSysTime(const FILETIME& filetime)
@@ -499,49 +546,6 @@ void MapiMessage::addUniqueRecipient(const char *source, MapiRecipient &candidat
 		return;
 	}
 
-	// See if we can deduce a better email address from the name than we 
-	// have in the explicit value. First, we give the library routines a chance.
-	QString name;
-	QString email;
-	if (KPIMUtils::extractEmailAddressAndName(candidate.name, email, name)) {
-		if (isGoodEmailAddress(candidate.email) < isGoodEmailAddress(email)) {
-			candidate.email = email;
-		}
-	} else {
-		// Now for some custom action. Look for the last possible starting 
-		// delimiter, and work forward from there. Thus:
-		//
-		//       "blah (blah) <blah> <result>"
-		//
-		// should return "result". Note that we don't remove this from 
-		// the name so as to give the resolution process as much to work
-		// with as possible.
-		static QRegExp firstRE(QString::fromAscii("[(<]"));
-		static QRegExp lastRE(QString::fromAscii("[)>]"));
-
-		int first = candidate.name.lastIndexOf(firstRE);
-		int last = candidate.name.indexOf(lastRE, first);
-
-		if ((first > -1) && (last > first + 1)) {
-			email = candidate.name.mid(first + 1, last - first - 1);
-			if (isGoodEmailAddress(candidate.email) < isGoodEmailAddress(email)) {
-				candidate.email = email;
-			}
-		}
-	}
-	if (candidate.email.startsWith(x500Prefix)) {
-		// Convert an X500 (or "EX"change) address to an account name,
-		// which should get resolved nicely.
-		int lastCn = candidate.email.lastIndexOf(QString::fromAscii("/CN="), -1, Qt::CaseInsensitive);
-
-		if (lastCn > -1) {
-			email = candidate.email.mid(lastCn + 4);
-			if (isGoodEmailAddress(candidate.email) < isGoodEmailAddress(email)) {
-				candidate.email = email;
-			}
-		}
-	}
-
 	for (int i = 0; i < m_recipients.size(); i++) {
 		MapiRecipient &entry = m_recipients[i];
 
@@ -691,11 +695,17 @@ void MapiMessage::recipientPopulate(const char *phase, SRow &recipient, MapiReci
 		case PidTagDisplayName:
 		case PidTagRecipientDisplayName:
 			result.name = property.value().toString();
+			tmp = mapiExtractEmail(property, "SMTP", true);
+			if (isGoodEmailAddress(result.email) < isGoodEmailAddress(tmp)) {
+				result.email = tmp;
+			}
 			break;
 		case PidTagPrimarySmtpAddress:
-		case UNDOCUMENTED_PR_EMAIL:
+			result.email = mapiExtractEmail(property, "SMTP");
+			break;
 		case UNDOCUMENTED_PR_EMAIL_UNICODE:
-			tmp = property.value().toString();
+			debug() << "UNDOCUMENTED_PR_EMAIL_UNICODE" << property.value().toString();
+			tmp = mapiExtractEmail(property, "SMTP");
 			if (isGoodEmailAddress(result.email) < isGoodEmailAddress(tmp)) {
 				result.email = tmp;
 			}
@@ -860,6 +870,7 @@ void MapiMessage::recipientPopulate(const char *phase, SRow &recipient, MapiReci
 				MapiRecipient result(MapiRecipient::To);
 
 				result.name = name.trimmed();
+				result.email = mapiExtractEmail(result.name, "SMTP", true);
 				addUniqueRecipient("displayTo", result);
 			}
 			break;
@@ -868,6 +879,7 @@ void MapiMessage::recipientPopulate(const char *phase, SRow &recipient, MapiReci
 				MapiRecipient result(MapiRecipient::CC);
 
 				result.name = name.trimmed();
+				result.email = mapiExtractEmail(result.name, "SMTP", true);
 				addUniqueRecipient("displayCC", result);
 			}
 			break;
@@ -876,28 +888,31 @@ void MapiMessage::recipientPopulate(const char *phase, SRow &recipient, MapiReci
 				MapiRecipient result(MapiRecipient::BCC);
 
 				result.name = name.trimmed();
+				result.email = mapiExtractEmail(result.name, "SMTP", true);
 				addUniqueRecipient("displayBCC", result);
 			}
 			break;
 		case PidTagSenderEmailAddress:
+			sender.email = mapiExtractEmail(property, "EX");
+			break;
 		case PidTagSenderSmtpAddress:
-			sender.email = property.value().toString();
+			sender.email = mapiExtractEmail(property, "SMTP");
 			break;
 		CASE_PREFER_A_OVER_B(PidTagSenderName, PidTagSenderSimpleDisplayName, sender.name, property.value().toString());
 			break;
 		case PidTagOriginalSenderEmailAddress:
-			originalSender.email = property.value().toString();
+			originalSender.email = mapiExtractEmail(property, "SMTP");
 			break;
 		case PidTagOriginalSenderName:
 			originalSender.name = property.value().toString();
 			break;
 		case PidTagSentRepresentingEmailAddress:
-			sentRepresenting.email = property.value().toString();
+			sentRepresenting.email = mapiExtractEmail(property, "SMTP");
 			break;
 		CASE_PREFER_A_OVER_B(PidTagSentRepresentingName, PidTagSentRepresentingSimpleDisplayName, sentRepresenting.name, property.value().toString());
 			break;
 		case PidTagOriginalSentRepresentingEmailAddress:
-			originalSentRepresenting.email = property.value().toString();
+			originalSentRepresenting.email = mapiExtractEmail(property, "SMTP");
 			break;
 		case PidTagOriginalSentRepresentingName:
 			originalSentRepresenting.name = property.value().toString();
@@ -907,12 +922,22 @@ void MapiMessage::recipientPopulate(const char *phase, SRow &recipient, MapiReci
 
 	// Step 3. Add the sent-on-behalf-of as well as the sender.
 	if (!sender.name.isEmpty()) {
+		// This might have come from a display name.
+		QString tmp = mapiExtractEmail(sender.name, "SMTP", true);
+		if (isGoodEmailAddress(sender.email) < isGoodEmailAddress(tmp)) {
+			sender.email = tmp;
+		}
 		addUniqueRecipient("sender", sender);
 	}
 	if (!originalSender.name.isEmpty()) {
 		addUniqueRecipient("originalSender", originalSender);
 	}
 	if (!sentRepresenting.name.isEmpty()) {
+		// This might have come from a display name.
+		QString tmp = mapiExtractEmail(sentRepresenting.name, "SMTP", true);
+		if (isGoodEmailAddress(sentRepresenting.email) < isGoodEmailAddress(tmp)) {
+			sentRepresenting.email = tmp;
+		}
 		addUniqueRecipient("replyTo", sentRepresenting);
 	}
 	if (!originalSentRepresenting.name.isEmpty()) {
@@ -962,7 +987,6 @@ void MapiMessage::recipientPopulate(const char *phase, SRow &recipient, MapiReci
 		PidTagDisplayName,
 		PidTagRecipientDisplayName, 
 		PidTagPrimarySmtpAddress,
-		UNDOCUMENTED_PR_EMAIL,
 		UNDOCUMENTED_PR_EMAIL_UNICODE,
 		0x60010018,
 		PidTagRecipientTrackStatus,
