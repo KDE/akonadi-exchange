@@ -21,6 +21,7 @@
 #define EXGALRESOURCE_H
 
 #include <mapiresource.h>
+#include <akonadi/collectionattributessynchronizationjob.h>
 
 class MapiConnector2;
 
@@ -63,7 +64,10 @@ private:
 	/**
 	 * A copy of the collection used for the GAL.
 	 */
-	Akonadi::Collection m_galCollection;
+	Akonadi::Collection m_gal;
+	volatile Akonadi::CollectionAttributesSynchronizationJob *m_galUpdater;
+
+	void retrieveGALItems(qulonglong count, class FetchStatusAttribute *fetchStatus);
 
 private Q_SLOTS:
 
@@ -71,6 +75,7 @@ private Q_SLOTS:
 	 * Incremental fetch of GAL.
 	 */
 	void retrieveGALItems(const QVariant &countVariant);
+	void GALUpdated(KJob *updater);
 };
 
 #endif

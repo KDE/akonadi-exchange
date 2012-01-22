@@ -23,8 +23,15 @@
 
 #include "exgalresource.h"
 
+#include <akonadi/attribute.h>
+#include <akonadi/attributefactory.h>
+#include <akonadi/cachepolicy.h>
+#include <akonadi/collectionattributessynchronizationjob.h>
+#include <akonadi/item.h>
+
 #include <QtDBus/QDBusConnection>
 
+#include <KDateTime>
 #include <KLocalizedString>
 #include <KABC/Address>
 #include <KABC/Addressee>
@@ -48,6 +55,10 @@
 #define DEBUG_CONTACT_PROPERTIES 0
 #endif
 
+#define MINUTES_IN_ONE_DAY (60 * 24)
+
+#define FETCH_STATUS "FetchStatus"
+
 using namespace Akonadi;
 
 /**
@@ -68,6 +79,83 @@ private:
 	virtual QDebug error() const;
 
 	bool propertiesPull(QVector<int> &tags, const bool tagsAppended, bool pullAll);
+};
+
+/**
+ * We determine the fetch status of the the GAL by tracking the the age of the
+ * collection, and the last fetched item:
+ * 
+ * 	- By default, GAL clients fetch it once per day. When we finish fetching
+ * 	it, we set the current date-time. If fetching is incomplete, the 
+ * 	date-time will be invalid.
+ * 
+ * 	- As fetching proceeds, we store the last fetched item's displayName.
+ * 	On resume, this can be used to seek to the right place in the GAL to
+ * 	resume fetching.
+ */
+class FetchStatusAttribute :
+	public Akonadi::Attribute
+{
+public:
+	FetchStatusAttribute()
+	{
+	}
+
+	FetchStatusAttribute(const KDateTime &dateTime, const QString &displayName) :
+		m_dateTime(dateTime),
+		m_displayName(displayName)
+	{
+	}
+
+	void setDateTime(const KDateTime dateTime)
+	{
+		m_dateTime = dateTime;
+	}
+
+	KDateTime dateTime() const
+	{
+		return m_dateTime;
+	}
+
+	void setDisplayName(const QString displayName)
+	{
+		m_displayName = displayName;
+	}
+
+	QString displayName() const
+	{
+		return m_displayName;
+	}
+
+	virtual QByteArray type() const
+	{
+		return FETCH_STATUS;
+	}
+
+	virtual Attribute *clone() const
+	{
+		return new FetchStatusAttribute(m_dateTime, m_displayName);
+	}
+
+	virtual QByteArray serialized() const
+	{
+		static QString separator = QString::fromAscii("|");
+		QString tmp = m_dateTime.toString().append(separator).append(m_displayName);
+
+		return tmp.toUtf8();
+	}
+
+	virtual void deserialize(const QByteArray &data)
+	{
+		int i = data.indexOf("|");
+
+		m_dateTime = KDateTime::fromString(QString::fromUtf8(data.left(i)));
+		m_displayName = QString::fromUtf8(data.mid(i + 1));
+	}
+
+private:
+	KDateTime m_dateTime;
+	QString m_displayName;
 };
 
 /**
@@ -470,16 +558,29 @@ static bool preparePayload(SPropValue *properties, unsigned propertyCount, KABC:
 ExGalResource::ExGalResource(const QString &id) : 
 	MapiResource(id, i18n("Exchange Contacts"), IPF_CONTACT, "IPM.Contact", QString::fromAscii("text/directory")),
 	m_galId(0, 0),
-	m_totalCount(0)
+	m_totalCount(0),
+	m_gal(0),
+	m_galUpdater(0)
 {
 	new SettingsAdaptor(Settings::self());
 	QDBusConnection::sessionBus().registerObject(QLatin1String("/Settings"),
 						     Settings::self(), 
 						     QDBusConnection::ExportAdaptors);
+	AttributeFactory::registerAttribute<FetchStatusAttribute>();
 }
 
 ExGalResource::~ExGalResource()
 {
+}
+
+void ExGalResource::GALUpdated(KJob *updater)
+{
+	qCritical() << "collection updater done";
+	if (updater->error()) {
+		qCritical() << "GAL updater error:" << updater->errorString();
+	}
+	disconnect((QObject *)m_galUpdater, SIGNAL(result(KJob *)), this, SLOT(GALUpdated(KJob *)));
+	m_galUpdater = 0;
 }
 
 const QString ExGalResource::profile()
@@ -495,17 +596,23 @@ void ExGalResource::retrieveCollections()
 	Collection::List collections;
 	Collection gal;
 
+	qCritical() << "GAL retrieveCollections";
 	setName(i18n("Exchange Contacts for %1", profile()));
 	gal.setName(i18n("Exchange Global Address List for %1", profile()));
 	gal.setRemoteId(m_galId.toString());
 	gal.setParentCollection(Collection::root());
 	gal.setContentMimeTypes(QStringList(m_itemMimeType));
+	qCritical() <<"line" << __LINE__;
 	gal.setRights(Akonadi::Collection::ReadOnly);
+	gal.cachePolicy().setSyncOnDemand(true);
+	gal.cachePolicy().setCacheTimeout(MINUTES_IN_ONE_DAY);
+	qCritical() <<"line" << __LINE__;
 	collections.append(gal);
 	fetchCollections(Contacts, collections);
 
 	// Notify Akonadi about the new collections.
 	collectionsRetrieved(collections);
+	qCritical() <<"line" << __LINE__;
 }
 
 void ExGalResource::retrieveItems(const Akonadi::Collection &collection)
@@ -513,17 +620,21 @@ void ExGalResource::retrieveItems(const Akonadi::Collection &collection)
 	Item::List items;
 	Item::List deletedItems;
 
+	qCritical() << "GAL retrieveItems";
 	if (collection.remoteId() == m_galId.toString()) {
 		// Assume the GAL is going to take a while to fetch, so use
 		// streaming mode.
-		if (!m_connection->fetchGALCount(&m_totalCount)) {
+		if (!m_connection->GALCount(&m_totalCount)) {
 			error(i18n("cannot fetch GAL count from Exchange"));
 			return;
 		}
 		kDebug() << "fetch items from collection:" << collection.name() << m_totalCount;
 		setAutomaticProgressReporting(false);
 		setItemStreamingEnabled(true);
-		m_galCollection = collection;
+
+		// Now that the collection has come back to us form the backend,
+		// it isValid().
+		m_gal = collection;
 		scheduleCustomTask(this, "retrieveGALItems", QVariant((qulonglong)0), ResourceBase::Append);
 		cancelTask();
 	} else {
@@ -541,22 +652,76 @@ void ExGalResource::retrieveItems(const Akonadi::Collection &collection)
  */
 void ExGalResource::retrieveGALItems(const QVariant &countVariant)
 {
-	qulonglong count = countVariant.toULongLong();
+	// TODO The attribute<>() function fails when it uses a dynamic_cast.
+	//FetchStatusAttribute *fetchStatus = m_gal.attribute<FetchStatusAttribute>(Akonadi::Entity::AddIfMissing);
+	FetchStatusAttribute *fetchStatus;
+	if (m_gal.hasAttribute(FETCH_STATUS)) {
+		fetchStatus = static_cast<FetchStatusAttribute *>(m_gal.attribute(FETCH_STATUS));
+		// TODO Why is this needed?
+		fetchStatus = static_cast<FetchStatusAttribute *>(fetchStatus->clone());
+	} else {
+		fetchStatus = new FetchStatusAttribute();
+	}
+
+	// Actually do the fetching.
+	retrieveGALItems(countVariant.toULongLong(), fetchStatus);
+
+	// Push the fetch state out to Akonadi if there is not already a job
+	// running for that.
+	if (m_galUpdater) {
+		delete fetchStatus;
+	} else {
+		// Set the modified attribute.
+		m_gal.addAttribute(fetchStatus);
+		m_galUpdater = new Akonadi::CollectionAttributesSynchronizationJob(m_gal);
+		connect((QObject *)m_galUpdater, SIGNAL(result(KJob *)), this, SLOT(GALUpdated(KJob *)));
+
+		// Go...
+		((KJob *)m_galUpdater)->start();
+	}
+}
+
+void ExGalResource::retrieveGALItems(qulonglong count, FetchStatusAttribute *fetchStatus)
+{
 	unsigned requestedCount = 300;
 	Item::List items;
 	Item::List deletedItems;
 	struct SRowSet *results = NULL;
 
-	emit status(Running, i18n("Fetching GAL from Exchange"));
-	emit percent((count + 99) * 100 / m_totalCount);
-	if (!m_connection->fetchGAL(count == 0, requestedCount, &contactTags, &results)) {
-		error(i18n("cannot fetch GAL from Exchange"));
-		return;
+	qCritical() << "GAL retrieveItems task" << fetchStatus->dateTime() << fetchStatus->displayName();
+	QString savedDisplayName = fetchStatus->displayName();
+	unsigned approximatePosition;
+
+	// Are we just starting? If so, then establish a starting position.
+	if (count == 0) {
+		// Are we resuming a previously incomplete fetch?
+		if (savedDisplayName.isEmpty()) {
+			emit status(Running, i18n("Start reading GAL"));
+			if (!m_connection->GALRead(true, requestedCount, &contactTags, &results, &approximatePosition)) {
+				error(i18n("cannot start reading GAL"));
+				return;
+			}
+		} else {
+			emit status(Running, i18n("Start reading GAL from: %1", savedDisplayName));
+			if (!m_connection->GALSeek(savedDisplayName, &contactTags, &results, &approximatePosition)) {
+				error(i18n("cannot start reading GAL from: %1", savedDisplayName));
+				return;
+			}
+		}
+	} else {
+		// Carry on from where we got to before.
+		emit status(Running, i18n("Reading GAL from: %1", savedDisplayName));
+		if (!m_connection->GALRead(false, requestedCount, &contactTags, &results, &approximatePosition)) {
+			error(i18n("cannot read GAL from: %1", savedDisplayName));
+			return;
+		}
 	}
+	emit percent(approximatePosition * 100 / m_totalCount);
 	if (!results) {
 		// All done!
-		emit status(Running, i18n("%1 GAL entries returned from Exchange", count));
+		emit status(Running, i18n("%1 GAL entries read", count));
 		itemsRetrievalDone();
+		fetchStatus->setDateTime(KDateTime::currentUtcDateTime());
 		return;
 	}
 
@@ -570,7 +735,7 @@ void ExGalResource::retrieveGALItems(const QVariant &countVariant)
 			continue;
 		}
 		Item item(m_itemMimeType);
-		item.setParentCollection(m_galCollection);
+		item.setParentCollection(m_gal);
 		item.setRemoteId(addressee.emails()[0]);
 		item.setRemoteRevision(QString::number(1));
 		item.setPayload<KABC::Addressee>(addressee);
@@ -580,6 +745,7 @@ void ExGalResource::retrieveGALItems(const QVariant &countVariant)
 	MAPIFreeBuffer(results);
 	count += items.size();
 	itemsRetrievedIncremental(items, deletedItems);
+	fetchStatus->setDisplayName(items.last().payload<KABC::Addressee>().name());
 #if (DEBUG_CONTACT_PROPERTIES)
 	// Exit early for debug only.
 	if (count > 3 * requestedCount) {
@@ -588,7 +754,8 @@ void ExGalResource::retrieveGALItems(const QVariant &countVariant)
 #endif
 	if ((unsigned)items.size() < requestedCount) {
 		// All done!
-		emit status(Running, i18n("%1 GAL entries returned from Exchange", count));
+		emit status(Running, i18n("%1 GAL entries read", count));
+		fetchStatus->setDateTime(KDateTime::currentUtcDateTime());
 		itemsRetrievalDone();
 	} else {
 		// Go around again for more...
@@ -605,6 +772,7 @@ bool ExGalResource::retrieveItem(const Akonadi::Item &itemOrig, const QSet<QByte
 {
 	Q_UNUSED(parts);
 
+	qCritical() << "GAL retrieveItem";
 	MapiContact *message = fetchItem<MapiContact>(itemOrig);
 	if (!message) {
 		return false;

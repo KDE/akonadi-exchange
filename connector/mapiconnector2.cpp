@@ -275,7 +275,7 @@ QDebug MapiConnector2::error() const
 	return TallocContext::error(prefix);
 }
 
-bool MapiConnector2::fetchGALCount(unsigned *totalCount)
+bool MapiConnector2::GALCount(unsigned *totalCount)
 {
 	if (MAPI_E_SUCCESS != GetGALTableCount(m_session, totalCount)) {
 		error() << "cannot get GAL count" << mapiError();
@@ -284,7 +284,7 @@ bool MapiConnector2::fetchGALCount(unsigned *totalCount)
 	return true;
 }
 
-bool MapiConnector2::fetchGAL(bool begin, unsigned requestedCount, SPropTagArray *tags, SRowSet **results)
+bool MapiConnector2::GALRead(bool begin, unsigned requestedCount, SPropTagArray *tags, SRowSet **results, unsigned *approximatePosition)
 {
 	uint8_t ulFlags = begin ? TABLE_START : TABLE_CUR;
 
@@ -292,6 +292,27 @@ bool MapiConnector2::fetchGAL(bool begin, unsigned requestedCount, SPropTagArray
 		error() << "cannot read GAL entries" << mapiError();
 		return false;
 	}
+
+	// Return where we got to.
+	struct nspi_context *nspi = (struct nspi_context *)m_session->nspi->ctx;
+	*approximatePosition = nspi->pStat->NumPos;
+	return true;
+}
+
+bool MapiConnector2::GALSeek(const QString &displayName, SPropTagArray *tags, SRowSet **results, unsigned *approximatePosition)
+{
+	struct nspi_context *nspi = (struct nspi_context *)m_session->nspi->ctx;
+	SPropValue key;
+
+	key.ulPropTag = (MAPITAGS)PR_DISPLAY_NAME_UNICODE;
+	key.value.lpszW = displayName.toUtf8();
+	if (MAPI_E_SUCCESS != nspi_SeekEntries(nspi, ctx(), SortTypeDisplayName, &key, tags, NULL, results)) {
+		error() << "cannot seek to GAL entry" << displayName << mapiError();
+		return false;
+	}
+
+	// Return where we got to.
+	*approximatePosition = nspi->pStat->NumPos;
 	return true;
 }
 

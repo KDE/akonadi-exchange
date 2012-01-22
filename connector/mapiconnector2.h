@@ -382,15 +382,17 @@ public:
 	bool defaultFolder(MapiDefaultFolder folderType, mapi_id_t *id);
 
 	/**
-	 * Entries in the GAL.
+	 * How many entries are there in the GAL?
 	 */
-	bool fetchGALCount(unsigned *totalCount);
+	bool GALCount(unsigned *totalCount);
 
 	/**
 	 * Fetch upto the requested number of entries from the GAL. The start
 	 * point is either the beginning, or where we previously left off.
 	 */
-	bool fetchGAL(bool begin, unsigned requestedCount, SPropTagArray *tags, SRowSet **results);
+	bool GALRead(bool begin, unsigned requestedCount, SPropTagArray *tags, SRowSet **results, unsigned *approximatePosition);
+
+	bool GALSeek(const QString &displayName, SPropTagArray *tags, SRowSet **results, unsigned *approximatePosition);
 
 	mapi_object_t *d()
 	{
