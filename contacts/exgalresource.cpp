@@ -589,6 +589,16 @@ const QString ExGalResource::profile()
 	return Settings::self()->profileName();
 }
 
+void ExGalResource::retrieveCollectionAttributes(const Akonadi::Collection &collection)
+{
+	if (collection.remoteId() == m_galId.toString()) {
+		collectionAttributesRetrieved(m_gal);
+	} else {
+		// We should not get here.
+		cancelTask();
+	}
+}
+
 void ExGalResource::retrieveCollections()
 {
 	// We are going to return both the user's contacts as well as the GAL.
@@ -602,17 +612,14 @@ void ExGalResource::retrieveCollections()
 	gal.setRemoteId(m_galId.toString());
 	gal.setParentCollection(Collection::root());
 	gal.setContentMimeTypes(QStringList(m_itemMimeType));
-	qCritical() <<"line" << __LINE__;
 	gal.setRights(Akonadi::Collection::ReadOnly);
 	gal.cachePolicy().setSyncOnDemand(true);
 	gal.cachePolicy().setCacheTimeout(MINUTES_IN_ONE_DAY);
-	qCritical() <<"line" << __LINE__;
 	collections.append(gal);
 	fetchCollections(Contacts, collections);
 
 	// Notify Akonadi about the new collections.
 	collectionsRetrieved(collections);
-	qCritical() <<"line" << __LINE__;
 }
 
 void ExGalResource::retrieveItems(const Akonadi::Collection &collection)
@@ -652,8 +659,10 @@ void ExGalResource::retrieveItems(const Akonadi::Collection &collection)
  */
 void ExGalResource::retrieveGALItems(const QVariant &countVariant)
 {
+#if 0
 	// TODO The attribute<>() function fails when it uses a dynamic_cast.
-	//FetchStatusAttribute *fetchStatus = m_gal.attribute<FetchStatusAttribute>(Akonadi::Entity::AddIfMissing);
+	FetchStatusAttribute *fetchStatus = m_gal.attribute<FetchStatusAttribute>(Akonadi::Entity::AddIfMissing);
+#else
 	FetchStatusAttribute *fetchStatus;
 	if (m_gal.hasAttribute(FETCH_STATUS)) {
 		fetchStatus = static_cast<FetchStatusAttribute *>(m_gal.attribute(FETCH_STATUS));
@@ -662,6 +671,7 @@ void ExGalResource::retrieveGALItems(const QVariant &countVariant)
 	} else {
 		fetchStatus = new FetchStatusAttribute();
 	}
+#endif
 
 	// Actually do the fetching.
 	retrieveGALItems(countVariant.toULongLong(), fetchStatus);

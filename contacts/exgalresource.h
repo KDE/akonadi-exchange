@@ -43,6 +43,7 @@ public Q_SLOTS:
 	virtual void configure(WId windowId);
 
 protected Q_SLOTS:
+	void retrieveCollectionAttributes(const Akonadi::Collection &collection);
 	void retrieveCollections();
 	void retrieveItems(const Akonadi::Collection &collection);
 	bool retrieveItem(const Akonadi::Item &itemOrig, const QSet<QByteArray> &parts);
