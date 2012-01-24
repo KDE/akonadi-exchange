@@ -278,7 +278,7 @@ static bool preparePayload(SPropValue *properties, unsigned propertyCount, KABC:
 		case PidTagMessageClass:
 			// Sanity check the message class.
 			if (QLatin1String("IPM.Contact") != property.value().toString()) {
-				kError() << "retreived item is not a contact:" << property.value().toString();
+				kError() << "retrieved item is not a contact:" << property.value().toString();
 				return false;
 			}
 			break;
@@ -698,7 +698,7 @@ void ExGalResource::retrieveGALItems(qulonglong count, FetchStatusAttribute *fet
 	Item::List deletedItems;
 	struct SRowSet *results = NULL;
 
-	qCritical() << "GAL retrieveItems task" << fetchStatus->dateTime() << fetchStatus->displayName();
+	qCritical() << "GAL retrieveItems task count:" << count << fetchStatus->dateTime() << fetchStatus->displayName();
 	QString savedDisplayName = fetchStatus->displayName();
 	unsigned approximatePosition;
 
@@ -712,8 +712,13 @@ void ExGalResource::retrieveGALItems(qulonglong count, FetchStatusAttribute *fet
 				return;
 			}
 		} else {
-			emit status(Running, i18n("Start reading GAL from: %1", savedDisplayName));
+			emit status(Running, i18n("Seek to GAL at: %1", savedDisplayName));
 			if (!m_connection->GALSeek(savedDisplayName, &contactTags, &results, &approximatePosition)) {
+				error(i18n("cannot seek to GAL at: %1", savedDisplayName));
+				return;
+			}
+			emit status(Running, i18n("Start reading GAL from: %1", savedDisplayName));
+			if (!m_connection->GALRead(false, requestedCount, &contactTags, &results, &approximatePosition)) {
 				error(i18n("cannot start reading GAL from: %1", savedDisplayName));
 				return;
 			}

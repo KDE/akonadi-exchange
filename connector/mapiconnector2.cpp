@@ -301,12 +301,17 @@ bool MapiConnector2::GALRead(bool begin, unsigned requestedCount, SPropTagArray 
 
 bool MapiConnector2::GALSeek(const QString &displayName, SPropTagArray *tags, SRowSet **results, unsigned *approximatePosition)
 {
+	TallocContext mem("MapiConnector2::GALSeek");
 	struct nspi_context *nspi = (struct nspi_context *)m_session->nspi->ctx;
 	SPropValue key;
 
+	if (!mem.ctx()) {
+		return false;
+	}
 	key.ulPropTag = (MAPITAGS)PR_DISPLAY_NAME_UNICODE;
-	key.value.lpszW = displayName.toUtf8();
-	if (MAPI_E_SUCCESS != nspi_SeekEntries(nspi, ctx(), SortTypeDisplayName, &key, tags, NULL, results)) {
+	key.dwAlignPad = 0;
+	key.value.lpszW = talloc_strdup(mem.ctx(), displayName.toUtf8().data());
+	if (MAPI_E_SUCCESS != nspi_SeekEntries(nspi, mem.ctx(), SortTypeDisplayName, &key, tags, NULL, results)) {
 		error() << "cannot seek to GAL entry" << displayName << mapiError();
 		return false;
 	}
@@ -1958,6 +1963,9 @@ QDateTime MapiRecurrencyPattern::convertExchangeTimes(const uint32_t exchangeMin
 TallocContext::TallocContext(const char *name)
 {
 	m_ctx = talloc_named(NULL, 0, "%s", name);
+	if (!m_ctx) {
+		qCritical() << name << "talloc_named failed";
+	}
 }
 
 TallocContext::~TallocContext()
@@ -1970,11 +1978,23 @@ TALLOC_CTX *TallocContext::ctx()
 	return m_ctx;
 }
 
+QDebug TallocContext::debug() const
+{
+	QString talloc = QString::fromAscii(talloc_get_name(m_ctx));
+	return qDebug() << talloc;
+}
+
 QDebug TallocContext::debug(const QString &caller) const
 {
 	static QString prefix = QString::fromAscii("%1.%2");
 	QString talloc = QString::fromAscii(talloc_get_name(m_ctx));
 	return qDebug() << prefix.arg(talloc).arg(caller);
+}
+
+QDebug TallocContext::error() const
+{
+	QString talloc = QString::fromAscii(talloc_get_name(m_ctx));
+	return qCritical() << talloc;
 }
 
 QDebug TallocContext::error(const QString &caller) const

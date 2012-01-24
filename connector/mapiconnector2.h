@@ -299,11 +299,11 @@ protected:
 	 * Debug and error reporting. Each subclass should reimplement with 
 	 * logic that emits a prefix identifying the object involved. 
 	 */
-	virtual QDebug debug() const = 0;
-	virtual QDebug error() const = 0;
+	virtual QDebug debug() const;
+	virtual QDebug error() const;
 
 	/**
-	 * A couple of helper functions that sbclasses can use to implement the
+	 * A couple of helper functions that subclasses can use to implement the
 	 * above virtual methods.
 	 */
 	QDebug debug(const QString &caller) const;
