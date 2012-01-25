@@ -301,17 +301,13 @@ bool MapiConnector2::GALRead(bool begin, unsigned requestedCount, SPropTagArray 
 
 bool MapiConnector2::GALSeek(const QString &displayName, SPropTagArray *tags, SRowSet **results, unsigned *approximatePosition)
 {
-	TallocContext mem("MapiConnector2::GALSeek");
 	struct nspi_context *nspi = (struct nspi_context *)m_session->nspi->ctx;
 	SPropValue key;
 
-	if (!mem.ctx()) {
-		return false;
-	}
 	key.ulPropTag = (MAPITAGS)PR_DISPLAY_NAME_UNICODE;
 	key.dwAlignPad = 0;
-	key.value.lpszW = talloc_strdup(mem.ctx(), displayName.toUtf8().data());
-	if (MAPI_E_SUCCESS != nspi_SeekEntries(nspi, mem.ctx(), SortTypeDisplayName, &key, tags, NULL, results)) {
+	key.value.lpszW = string(displayName);
+	if (MAPI_E_SUCCESS != nspi_SeekEntries(nspi, ctx(), SortTypeDisplayName, &key, tags, NULL, results)) {
 		error() << "cannot seek to GAL entry" << displayName << mapiError();
 		return false;
 	}
@@ -999,10 +995,8 @@ void MapiMessage::recipientPopulate(const char *phase, SRow &recipient, MapiReci
 	unsigned j = 0;
 	foreach (int i, needingResolution) {
 		MapiRecipient &recipient = m_recipients[i];
-		QByteArray utf8(recipient.name.toUtf8());
 
-		utf8.append('\0');
-		names[j] = talloc_strdup(ctx(), utf8.data());
+		names[j] = string(recipient.name);
 		j++;
 	}
 	names[j] = 0;
@@ -1173,7 +1167,7 @@ bool MapiObject::propertiesPush()
 bool MapiObject::propertiesPull(QVector<int> &tags, const bool tagsAppended, bool pullAll)
 {
 	if (!tagsAppended || !m_ourTagList) {
-		m_ourTagList = talloc_array(ctx(), int, tags.size() + 1);
+		m_ourTagList = array<int>(tags.size() + 1);
 		if (!m_ourTagList) {
 			error() << "cannot allocate tags:" << tags.size() << mapiError();
 			return false;
@@ -1211,7 +1205,7 @@ bool MapiObject::propertiesPull()
 	}
 
 	// Copy results from MAPI array to our array.
-	m_properties = talloc_array(ctx(), SPropValue, mapiProperties.cValues);
+	m_properties = array<SPropValue>(mapiProperties.cValues);
 	if (m_properties) {
 		for (m_propertyCount = 0; m_propertyCount < mapiProperties.cValues; m_propertyCount++) {
 			cast_SPropValue(ctx(), &mapiProperties.lpProps[m_propertyCount], 
@@ -1291,7 +1285,7 @@ bool MapiObject::propertyWrite(int tag, int data, bool idempotent)
 
 bool MapiObject::propertyWrite(int tag, QString &data, bool idempotent)
 {
-	char *copy = talloc_strdup(ctx(), data.toUtf8().data());
+	char *copy = string(data);
 
 	if (!copy) {
 		error() << "cannot talloc:" << data;
@@ -1303,7 +1297,7 @@ bool MapiObject::propertyWrite(int tag, QString &data, bool idempotent)
 
 bool MapiObject::propertyWrite(int tag, QDateTime &data, bool idempotent)
 {
-	FILETIME *copy = talloc(ctx(), FILETIME);
+	FILETIME *copy = allocate<FILETIME>();
 
 	if (!copy) {
 		error() << "cannot talloc:" << data;
@@ -1973,15 +1967,21 @@ TallocContext::~TallocContext()
 	talloc_free(m_ctx);
 }
 
+template <class T>
+T *TallocContext::allocate()
+{
+	return talloc(m_ctx, T);
+}
+
+template <class T>
+T *TallocContext::array(unsigned size)
+{
+	return talloc_array(m_ctx, T, size);
+}
+
 TALLOC_CTX *TallocContext::ctx()
 {
 	return m_ctx;
-}
-
-QDebug TallocContext::debug() const
-{
-	QString talloc = QString::fromAscii(talloc_get_name(m_ctx));
-	return qDebug() << talloc;
 }
 
 QDebug TallocContext::debug(const QString &caller) const
@@ -1991,15 +1991,14 @@ QDebug TallocContext::debug(const QString &caller) const
 	return qDebug() << prefix.arg(talloc).arg(caller);
 }
 
-QDebug TallocContext::error() const
-{
-	QString talloc = QString::fromAscii(talloc_get_name(m_ctx));
-	return qCritical() << talloc;
-}
-
 QDebug TallocContext::error(const QString &caller) const
 {
 	static QString prefix = QString::fromAscii("%1.%2");
 	QString talloc = QString::fromAscii(talloc_get_name(m_ctx));
 	return qCritical() << prefix.arg(talloc).arg(caller);
+}
+
+char *TallocContext::string(const QString &original)
+{
+	return talloc_strdup(m_ctx, original.toUtf8().data());
 }

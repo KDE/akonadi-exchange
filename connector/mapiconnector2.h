@@ -292,6 +292,23 @@ public:
 
 	TALLOC_CTX *ctx();
 
+	/**
+	 * Make a talloc-friendly allocation.
+	 */
+	template <class T>
+	T *allocate();
+
+	/**
+	 * Make a talloc-friendly array.
+	 */
+	template <class T>
+	T *array(unsigned size);
+
+	/**
+	 * Make a talloc-friendly UTF-8 encoded string.
+	 */
+	char *string(const QString &original);
+
 protected:
 	TALLOC_CTX *m_ctx;
 
@@ -299,8 +316,8 @@ protected:
 	 * Debug and error reporting. Each subclass should reimplement with 
 	 * logic that emits a prefix identifying the object involved. 
 	 */
-	virtual QDebug debug() const;
-	virtual QDebug error() const;
+	virtual QDebug debug() const = 0;
+	virtual QDebug error() const = 0;
 
 	/**
 	 * A couple of helper functions that subclasses can use to implement the
