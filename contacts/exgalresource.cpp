@@ -712,11 +712,14 @@ void ExGalResource::retrieveGALItems(qulonglong count, FetchStatusAttribute *fet
 				return;
 			}
 		} else {
+			// Seek to the row at or after the point we remembered.
 			emit status(Running, i18n("Seek to GAL at: %1", savedDisplayName));
-			if (!m_connection->GALSeek(savedDisplayName, &contactTags, &results, &approximatePosition)) {
+			if (!m_connection->GALSeek(savedDisplayName, 0, &results, &approximatePosition)) {
 				error(i18n("cannot seek to GAL at: %1", savedDisplayName));
 				return;
 			}
+
+			// Read on from here.
 			emit status(Running, i18n("Start reading GAL from: %1", savedDisplayName));
 			if (!m_connection->GALRead(false, requestedCount, &contactTags, &results, &approximatePosition)) {
 				error(i18n("cannot start reading GAL from: %1", savedDisplayName));
