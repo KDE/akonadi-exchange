@@ -284,36 +284,51 @@ bool MapiConnector2::GALCount(unsigned *totalCount)
 	return true;
 }
 
-bool MapiConnector2::GALRead(bool begin, unsigned requestedCount, SPropTagArray *tags, SRowSet **results, unsigned *approximatePosition)
+bool MapiConnector2::GALRead(unsigned requestedCount, SPropTagArray *tags, SRowSet **results, unsigned *percentagePosition)
 {
-	uint8_t ulFlags = begin ? TABLE_START : TABLE_CUR;
-
-	if (MAPI_E_SUCCESS != GetGALTable(m_session, tags, results, requestedCount, ulFlags)) {
+	if (MAPI_E_SUCCESS != GetGALTable(m_session, tags, results, requestedCount, TABLE_CUR)) {
 		error() << "cannot read GAL entries" << mapiError();
 		return false;
 	}
 
 	// Return where we got to.
-	struct nspi_context *nspi = (struct nspi_context *)m_session->nspi->ctx;
-	*approximatePosition = nspi->pStat->NumPos;
+	if (percentagePosition) {
+		struct nspi_context *nspi = (struct nspi_context *)m_session->nspi->ctx;
+
+		*percentagePosition = nspi->pStat->NumPos * 100 / nspi->pStat->TotalRecs;
+	}
 	return true;
 }
 
-bool MapiConnector2::GALSeek(const QString &displayName, SPropTagArray *tags, SRowSet **results, unsigned *approximatePosition)
+bool MapiConnector2::GALRewind()
+{
+	struct nspi_context *nspi = (struct nspi_context *)m_session->nspi->ctx;
+
+	nspi->pStat->CurrentRec = 0;
+	nspi->pStat->Delta = 0;
+	nspi->pStat->NumPos = 0;
+	nspi->pStat->TotalRecs = 0xffffffff;
+	return true;
+}
+
+bool MapiConnector2::GALSeek(const QString &displayName, unsigned *percentagePosition, SPropTagArray *tags, SRowSet **results)
 {
 	struct nspi_context *nspi = (struct nspi_context *)m_session->nspi->ctx;
 	SPropValue key;
+	SRowSet *dummy;
 
 	key.ulPropTag = (MAPITAGS)PR_DISPLAY_NAME_UNICODE;
 	key.dwAlignPad = 0;
 	key.value.lpszW = string(displayName);
-	if (MAPI_E_SUCCESS != nspi_SeekEntries(nspi, ctx(), SortTypeDisplayName, &key, tags, NULL, results)) {
+	if (MAPI_E_SUCCESS != nspi_SeekEntries(nspi, ctx(), SortTypeDisplayName, &key, tags, NULL, results ? results : &dummy)) {
 		error() << "cannot seek to GAL entry" << displayName << mapiError();
 		return false;
 	}
 
 	// Return where we got to.
-	*approximatePosition = nspi->pStat->NumPos;
+	if (percentagePosition) {
+		*percentagePosition = nspi->pStat->NumPos * 100 / nspi->pStat->TotalRecs;
+	}
 	return true;
 }
 

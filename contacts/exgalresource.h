@@ -20,9 +20,17 @@
 #ifndef EXGALRESOURCE_H
 #define EXGALRESOURCE_H
 
-#include <mapiresource.h>
+#include <akonadi/collection.h>
 #include <akonadi/collectionattributessynchronizationjob.h>
+#include <KJob>
 
+#include "mapiresource.h"
+
+namespace Akonadi
+{
+	class CollectionAttributesSynchronizationJob;
+	class TransactionSequence;
+}
 class MapiConnector2;
 
 /**
@@ -31,8 +39,7 @@ class MapiConnector2;
  */
 class ExGalResource : public MapiResource
 {
-Q_OBJECT
-
+	Q_OBJECT
 public:
 	ExGalResource(const QString &id);
 	virtual ~ExGalResource();
@@ -60,23 +67,27 @@ private:
 	 * A reserved id is used to represent the GAL.
 	 */
 	const FullId m_galId;
-	unsigned m_totalCount;
 
 	/**
 	 * A copy of the collection used for the GAL.
 	 */
 	Akonadi::Collection m_gal;
-	volatile Akonadi::CollectionAttributesSynchronizationJob *m_galUpdater;
+	Akonadi::Item::List m_galItems;
 
-	void retrieveGALItems(qulonglong count, class FetchStatusAttribute *fetchStatus);
+	volatile Akonadi::CollectionAttributesSynchronizationJob *m_galUpdater;
+	Akonadi::TransactionSequence *m_transaction;
+
+	void retrieveGALItems();
+	Akonadi::TransactionSequence *transaction();
 
 private Q_SLOTS:
+	void retrieveGALBatch(const QVariant &arg);
+	void createGALItem();
+	void createGALItemDone(KJob *job);
+	void updateGALStatus(QString lastAddressee);
+	void updateGALStatusDone(KJob *job);
 
-	/**
-	 * Incremental fetch of GAL.
-	 */
-	void retrieveGALItems(const QVariant &countVariant);
-	void GALUpdated(KJob *updater);
+	void transactionDone(KJob *job);
 };
 
 #endif

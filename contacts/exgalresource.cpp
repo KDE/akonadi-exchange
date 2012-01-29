@@ -23,21 +23,19 @@
 
 #include "exgalresource.h"
 
-#include <akonadi/attribute.h>
 #include <akonadi/attributefactory.h>
 #include <akonadi/cachepolicy.h>
-#include <akonadi/collectionattributessynchronizationjob.h>
 #include <akonadi/item.h>
-
-#include <QtDBus/QDBusConnection>
-
-#include <KDateTime>
+#include <akonadi/itemcreatejob.h>
+#include <akonadi/transactionsequence.h>
 #include <KLocalizedString>
 #include <KABC/Address>
 #include <KABC/Addressee>
 #include <KABC/PhoneNumber>
 #include <KABC/Picture>
+#include <KDateTime>
 #include <KWindowSystem>
+#include <QtDBus/QDBusConnection>
 
 #include "mapiconnector2.h"
 #include "profiledialog.h"
@@ -558,9 +556,9 @@ static bool preparePayload(SPropValue *properties, unsigned propertyCount, KABC:
 ExGalResource::ExGalResource(const QString &id) : 
 	MapiResource(id, i18n("Exchange Contacts"), IPF_CONTACT, "IPM.Contact", QString::fromAscii("text/directory")),
 	m_galId(0, 0),
-	m_totalCount(0),
 	m_gal(0),
-	m_galUpdater(0)
+	m_galUpdater(0),
+	m_transaction(0)
 {
 	new SettingsAdaptor(Settings::self());
 	QDBusConnection::sessionBus().registerObject(QLatin1String("/Settings"),
@@ -571,16 +569,6 @@ ExGalResource::ExGalResource(const QString &id) :
 
 ExGalResource::~ExGalResource()
 {
-}
-
-void ExGalResource::GALUpdated(KJob *updater)
-{
-	qCritical() << "collection updater done";
-	if (updater->error()) {
-		qCritical() << "GAL updater error:" << updater->errorString();
-	}
-	disconnect((QObject *)m_galUpdater, SIGNAL(result(KJob *)), this, SLOT(GALUpdated(KJob *)));
-	m_galUpdater = 0;
 }
 
 const QString ExGalResource::profile()
@@ -621,135 +609,105 @@ void ExGalResource::retrieveCollections()
 	// Notify Akonadi about the new collections.
 	collectionsRetrieved(collections);
 }
-
+ 
 void ExGalResource::retrieveItems(const Akonadi::Collection &collection)
 {
 	Item::List items;
 	Item::List deletedItems;
 
-	qCritical() << "GAL retrieveItems";
+	qCritical() << "GAL retrieveItems" << collection.name();
 	if (collection.remoteId() == m_galId.toString()) {
 		// Assume the GAL is going to take a while to fetch, so use
 		// streaming mode.
-		if (!m_connection->GALCount(&m_totalCount)) {
-			error(i18n("cannot fetch GAL count from Exchange"));
-			return;
-		}
-		kDebug() << "fetch items from collection:" << collection.name() << m_totalCount;
 		setAutomaticProgressReporting(false);
 		setItemStreamingEnabled(true);
 
 		// Now that the collection has come back to us form the backend,
 		// it isValid().
 		m_gal = collection;
-		scheduleCustomTask(this, "retrieveGALItems", QVariant((qulonglong)0), ResourceBase::Append);
+		
+		// We are just starting to fetch stuff, see if there is a saved 
+		// displayName to start from.
+		if (m_gal.hasAttribute(FETCH_STATUS)) {
+			// TODO Why is the clone needed?
+			FetchStatusAttribute *fetchStatus = static_cast<FetchStatusAttribute *>(m_gal.attribute(FETCH_STATUS)->clone());
+			QString savedDisplayName = fetchStatus->displayName();
+			
+		qCritical() << "GAL retrieveItems task count:" << fetchStatus->dateTime() << fetchStatus->displayName();
+			if (!savedDisplayName.isEmpty()) { 
+				// Seek to the row at or after the point we remembered.
+				emit status(Running, i18n("Seek to GAL at: %1", savedDisplayName));
+				qCritical() << "progress:" << __LINE__;
+				if (!m_connection->GALSeek(savedDisplayName)) {
+					error(i18n("cannot seek to GAL at: %1", savedDisplayName));
+					qCritical() << (i18n("cannot seek to GAL at: %1", savedDisplayName));
+					return;
+				}
+			}
+			delete fetchStatus;
+		} else {
+			if (!m_connection->GALRewind()) {
+				error(i18n("cannot rewind GAL"));
+				qCritical() << (i18n("cannot rewind GAL"));
+				return;
+			}
+		}
+
+		qCritical() << "GAL count" << __LINE__;
+		scheduleCustomTask(this, "retrieveGALBatch", QVariant(), ResourceBase::Append);
 		cancelTask();
 	} else {
 		// This request is NOT for the GAL. We don't bother with 
 		// streaming mode.
 		setAutomaticProgressReporting(true);
-		fetchItems(collection, items, deletedItems);
+		setItemStreamingEnabled(false);
+//		fetchItems(collection, items, deletedItems);
 		itemsRetrievedIncremental(items, deletedItems);
+		itemsRetrievalDone();
 		kDebug() << "new/changed items:" << items.size() << "deleted items:" << deletedItems.size();
 	}
 }
 
 /**
- * Streamed fetch of the GAL.
+ * Streamed fetch of the GAL, one batch at a time.
+ * 
+ * Next state: If we have read the entire GAL, @ref updateGALStatus for the 
+ * last time, otherwise @ref createGALItem().
  */
-void ExGalResource::retrieveGALItems(const QVariant &countVariant)
-{
-#if 0
-	// TODO The attribute<>() function fails when it uses a dynamic_cast.
-	FetchStatusAttribute *fetchStatus = m_gal.attribute<FetchStatusAttribute>(Akonadi::Entity::AddIfMissing);
-#else
-	FetchStatusAttribute *fetchStatus;
-	if (m_gal.hasAttribute(FETCH_STATUS)) {
-		fetchStatus = static_cast<FetchStatusAttribute *>(m_gal.attribute(FETCH_STATUS));
-		// TODO Why is this needed?
-		fetchStatus = static_cast<FetchStatusAttribute *>(fetchStatus->clone());
-	} else {
-		fetchStatus = new FetchStatusAttribute();
-	}
-#endif
-
-	// Actually do the fetching.
-	retrieveGALItems(countVariant.toULongLong(), fetchStatus);
-
-	// Push the fetch state out to Akonadi if there is not already a job
-	// running for that.
-	if (m_galUpdater) {
-		delete fetchStatus;
-	} else {
-		// Set the modified attribute.
-		m_gal.addAttribute(fetchStatus);
-		m_galUpdater = new Akonadi::CollectionAttributesSynchronizationJob(m_gal);
-		connect((QObject *)m_galUpdater, SIGNAL(result(KJob *)), this, SLOT(GALUpdated(KJob *)));
-
-		// Go...
-		((KJob *)m_galUpdater)->start();
-	}
-}
-
-void ExGalResource::retrieveGALItems(qulonglong count, FetchStatusAttribute *fetchStatus)
+void ExGalResource::retrieveGALBatch(const QVariant &)
 {
 	unsigned requestedCount = 300;
-	Item::List items;
-	Item::List deletedItems;
+	// Actually do the fetching.
 	struct SRowSet *results = NULL;
+	unsigned percentagePosition;
 
-	qCritical() << "GAL retrieveItems task count:" << count << fetchStatus->dateTime() << fetchStatus->displayName();
-	QString savedDisplayName = fetchStatus->displayName();
-	unsigned approximatePosition;
-
-	// Are we just starting? If so, then establish a starting position.
-	if (count == 0) {
-		// Are we resuming a previously incomplete fetch?
-		if (savedDisplayName.isEmpty()) {
-			emit status(Running, i18n("Start reading GAL"));
-			if (!m_connection->GALRead(true, requestedCount, &contactTags, &results, &approximatePosition)) {
-				error(i18n("cannot start reading GAL"));
-				return;
-			}
-		} else {
-			// Seek to the row at or after the point we remembered.
-			emit status(Running, i18n("Seek to GAL at: %1", savedDisplayName));
-			if (!m_connection->GALSeek(savedDisplayName, 0, &results, &approximatePosition)) {
-				error(i18n("cannot seek to GAL at: %1", savedDisplayName));
-				return;
-			}
-
-			// Read on from here.
-			emit status(Running, i18n("Start reading GAL from: %1", savedDisplayName));
-			if (!m_connection->GALRead(false, requestedCount, &contactTags, &results, &approximatePosition)) {
-				error(i18n("cannot start reading GAL from: %1", savedDisplayName));
-				return;
-			}
-		}
-	} else {
-		// Carry on from where we got to before.
-		emit status(Running, i18n("Reading GAL from: %1", savedDisplayName));
-		if (!m_connection->GALRead(false, requestedCount, &contactTags, &results, &approximatePosition)) {
-			error(i18n("cannot read GAL from: %1", savedDisplayName));
-			return;
-		}
-	}
-	emit percent(approximatePosition * 100 / m_totalCount);
-	if (!results) {
-		// All done!
-		emit status(Running, i18n("%1 GAL entries read", count));
-		itemsRetrievalDone();
-		fetchStatus->setDateTime(KDateTime::currentUtcDateTime());
+	// Actually do the fetching.
+	emit status(Running, i18n("Reading GAL"));
+	qCritical() << "retrieveGALBatch:" << __LINE__;
+	if (!m_connection->GALRead(requestedCount, &contactTags, &results, &percentagePosition)) {
+		error(i18n("cannot read GAL: %1", mapiError()));
+		qCritical() << i18n("cannot read GAL: %1", mapiError());
 		return;
 	}
 
+	if (!results) {
+		// All done!
+		emit status(Running, i18n("GAL entries read"));
+		qCritical() << "retrieveGALBatch:" << __LINE__;
+		updateGALStatus(QString());
+		return;
+	}
+	emit percent(percentagePosition);
+		qCritical() << "FetchGALItemsJob:" << __LINE__;
+
 	// For each row, construct an Addressee, and add the item to the list.
+	qCritical() << "FetchGALItemsJob:" << __LINE__ << "rows" << results->cRows;
 	for (unsigned i = 0; i < results->cRows; i++) {
 		struct SRow &contact = results->aRow[i];
 		KABC::Addressee addressee;
 
 		if (!preparePayload(contact.lpProps, contact.cValues, addressee)) {
-			emit status(Running, i18n("Skipped malformed GAL entry"));
+			//emit status(Running, i18n("Skipped malformed GAL entry"));
 			continue;
 		}
 		Item item(m_itemMimeType);
@@ -758,29 +716,121 @@ void ExGalResource::retrieveGALItems(qulonglong count, FetchStatusAttribute *fet
 		item.setRemoteRevision(QString::number(1));
 		item.setPayload<KABC::Addressee>(addressee);
 
-		items << item;
+		m_galItems << item;
 	}
 	MAPIFreeBuffer(results);
-	count += items.size();
-	itemsRetrievedIncremental(items, deletedItems);
-	fetchStatus->setDisplayName(items.last().payload<KABC::Addressee>().name());
-#if (DEBUG_CONTACT_PROPERTIES)
-	// Exit early for debug only.
-	if (count > 3 * requestedCount) {
-		requestedCount = items.size() + 1;
+	taskDone();
+	createGALItem();
+}
+
+/**
+ * Initiate the creation of a single GAL item.
+ * 
+ * Next state: @ref createGALItemDone().
+ */
+void ExGalResource::createGALItem()
+{
+	Akonadi::Item item = m_galItems.first();
+	m_galItems.removeFirst();
+
+	qCritical() << "createGALItem:" << __LINE__;
+	// Save the new items in Akonadi.
+	Akonadi::ItemCreateJob *job = new Akonadi::ItemCreateJob(item, m_gal, transaction());  
+	connect(job, SIGNAL(result(KJob *)), SLOT(createGALItemDone(KJob *)));
+}
+
+/**
+ * Complete the creation of a single GAL item.
+ * 
+ * Next state: If there are more items in the batch, create the next item
+ * @ref createGALItem(), otherwise @ref updateGALStatus for the current batch.
+ */
+void ExGalResource::createGALItemDone(KJob *job)
+{
+	if (job->error()) {
+		qCritical() << "itemCreateJobDone:" << job->errorString();
 	}
-#endif
-	if ((unsigned)items.size() < requestedCount) {
-		// All done!
-		emit status(Running, i18n("%1 GAL entries read", count));
-		fetchStatus->setDateTime(KDateTime::currentUtcDateTime());
-		itemsRetrievalDone();
+	// emitResult();
+	if (m_galItems.size()) {
+	qCritical() << "createGALItemDone:" << __LINE__;
+		createGALItem();
 	} else {
-		// Go around again for more...
-		scheduleCustomTask(this, "retrieveGALItems", QVariant(count), ResourceBase::Append);
+		Akonadi::ItemCreateJob *realJob = dynamic_cast<Akonadi::ItemCreateJob *>(job);
+
+		qCritical() << "createGALItemDone:" << __LINE__;
+		updateGALStatus(realJob->item().payload<KABC::Addressee>().name());
 	}
-	// Uncommenting this causes retrieveItem() to fail for Contacts...
-//	taskDone();
+	qCritical() << "createGALItemDone:" << __LINE__;
+}
+
+/**
+ * Initiate update of the fetch status of the GAL.
+ * 
+ * @param lastAddressee		If not empty, the displayName of the last
+ * 				item written. If empty, we will write a final
+ * 				timestamp instead.
+ * 
+ * Next state: @ref updateGALStatusDone().
+ */
+void ExGalResource::updateGALStatus(QString lastAddressee)
+{
+	FetchStatusAttribute *fetchStatus = new FetchStatusAttribute();
+	qCritical() << "updateGALStatus" << __LINE__;
+
+	if (lastAddressee.isEmpty()) {
+		// Set the modified attribute.
+		fetchStatus->setDisplayName(lastAddressee);
+		m_gal.addAttribute(fetchStatus);
+	} else {
+		// Set the modified attribute.
+		fetchStatus->setDateTime(KDateTime::currentUtcDateTime());
+		m_gal.addAttribute(fetchStatus);
+	}
+
+	taskDone();
+	// Push the fetch state out to Akonadi if there is not already a job
+	// running for that.
+	qCritical() << "updateGALStatus" << __LINE__;
+	Akonadi::CollectionAttributesSynchronizationJob *job = new Akonadi::CollectionAttributesSynchronizationJob(m_gal);
+	connect(job, SIGNAL(result(KJob *)), SLOT(updateGALStatusDone(KJob *)));
+	qCritical() << "updateGALStatus" << __LINE__;
+	job->start();
+}
+
+/**
+ * Complete the update of the fetch status of the GAL.
+ * 
+ * Next state: Go get the next batch, @ref retrieveGALBatch().
+ */
+void ExGalResource::updateGALStatusDone(KJob *job)
+{
+	if (job->error()) {
+		qCritical() << "updateGALStatusDone:" << job->errorString();
+	}
+	qCritical() << "updateGALStatusDone:" << __LINE__;
+	taskDone();
+	scheduleCustomTask(this, "retrieveGALBatch", QVariant(), ResourceBase::Append);
+	qCritical() << "updateGALStatusDone:" << __LINE__;
+}
+
+Akonadi::TransactionSequence *ExGalResource::transaction()
+{
+	if (!m_transaction) {
+		m_transaction = new Akonadi::TransactionSequence(this);
+		m_transaction->setAutomaticCommittingEnabled(false);
+		connect(m_transaction, SIGNAL(result(KJob *)), SLOT(transactionDone(KJob *)));
+	}
+	return m_transaction;
+}
+ 
+void ExGalResource::transactionDone(KJob *job)
+{
+	if (job->error()) {
+		qCritical() << "transactionDone:" << job->errorString();
+		// handled by base class
+		return;
+	}
+//	emitResult();
 }
 
 /**

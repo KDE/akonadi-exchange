@@ -405,11 +405,13 @@ public:
 
 	/**
 	 * Fetch upto the requested number of entries from the GAL. The start
-	 * point is either the beginning, or where we previously left off.
+	 * point is where we previously left off.
 	 */
-	bool GALRead(bool begin, unsigned requestedCount, SPropTagArray *tags, SRowSet **results, unsigned *approximatePosition);
+	bool GALRead(unsigned requestedCount, SPropTagArray *tags, SRowSet **results, unsigned *percentagePosition = 0);
 
-	bool GALSeek(const QString &displayName, SPropTagArray *tags, SRowSet **results, unsigned *approximatePosition);
+	bool GALSeek(const QString &displayName, unsigned *percentagePosition = 0, SPropTagArray *tags = 0, SRowSet **results = 0);
+
+	bool GALRewind();
 
 	mapi_object_t *d()
 	{
