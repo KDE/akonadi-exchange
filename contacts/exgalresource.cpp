@@ -654,7 +654,8 @@ void ExGalResource::retrieveItems(const Akonadi::Collection &collection)
 		}
 
 		qCritical() << "GAL count" << __LINE__;
-		scheduleCustomTask(this, "retrieveGALBatch", QVariant(), ResourceBase::Append);
+		//scheduleCustomTask(this, "retrieveGALBatch", QVariant(), ResourceBase::Append);
+		QMetaObject::invokeMethod(this, "retrieveGALBatch", Qt::QueuedConnection);
 		cancelTask();
 	} else {
 		// This request is NOT for the GAL. We don't bother with 
@@ -674,7 +675,8 @@ void ExGalResource::retrieveItems(const Akonadi::Collection &collection)
  * Next state: If we have read the entire GAL, @ref updateGALStatus for the 
  * last time, otherwise @ref createGALItem().
  */
-void ExGalResource::retrieveGALBatch(const QVariant &)
+//void ExGalResource::retrieveGALBatch(const QVariant &)
+void ExGalResource::retrieveGALBatch()
 {
 	unsigned requestedCount = 300;
 	// Actually do the fetching.
@@ -809,7 +811,8 @@ void ExGalResource::updateGALStatusDone(KJob *job)
 	}
 	qCritical() << "updateGALStatusDone:" << __LINE__;
 	taskDone();
-	scheduleCustomTask(this, "retrieveGALBatch", QVariant(), ResourceBase::Append);
+	//scheduleCustomTask(this, "retrieveGALBatch", QVariant(), ResourceBase::Append);
+	QMetaObject::invokeMethod(this, "retrieveGALBatch", Qt::QueuedConnection);
 	qCritical() << "updateGALStatusDone:" << __LINE__;
 }
 
