@@ -73,11 +73,7 @@ private:
 	 */
 	Akonadi::Collection m_gal;
 	Akonadi::Item::List m_galItems;
-
 	volatile Akonadi::CollectionAttributesSynchronizationJob *m_galUpdater;
-	Akonadi::TransactionSequence *m_transaction;
-
-	Akonadi::TransactionSequence *transaction();
 
 private Q_SLOTS:
 	void retrieveGALBatch();
@@ -85,8 +81,6 @@ private Q_SLOTS:
 	void createGALItemDone(KJob *job);
 	void updateGALStatus(QString lastAddressee);
 	void updateGALStatusDone(KJob *job);
-
-	void transactionDone(KJob *job);
 };
 
 #endif

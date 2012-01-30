@@ -27,7 +27,6 @@
 #include <akonadi/cachepolicy.h>
 #include <akonadi/item.h>
 #include <akonadi/itemcreatejob.h>
-#include <akonadi/transactionsequence.h>
 #include <KLocalizedString>
 #include <KABC/Address>
 #include <KABC/Addressee>
@@ -557,8 +556,7 @@ ExGalResource::ExGalResource(const QString &id) :
 	MapiResource(id, i18n("Exchange Contacts"), IPF_CONTACT, "IPM.Contact", QString::fromAscii("text/directory")),
 	m_galId(0, 0),
 	m_gal(0),
-	m_galUpdater(0),
-	m_transaction(0)
+	m_galUpdater(0)
 {
 	new SettingsAdaptor(Settings::self());
 	QDBusConnection::sessionBus().registerObject(QLatin1String("/Settings"),
@@ -735,8 +733,8 @@ void ExGalResource::createGALItem()
 	Akonadi::Item item = m_galItems.first();
 	m_galItems.removeFirst();
 
-	// Save the new items in Akonadi within the context of a transaction.
-	Akonadi::ItemCreateJob *job = new Akonadi::ItemCreateJob(item, m_gal, transaction());
+	// Save the new items in Akonadi.
+	Akonadi::ItemCreateJob *job = new Akonadi::ItemCreateJob(item, m_gal);
 	connect(job, SIGNAL(result(KJob *)), SLOT(createGALItemDone(KJob *)));
 }
 
@@ -755,10 +753,6 @@ void ExGalResource::createGALItemDone(KJob *job)
 		// Go back and create then next item.
 		createGALItem();
 	} else {
-		// End the transaction.
-		transaction()->commit();
-		m_transaction = 0;
-
 		// Update the status of the current batch.
 		Akonadi::ItemCreateJob *realJob = dynamic_cast<Akonadi::ItemCreateJob *>(job);
 
@@ -815,26 +809,6 @@ void ExGalResource::updateGALStatusDone(KJob *job)
 	//scheduleCustomTask(this, "retrieveGALBatch", QVariant(), ResourceBase::Append);
 	QMetaObject::invokeMethod(this, "retrieveGALBatch", Qt::QueuedConnection);
 	qCritical() << "updateGALStatusDone:" << __LINE__;
-}
-
-Akonadi::TransactionSequence *ExGalResource::transaction()
-{
-	if (!m_transaction) {
-		m_transaction = new Akonadi::TransactionSequence(this);
-		m_transaction->setAutomaticCommittingEnabled(false);
-		connect(m_transaction, SIGNAL(result(KJob *)), SLOT(transactionDone(KJob *)));
-	}
-	return m_transaction;
-}
- 
-void ExGalResource::transactionDone(KJob *job)
-{
-	if (job->error()) {
-		qCritical() << "transactionDone:" << job->errorString();
-		// handled by base class
-		return;
-	}
-//	emitResult();
 }
 
 /**
