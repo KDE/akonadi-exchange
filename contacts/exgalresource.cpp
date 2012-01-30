@@ -27,6 +27,8 @@
 #include <akonadi/cachepolicy.h>
 #include <akonadi/item.h>
 #include <akonadi/itemcreatejob.h>
+#include <akonadi/itemfetchjob.h>
+#include <akonadi/itemmodifyjob.h>
 #include <KLocalizedString>
 #include <KABC/Address>
 #include <KABC/Addressee>
@@ -724,20 +726,49 @@ void ExGalResource::retrieveGALBatch()
 }
 
 /**
- * Initiate the creation of a single GAL item.
+ * Initiate the creation of a single GAL item by trying to fetch any existing
+ * item.
  * 
- * Next state: @ref createGALItemDone().
+ * Next state: @ref fetchGALItemDone().
  */
 void ExGalResource::createGALItem()
 {
 	Akonadi::Item item = m_galItems.first();
-	m_galItems.removeFirst();
-
-	// Save the new items in Akonadi.
-	Akonadi::ItemCreateJob *job = new Akonadi::ItemCreateJob(item, m_gal);
-	connect(job, SIGNAL(result(KJob *)), SLOT(createGALItemDone(KJob *)));
+	Akonadi::ItemFetchJob *job = new Akonadi::ItemFetchJob(item);
+	connect(job, SIGNAL(result(KJob *)), SLOT(fetchGALItemDone(KJob *)));
 }
 
+/**
+ * Initiate the creation of a single GAL item if we didn't find an existing item
+ * or else modify the existing one.
+ * 
+ * Next state: @ref createGALItemDone().
+ */
+void ExGalResource::fetchGALItemDone(KJob *job)
+{
+	Akonadi::Item item = m_galItems.first();
+	m_galItems.removeFirst();
+
+	// Suppress normal error reporting, since a failed fetch gives us the
+	// error "Unknown error. (Item query returned empty result set)".
+	//if (job->error()) {
+	//	qCritical() << "searchGALItemDone:" << job->errorString();
+	//}
+	Akonadi::ItemFetchJob *searchJob = qobject_cast<Akonadi::ItemFetchJob *>(job);
+	const Akonadi::Item::List contacts = searchJob->items();
+	if (contacts.size()) {
+		// Update the original item in Akonadi.
+		Akonadi::Item originalItem = contacts.first();
+		originalItem.setPayload<KABC::Addressee>(item.payload<KABC::Addressee>());
+		Akonadi::ItemModifyJob *job = new Akonadi::ItemModifyJob(originalItem);
+		connect(job, SIGNAL(result(KJob *)), SLOT(createGALItemDone(KJob *)));
+	} else {
+		// Save the new item in Akonadi.
+		Akonadi::ItemCreateJob *job = new Akonadi::ItemCreateJob(item, m_gal);
+		connect(job, SIGNAL(result(KJob *)), SLOT(createGALItemDone(KJob *)));
+	}
+}
+ 
 /**
  * Complete the creation of a single GAL item.
  * 
@@ -752,10 +783,11 @@ void ExGalResource::createGALItemDone(KJob *job)
 	if (m_galItems.size()) {
 		// Go back and create then next item.
 		createGALItem();
-	} else {
+	} else if (Akonadi::ItemModifyJob *realJob = dynamic_cast<Akonadi::ItemModifyJob *>(job)) {
 		// Update the status of the current batch.
-		Akonadi::ItemCreateJob *realJob = dynamic_cast<Akonadi::ItemCreateJob *>(job);
-
+		updateGALStatus(realJob->item().payload<KABC::Addressee>().name());
+	} else if (Akonadi::ItemCreateJob *realJob = dynamic_cast<Akonadi::ItemCreateJob *>(job)) {
+		// Update the status of the current batch.
 		updateGALStatus(realJob->item().payload<KABC::Addressee>().name());
 	}
 }

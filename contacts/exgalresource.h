@@ -78,6 +78,7 @@ private:
 private Q_SLOTS:
 	void retrieveGALBatch();
 	void createGALItem();
+	void fetchGALItemDone(KJob *job);
 	void createGALItemDone(KJob *job);
 	void updateGALStatus(QString lastAddressee);
 	void updateGALStatusDone(KJob *job);
