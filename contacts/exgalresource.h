@@ -77,11 +77,9 @@ private:
 	volatile Akonadi::CollectionAttributesSynchronizationJob *m_galUpdater;
 	Akonadi::TransactionSequence *m_transaction;
 
-//	void retrieveGALItems();
 	Akonadi::TransactionSequence *transaction();
 
 private Q_SLOTS:
-	//void retrieveGALBatch(const QVariant &arg);
 	void retrieveGALBatch();
 	void createGALItem();
 	void createGALItemDone(KJob *job);

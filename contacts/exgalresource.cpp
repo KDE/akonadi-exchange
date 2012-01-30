@@ -735,9 +735,8 @@ void ExGalResource::createGALItem()
 	Akonadi::Item item = m_galItems.first();
 	m_galItems.removeFirst();
 
-	qCritical() << "createGALItem:" << __LINE__;
-	// Save the new items in Akonadi.
-	Akonadi::ItemCreateJob *job = new Akonadi::ItemCreateJob(item, m_gal, transaction());  
+	// Save the new items in Akonadi within the context of a transaction.
+	Akonadi::ItemCreateJob *job = new Akonadi::ItemCreateJob(item, m_gal, transaction());
 	connect(job, SIGNAL(result(KJob *)), SLOT(createGALItemDone(KJob *)));
 }
 
@@ -752,17 +751,19 @@ void ExGalResource::createGALItemDone(KJob *job)
 	if (job->error()) {
 		qCritical() << "itemCreateJobDone:" << job->errorString();
 	}
-	// emitResult();
 	if (m_galItems.size()) {
-	qCritical() << "createGALItemDone:" << __LINE__;
+		// Go back and create then next item.
 		createGALItem();
 	} else {
+		// End the transaction.
+		transaction()->commit();
+		m_transaction = 0;
+
+		// Update the status of the current batch.
 		Akonadi::ItemCreateJob *realJob = dynamic_cast<Akonadi::ItemCreateJob *>(job);
 
-		qCritical() << "createGALItemDone:" << __LINE__;
 		updateGALStatus(realJob->item().payload<KABC::Addressee>().name());
 	}
-	qCritical() << "createGALItemDone:" << __LINE__;
 }
 
 /**
