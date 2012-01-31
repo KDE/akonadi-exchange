@@ -656,8 +656,7 @@ void ExGalResource::retrieveItems(const Akonadi::Collection &collection)
 		// This request is NOT for the GAL. We don't bother with 
 		// streaming mode.
 		setAutomaticProgressReporting(true);
-		setItemStreamingEnabled(false);
-//		fetchItems(collection, items, deletedItems);
+		fetchItems(collection, items, deletedItems);
 		itemsRetrievedIncremental(items, deletedItems);
 		itemsRetrievalDone();
 		kDebug() << "new/changed items:" << items.size() << "deleted items:" << deletedItems.size();
