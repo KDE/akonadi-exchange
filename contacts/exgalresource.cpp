@@ -696,7 +696,7 @@ void ExGalResource::retrieveGALBatch()
 		// All done!
 		emit status(Running, i18n("GAL entries read"));
 		qCritical() << "retrieveGALBatch:" << __LINE__;
-		updateGALStatus(QString());
+		updateGALStatus();
 		return;
 	}
 	emit percent(percentagePosition);
@@ -793,7 +793,7 @@ void ExGalResource::createGALItemDone(KJob *job)
 }
 
 /**
- * Initiate update of the fetch status of the GAL.
+ * Initiate update of the fetch status of the GAL, see @ref FetchStatusAttribute.
  * 
  * @param lastAddressee		If not empty, the displayName of the last
  * 				item written. If empty, we will write a final
@@ -804,25 +804,21 @@ void ExGalResource::createGALItemDone(KJob *job)
 void ExGalResource::updateGALStatus(QString lastAddressee)
 {
 	FetchStatusAttribute *fetchStatus = new FetchStatusAttribute();
-	qCritical() << "updateGALStatus" << __LINE__;
 
 	if (lastAddressee.isEmpty()) {
 		// Set the modified attribute.
-		fetchStatus->setDisplayName(lastAddressee);
+		fetchStatus->setDateTime(KDateTime::currentUtcDateTime());
 		m_gal.addAttribute(fetchStatus);
 	} else {
 		// Set the modified attribute.
-		fetchStatus->setDateTime(KDateTime::currentUtcDateTime());
+		fetchStatus->setDisplayName(lastAddressee);
 		m_gal.addAttribute(fetchStatus);
 	}
 
-	taskDone();
 	// Push the fetch state out to Akonadi if there is not already a job
 	// running for that.
-	qCritical() << "updateGALStatus" << __LINE__;
 	Akonadi::CollectionAttributesSynchronizationJob *job = new Akonadi::CollectionAttributesSynchronizationJob(m_gal);
 	connect(job, SIGNAL(result(KJob *)), SLOT(updateGALStatusDone(KJob *)));
-	qCritical() << "updateGALStatus" << __LINE__;
 	job->start();
 }
 

@@ -80,7 +80,7 @@ private Q_SLOTS:
 	void createGALItem();
 	void fetchGALItemDone(KJob *job);
 	void createGALItemDone(KJob *job);
-	void updateGALStatus(QString lastAddressee);
+	void updateGALStatus(QString lastAddressee = QString());
 	void updateGALStatusDone(KJob *job);
 };
 
