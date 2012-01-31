@@ -633,14 +633,11 @@ void ExGalResource::retrieveItems(const Akonadi::Collection &collection)
 			FetchStatusAttribute *fetchStatus = static_cast<FetchStatusAttribute *>(m_gal.attribute(FETCH_STATUS)->clone());
 			QString savedDisplayName = fetchStatus->displayName();
 			
-		qCritical() << "GAL retrieveItems task count:" << fetchStatus->dateTime() << fetchStatus->displayName();
 			if (!savedDisplayName.isEmpty()) { 
 				// Seek to the row at or after the point we remembered.
 				emit status(Running, i18n("Seek to GAL at: %1", savedDisplayName));
-				qCritical() << "progress:" << __LINE__;
 				if (!m_connection->GALSeek(savedDisplayName)) {
 					error(i18n("cannot seek to GAL at: %1", savedDisplayName));
-					qCritical() << (i18n("cannot seek to GAL at: %1", savedDisplayName));
 					return;
 				}
 			}
@@ -648,13 +645,11 @@ void ExGalResource::retrieveItems(const Akonadi::Collection &collection)
 		} else {
 			if (!m_connection->GALRewind()) {
 				error(i18n("cannot rewind GAL"));
-				qCritical() << (i18n("cannot rewind GAL"));
 				return;
 			}
 		}
 
-		qCritical() << "GAL count" << __LINE__;
-		//scheduleCustomTask(this, "retrieveGALBatch", QVariant(), ResourceBase::Append);
+		// Start an asynchronous effort to read the GAL.
 		QMetaObject::invokeMethod(this, "retrieveGALBatch", Qt::QueuedConnection);
 		cancelTask();
 	} else {
@@ -675,32 +670,26 @@ void ExGalResource::retrieveItems(const Akonadi::Collection &collection)
  * Next state: If we have read the entire GAL, @ref updateGALStatus for the 
  * last time, otherwise @ref createGALItem().
  */
-//void ExGalResource::retrieveGALBatch(const QVariant &)
 void ExGalResource::retrieveGALBatch()
 {
 	unsigned requestedCount = 300;
-	// Actually do the fetching.
 	struct SRowSet *results = NULL;
 	unsigned percentagePosition;
 
 	// Actually do the fetching.
 	emit status(Running, i18n("Reading GAL"));
-	qCritical() << "retrieveGALBatch:" << __LINE__;
 	if (!m_connection->GALRead(requestedCount, &contactTags, &results, &percentagePosition)) {
-		error(i18n("cannot read GAL: %1", mapiError()));
-		qCritical() << i18n("cannot read GAL: %1", mapiError());
+		error(i18n("cannot read GAL"));
 		return;
 	}
 
 	if (!results) {
 		// All done!
 		emit status(Running, i18n("GAL entries read"));
-		qCritical() << "retrieveGALBatch:" << __LINE__;
 		updateGALStatus();
 		return;
 	}
 	emit percent(percentagePosition);
-		qCritical() << "FetchGALItemsJob:" << __LINE__;
 
 	// For each row, construct an Addressee, and add the item to the list.
 	qCritical() << "FetchGALItemsJob:" << __LINE__ << "rows" << results->cRows;
@@ -709,7 +698,7 @@ void ExGalResource::retrieveGALBatch()
 		KABC::Addressee addressee;
 
 		if (!preparePayload(contact.lpProps, contact.cValues, addressee)) {
-			//emit status(Running, i18n("Skipped malformed GAL entry"));
+			emit status(Running, i18n("Skipped malformed GAL entry"));
 			continue;
 		}
 		Item item(m_itemMimeType);
@@ -832,11 +821,9 @@ void ExGalResource::updateGALStatusDone(KJob *job)
 	if (job->error()) {
 		qCritical() << "updateGALStatusDone:" << job->errorString();
 	}
-	qCritical() << "updateGALStatusDone:" << __LINE__;
-	taskDone();
-	//scheduleCustomTask(this, "retrieveGALBatch", QVariant(), ResourceBase::Append);
+
+	// Go get the next batch.
 	QMetaObject::invokeMethod(this, "retrieveGALBatch", Qt::QueuedConnection);
-	qCritical() << "updateGALStatusDone:" << __LINE__;
 }
 
 /**
