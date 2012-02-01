@@ -56,6 +56,8 @@
 
 #define MINUTES_IN_ONE_DAY (60 * 24)
 
+#define MEASURE_PERFORMANCE 1
+
 #define FETCH_STATUS "FetchStatus"
 
 using namespace Akonadi;
@@ -513,6 +515,7 @@ static bool preparePayload(SPropValue *properties, unsigned propertyCount, KABC:
 	}
 	if (objectType != MAPI_MAILUSER) {
 		//this->objectType = mapiObjectType(objectType);
+		qCritical() << "email" << email << objectType;
 	}
 
 	// Don't override an SMTP address.
@@ -650,6 +653,8 @@ void ExGalResource::retrieveItems(const Akonadi::Collection &collection)
 		}
 
 		// Start an asynchronous effort to read the GAL.
+		m_msExchange = 0;
+		m_msNonExchange = 0;
 		QMetaObject::invokeMethod(this, "retrieveGALBatch", Qt::QueuedConnection);
 		cancelTask();
 	} else {
@@ -677,10 +682,16 @@ void ExGalResource::retrieveGALBatch()
 
 	// Actually do the fetching.
 	emit status(Running, i18n("Reading GAL"));
+#if MEASURE_PERFORMANCE
+	m_msExchange -= QDateTime::currentMSecsSinceEpoch();
+#endif
 	if (!m_connection->GALRead(requestedCount, &contactTags, &results, &percentagePosition)) {
 		error(i18n("cannot read GAL"));
 		return;
 	}
+#if MEASURE_PERFORMANCE
+	m_msExchange += QDateTime::currentMSecsSinceEpoch();
+#endif
 
 	if (!results) {
 		// All done!
@@ -691,7 +702,6 @@ void ExGalResource::retrieveGALBatch()
 	emit percent(percentagePosition);
 
 	// For each row, construct an Addressee, and add the item to the list.
-	qCritical() << "FetchGALItemsJob:" << __LINE__ << "rows" << results->cRows;
 	for (unsigned i = 0; i < results->cRows; i++) {
 		struct SRow &contact = results->aRow[i];
 		KABC::Addressee addressee;
@@ -710,6 +720,9 @@ void ExGalResource::retrieveGALBatch()
 	}
 	MAPIFreeBuffer(results);
 	taskDone();
+#if MEASURE_PERFORMANCE
+	m_msNonExchange -= QDateTime::currentMSecsSinceEpoch();
+#endif
 	createGALItem();
 }
 
@@ -791,6 +804,10 @@ void ExGalResource::createGALItemDone(KJob *job)
  */
 void ExGalResource::updateGALStatus(QString lastAddressee)
 {
+#if MEASURE_PERFORMANCE
+	m_msNonExchange += QDateTime::currentMSecsSinceEpoch();
+	qCritical() << "updateGALStatusDone: Exchange ms:" << m_msExchange << "non Exchange ms:" << m_msNonExchange;
+#endif
 	FetchStatusAttribute *fetchStatus = new FetchStatusAttribute();
 
 	if (lastAddressee.isEmpty()) {

@@ -74,6 +74,8 @@ private:
 	Akonadi::Collection m_gal;
 	Akonadi::Item::List m_galItems;
 	volatile Akonadi::CollectionAttributesSynchronizationJob *m_galUpdater;
+	qint64 m_msExchange;
+	qint64 m_msNonExchange;
 
 private Q_SLOTS:
 	void retrieveGALBatch();
