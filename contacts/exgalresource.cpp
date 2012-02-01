@@ -29,6 +29,7 @@
 #include <akonadi/itemcreatejob.h>
 #include <akonadi/itemfetchjob.h>
 #include <akonadi/itemmodifyjob.h>
+#include <akonadi/transactionsequence.h>
 #include <KLocalizedString>
 #include <KABC/Address>
 #include <KABC/Addressee>
@@ -57,6 +58,7 @@
 #define MINUTES_IN_ONE_DAY (60 * 24)
 
 #define MEASURE_PERFORMANCE 1
+#define BATCH_COMMIT 0
 
 #define FETCH_STATUS "FetchStatus"
 
@@ -561,7 +563,8 @@ ExGalResource::ExGalResource(const QString &id) :
 	MapiResource(id, i18n("Exchange Contacts"), IPF_CONTACT, "IPM.Contact", QString::fromAscii("text/directory")),
 	m_galId(0, 0),
 	m_gal(0),
-	m_galUpdater(0)
+	m_galUpdater(0),
+	m_transaction(0)
 {
 	new SettingsAdaptor(Settings::self());
 	QDBusConnection::sessionBus().registerObject(QLatin1String("/Settings"),
@@ -761,11 +764,11 @@ void ExGalResource::fetchGALItemDone(KJob *job)
 		// Update the original item in Akonadi.
 		Akonadi::Item originalItem = contacts.first();
 		originalItem.setPayload<KABC::Addressee>(item.payload<KABC::Addressee>());
-		Akonadi::ItemModifyJob *job = new Akonadi::ItemModifyJob(originalItem);
+		Akonadi::ItemModifyJob *job = new Akonadi::ItemModifyJob(originalItem, transaction());
 		connect(job, SIGNAL(result(KJob *)), SLOT(createGALItemDone(KJob *)));
 	} else {
 		// Save the new item in Akonadi.
-		Akonadi::ItemCreateJob *job = new Akonadi::ItemCreateJob(item, m_gal);
+		Akonadi::ItemCreateJob *job = new Akonadi::ItemCreateJob(item, m_gal, transaction());
 		connect(job, SIGNAL(result(KJob *)), SLOT(createGALItemDone(KJob *)));
 	}
 }
@@ -781,6 +784,11 @@ void ExGalResource::createGALItemDone(KJob *job)
 	if (job->error()) {
 		qCritical() << "itemCreateJobDone:" << job->errorString();
 	}
+#if !BATCH_COMMIT
+	// End the transaction.
+	transaction()->commit();
+	m_transaction = 0;
+#endif
 	if (m_galItems.size()) {
 		// Go back and create then next item.
 		createGALItem();
@@ -804,6 +812,11 @@ void ExGalResource::createGALItemDone(KJob *job)
  */
 void ExGalResource::updateGALStatus(QString lastAddressee)
 {
+#if BATCH_COMMIT
+	// End the transaction.
+	transaction()->commit();
+	m_transaction = 0;
+#endif
 #if MEASURE_PERFORMANCE
 	m_msNonExchange += QDateTime::currentMSecsSinceEpoch();
 	qCritical() << "updateGALStatusDone: Exchange ms:" << m_msExchange << "non Exchange ms:" << m_msNonExchange;
@@ -840,6 +853,25 @@ void ExGalResource::updateGALStatusDone(KJob *job)
 
 	// Go get the next batch.
 	QMetaObject::invokeMethod(this, "retrieveGALBatch", Qt::QueuedConnection);
+}
+ 
+Akonadi::TransactionSequence *ExGalResource::transaction()
+{
+	if (!m_transaction) {
+		m_transaction = new Akonadi::TransactionSequence(this);
+		m_transaction->setAutomaticCommittingEnabled(false);
+		connect(m_transaction, SIGNAL(result(KJob *)), SLOT(transactionDone(KJob *)));
+	}
+	return m_transaction;
+}
+ 
+void ExGalResource::transactionDone(KJob *job)
+{
+	if (job->error()) {
+		qCritical() << "transactionDone:" << job->errorString();
+		// handled by base class
+		return;
+	}
 }
 
 /**
