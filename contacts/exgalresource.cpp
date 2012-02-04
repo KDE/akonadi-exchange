@@ -58,7 +58,6 @@
 #define MINUTES_IN_ONE_DAY (60 * 24)
 
 #define MEASURE_PERFORMANCE 1
-#define BATCH_COMMIT 0
 
 #define FETCH_STATUS "FetchStatus"
 
@@ -618,7 +617,7 @@ void ExGalResource::retrieveCollections()
 void ExGalResource::retrieveItems(const Akonadi::Collection &collection)
 {
 	Item::List items;
-	Item::List removedItems;
+	Item::List deletedItems;
 
 	if (collection.remoteId() == m_galId.toString()) {
 		if (!logon()) {
@@ -665,10 +664,10 @@ void ExGalResource::retrieveItems(const Akonadi::Collection &collection)
 		// This request is NOT for the GAL. We don't bother with 
 		// streaming mode.
 		setAutomaticProgressReporting(true);
-		fetchItems(collection, items, removedItems);
-		itemsRetrievedIncremental(items, removedItems);
+		fetchItems(collection, items, deletedItems);
+		itemsRetrievedIncremental(items, deletedItems);
 		itemsRetrievalDone();
-		kDebug() << "new/changed items:" << items.size() << "deleted items:" << removedItems.size();
+		kDebug() << "new/changed items:" << items.size() << "deleted items:" << deletedItems.size();
 	}
 }
 
@@ -734,6 +733,8 @@ void ExGalResource::retrieveGALBatch()
 #endif
 
 	// Push the batch into Akonadi.
+	QString lastDisplayName = m_galItems.last().payload<KABC::Addressee>().name();
+	emit status(Running, i18n("Writing backend through item: %1", lastDisplayName));
 	Akonadi::ItemSync *job = new ItemSync(m_gal);
 	connect(job, SIGNAL(result(KJob *)), SLOT(retrieveGALBatchDone(KJob *)));
 	job->setIncrementalSyncItems(m_galItems, Item::List());
@@ -752,7 +753,6 @@ void ExGalResource::retrieveGALBatchDone(KJob *job)
 
 	// Update the status of the current batch.
 	QString lastDisplayName = m_galItems.last().payload<KABC::Addressee>().name();
-	emit status(Running, i18n("Wrote GAL through item: %1", lastDisplayName));
 	updateGALStatus(lastDisplayName);
 }
 
@@ -767,10 +767,6 @@ void ExGalResource::retrieveGALBatchDone(KJob *job)
  */
 void ExGalResource::updateGALStatus(QString lastAddressee)
 {
-#if MEASURE_PERFORMANCE
-	m_msNonExchange += QDateTime::currentMSecsSinceEpoch();
-	qCritical() << "updateGALStatusDone: Exchange ms:" << m_msExchange << "non Exchange ms:" << m_msNonExchange;
-#endif
 	FetchStatusAttribute *fetchStatus = new FetchStatusAttribute();
 
 	if (lastAddressee.isEmpty()) {
@@ -780,6 +776,7 @@ void ExGalResource::updateGALStatus(QString lastAddressee)
 	} else {
 		// Set the modified attribute.
 		fetchStatus->setDisplayName(lastAddressee);
+		emit status(Running, i18n("Updating status with item: %1", lastAddressee));
 		m_gal.addAttribute(fetchStatus);
 	}
 
@@ -797,6 +794,10 @@ void ExGalResource::updateGALStatus(QString lastAddressee)
  */
 void ExGalResource::updateGALStatusDone(KJob *job)
 {
+#if MEASURE_PERFORMANCE
+	m_msNonExchange += QDateTime::currentMSecsSinceEpoch();
+	qCritical() << "updateGALStatusDone: Exchange ms:" << m_msExchange << "non Exchange ms:" << m_msNonExchange;
+#endif
 	if (job->error()) {
 		qCritical() << "updateGALStatusDone:" << job->errorString();
 	}
@@ -858,7 +859,7 @@ void ExGalResource::itemAdded( const Akonadi::Item &item, const Akonadi::Collect
   Q_UNUSED( item );
   Q_UNUSED( collection );
 
-  // TODO: this method is called when somebody else, e.gal. a client application,
+  // TODO: this method is called when somebody else, e.g. a client application,
   // has created an item in a collection managed by your resource.
 
   // NOTE: There is an equivalent method for collections, but it isn't part
@@ -870,7 +871,7 @@ void ExGalResource::itemChanged( const Akonadi::Item &item, const QSet<QByteArra
   Q_UNUSED( item );
   Q_UNUSED( parts );
 
-  // TODO: this method is called when somebody else, e.gal. a client application,
+  // TODO: this method is called when somebody else, e.g. a client application,
   // has changed an item managed by your resource.
 
   // NOTE: There is an equivalent method for collections, but it isn't part
@@ -881,7 +882,7 @@ void ExGalResource::itemRemoved( const Akonadi::Item &item )
 {
   Q_UNUSED( item );
 
-  // TODO: this method is called when somebody else, e.gal. a client application,
+  // TODO: this method is called when somebody else, e.g. a client application,
   // has deleted an item managed by your resource.
 
   // NOTE: There is an equivalent method for collections, but it isn't part
