@@ -20,16 +20,13 @@
 #ifndef EXGALRESOURCE_H
 #define EXGALRESOURCE_H
 
-#include <akonadi/collection.h>
-#include <akonadi/collectionattributessynchronizationjob.h>
-#include <KJob>
-
 #include "mapiresource.h"
 
 namespace Akonadi
 {
-	class CollectionAttributesSynchronizationJob;
+	class Collection;
 }
+class KJob;
 class MapiConnector2;
 
 /**
@@ -63,16 +60,10 @@ protected:
 
 private:
 	/**
-	 * A reserved id is used to represent the GAL.
-	 */
-	const FullId m_galId;
-
-	/**
 	 * A copy of the collection used for the GAL.
 	 */
-	Akonadi::Collection m_gal;
+	class MapiGAL *m_gal;
 	Akonadi::Item::List m_galItems;
-	volatile Akonadi::CollectionAttributesSynchronizationJob *m_galUpdater;
 	qint64 m_msExchange;
 	qint64 m_msNonExchange;
 
