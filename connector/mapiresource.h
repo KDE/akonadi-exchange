@@ -128,7 +128,7 @@ protected:
 	MapiConnector2 *m_connection;
 	bool m_connected;
 
-private:
+protected:
 	/**
 	 * Logon to Exchange. A successful login is cached and subsequent calls
 	 * short-circuited.

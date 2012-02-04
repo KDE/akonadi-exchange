@@ -29,7 +29,6 @@
 namespace Akonadi
 {
 	class CollectionAttributesSynchronizationJob;
-	class TransactionSequence;
 }
 class MapiConnector2;
 
@@ -76,18 +75,12 @@ private:
 	volatile Akonadi::CollectionAttributesSynchronizationJob *m_galUpdater;
 	qint64 m_msExchange;
 	qint64 m_msNonExchange;
-	Akonadi::TransactionSequence *m_transaction;
-
-	Akonadi::TransactionSequence *transaction();
 
 private Q_SLOTS:
 	void retrieveGALBatch();
-	void createGALItem();
-	void fetchGALItemDone(KJob *job);
-	void createGALItemDone(KJob *job);
+	void retrieveGALBatchDone(KJob *job);
 	void updateGALStatus(QString lastAddressee = QString());
 	void updateGALStatusDone(KJob *job);
-	void transactionDone(KJob *job);
 };
 
 #endif
