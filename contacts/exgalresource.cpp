@@ -680,7 +680,11 @@ void ExGalResource::retrieveItems(const Akonadi::Collection &collection)
  */
 void ExGalResource::retrieveGALBatch()
 {
-	unsigned requestedCount = 300;
+	// The size of a batch is arbitrary. On my laptop, we spend much more 
+	// time doing stuff in Akonadi than Exchange, and the number here gives
+	// about 4 seconds in Exchange, and about 10 times than Akonadi. Smaller
+	// numbers tend to make the ratio head up towards 15 times.
+	unsigned requestedCount = 500;
 	struct SRowSet *results = NULL;
 	unsigned percentagePosition;
 
