@@ -394,7 +394,8 @@ public:
 	bool login(QString profile);
 
 	/**
-	 * Factory for getting default folder ids.
+	 * Factory for getting default folder ids. MAPI has two kinds of folder,
+	 * Public and user-specific. This wraps the two together.
 	 */
 	bool defaultFolder(MapiDefaultFolder folderType, mapi_id_t *id);
 

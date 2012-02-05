@@ -262,8 +262,15 @@ QDebug MapiConnector2::debug() const
 
 bool MapiConnector2::defaultFolder(MapiDefaultFolder folderType, mapi_id_t *id)
 {
+	if ((PublicRoot <= folderType) && (folderType <= PublicNNTPArticle)) {
+		if (MAPI_E_SUCCESS != GetDefaultPublicFolder(&m_store, id, folderType)) {
+			error() << "cannot get default public folder: %1" << folderType << mapiError();
+			return false;
+		}
+		return true;
+	}
 	if (MAPI_E_SUCCESS != GetDefaultFolder(&m_store, id, folderType)) {
-		error() << "cannot get default folder" << mapiError();
+		error() << "cannot get default folder: %1" << folderType << mapiError();
 		return false;
 	}
 	return true;
@@ -359,6 +366,10 @@ bool MapiConnector2::login(QString profile)
 	}
 	if (MAPI_E_SUCCESS != OpenMsgStore(m_session, &m_store)) {
 		error() << "cannot open message store" << mapiError();
+		return false;
+	}
+	if (MAPI_E_SUCCESS != OpenPublicFolder(m_session, &m_store)) {
+		error() << "cannot open public folder" << mapiError();
 		return false;
 	}
 	return true;
