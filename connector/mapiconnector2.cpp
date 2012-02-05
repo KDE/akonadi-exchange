@@ -29,6 +29,8 @@
 
 #include <kpimutils/email.h>
 
+#define PUBLIC_FOLDERS 0
+
 /**
  * Display ids in the same format we use when stored in Akonadi.
  */
@@ -244,13 +246,22 @@ MapiConnector2::MapiConnector2() :
 	m_session(0)
 {
 	mapi_object_init(&m_store);
+#if PUBLIC_FOLDERS
+	mapi_object_init(&m_publicFolderStore);
+#endif
 }
 
 MapiConnector2::~MapiConnector2()
 {
 	if (m_session) {
 		Logoff(&m_store);
+#if PUBLIC_FOLDERS
+		Logoff(&m_publicFolderStore);
+#endif
 	}
+#if PUBLIC_FOLDERS
+	mapi_object_release(&m_publicFolderStore);
+#endif
 	mapi_object_release(&m_store);
 }
 
@@ -262,13 +273,15 @@ QDebug MapiConnector2::debug() const
 
 bool MapiConnector2::defaultFolder(MapiDefaultFolder folderType, mapi_id_t *id)
 {
+#if PUBLIC_FOLDERS
 	if ((PublicRoot <= folderType) && (folderType <= PublicNNTPArticle)) {
-		if (MAPI_E_SUCCESS != GetDefaultPublicFolder(&m_store, id, folderType)) {
+		if (MAPI_E_SUCCESS != GetDefaultPublicFolder(&m_publicFolderStore, id, folderType)) {
 			error() << "cannot get default public folder: %1" << folderType << mapiError();
 			return false;
 		}
 		return true;
 	}
+#endif
 	if (MAPI_E_SUCCESS != GetDefaultFolder(&m_store, id, folderType)) {
 		error() << "cannot get default folder: %1" << folderType << mapiError();
 		return false;
@@ -368,10 +381,12 @@ bool MapiConnector2::login(QString profile)
 		error() << "cannot open message store" << mapiError();
 		return false;
 	}
-	if (MAPI_E_SUCCESS != OpenPublicFolder(m_session, &m_store)) {
+#if PUBLIC_FOLDERS
+	if (MAPI_E_SUCCESS != OpenPublicFolder(m_session, &m_publicFolderStore)) {
 		error() << "cannot open public folder" << mapiError();
 		return false;
 	}
+#endif
 	return true;
 }
 

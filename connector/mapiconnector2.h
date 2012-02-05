@@ -433,6 +433,7 @@ private:
 
 	mapi_session *m_session;
 	mapi_object_t m_store;
+	mapi_object_t m_publicFolderStore;
 
 	virtual QDebug debug() const;
 	virtual QDebug error() const;
