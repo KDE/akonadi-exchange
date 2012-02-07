@@ -73,7 +73,8 @@ typedef enum
 
 /**
  * The id for a MAPI object is (a) hierarchical and (b) associated with a 
- * provider.
+ * provider. The provider is set with reference to the @ref MapiDefaultFolder
+ * and then cascaded down to contained items as we recurse down a folder tree. 
  */
 class MapiId : public QPair<mapi_id_t, mapi_id_t>
 {
