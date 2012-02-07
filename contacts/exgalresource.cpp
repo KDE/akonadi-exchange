@@ -44,11 +44,6 @@
 #include "profiledialog.h"
 
 /**
- * Display ids in the same format we use when stored in Akonadi.
- */
-#define ID_BASE 36
-
-/**
  * Set this to 1 to pull all the properties, e.g. to see what a server has
  * available.
  */
@@ -68,7 +63,7 @@ using namespace Akonadi;
 class MapiContact : public MapiMessage, public KABC::Addressee
 {
 public:
-	MapiContact(MapiConnector2 *connection, const char *tallocName, mapi_id_t folderId, mapi_id_t id);
+	MapiContact(MapiConnector2 *connection, const char *tallocName, MapiId &id);
 
 	/**
 	 * Fetch all contact properties.
@@ -565,7 +560,7 @@ class MapiGAL : public Akonadi::Collection
 {
 public:
 	MapiGAL(MapiConnector2 *connection, const QString &profile, QStringList itemMimeType) :
-		m_galId(0, 0),
+		m_galId(QString::fromAscii("2/0/0")),
 		m_profile(profile),
 		m_connection(connection),
 		m_fetchStatus(0)
@@ -586,7 +581,7 @@ public:
 		delete m_fetchStatus;
 	}
 
-	const FullId &id()
+	const MapiId &id() const
 	{
 		return m_galId;
 	}
@@ -691,7 +686,7 @@ private:
 	/**
 	 * A reserved id is used to represent the GAL.
 	 */
-	const FullId m_galId;
+	const MapiId m_galId;
 	QString m_profile;
 	MapiConnector2 *m_connection;
 	FetchStatusAttribute *m_fetchStatus;
@@ -740,6 +735,10 @@ void ExGalResource::retrieveCollections()
 
 	setName(i18n("Exchange Contacts for %1", profile()));
 	collections.append(*m_gal);
+#if 0
+	fetchCollections(PublicOfflineAB, collections);
+	fetchCollections(PublicLocalOfflineAB, collections);
+#endif
 	fetchCollections(Contacts, collections);
 
 	// Notify Akonadi about the new collections.
@@ -751,6 +750,7 @@ void ExGalResource::retrieveItems(const Akonadi::Collection &collection)
 	Item::List items;
 	Item::List deletedItems;
 
+	kError() << __FUNCTION__ << collection.name();
 	if (collection.remoteId() == m_gal->id().toString()) {
 		// Assume the GAL is going to take a while to fetch.
 		setAutomaticProgressReporting(false);
@@ -986,22 +986,22 @@ void ExGalResource::itemRemoved( const Akonadi::Item &item )
   // of this template code to keep it simple
 }
 
-MapiContact::MapiContact(MapiConnector2 *connector, const char *tallocName, mapi_id_t folderId, mapi_id_t id) :
-	MapiMessage(connector, tallocName, folderId, id),
+MapiContact::MapiContact(MapiConnector2 *connector, const char *tallocName, MapiId &id) :
+	MapiMessage(connector, tallocName, id),
 	KABC::Addressee()
 {
 }
 
 QDebug MapiContact::debug() const
 {
-	static QString prefix = QString::fromAscii("MapiContact: %1/%2:");
-	return MapiObject::debug(prefix.arg(m_folderId, 0, ID_BASE).arg(m_id, 0, ID_BASE)) /*<< title*/;
+	static QString prefix = QString::fromAscii("MapiContact: %1:");
+	return MapiObject::debug(prefix.arg(m_id.toString()));
 }
 
 QDebug MapiContact::error() const
 {
-	static QString prefix = QString::fromAscii("MapiContact: %1/%2:");
-	return MapiObject::error(prefix.arg(m_folderId, 0, ID_BASE).arg(m_id, 0, ID_BASE)) /*<< title*/;
+	static QString prefix = QString::fromAscii("MapiContact: %1:");
+	return MapiObject::error(prefix.arg(m_id.toString()));
 }
 
 bool MapiContact::propertiesPull(QVector<int> &tags, const bool tagsAppended, bool pullAll)

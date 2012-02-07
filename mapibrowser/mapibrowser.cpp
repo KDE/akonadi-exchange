@@ -32,19 +32,6 @@
 #include "mapiconnector2.h"
 #include "profiledialog.h"
 
-/**
- * We store all objects in Akonadi using the densest string representation to hand.
- */
-static QString toStringId(qulonglong id)
-{
-	return QString::number(id, 36);
-}
-
-static qulonglong fromStringId(const QString &id)
-{
-	return id.toULongLong(0, 36);
-}
-
 mapibrowser::mapibrowser()
 {
 	main = new MainWindow(this);
@@ -102,8 +89,8 @@ void mapibrowser::onRefreshTree()
 		return;
 	}
 
-	mapi_id_t rootId;
-	if (!con.defaultFolder(TopInformationStore, &rootId))
+	MapiId rootId(&con, TopInformationStore);
+	if (!rootId.isValid())
 	{
 		QMessageBox::warning(this, QString::fromLocal8Bit("Error"), QString::fromLocal8Bit("cannot find Exchange folder root"));
 		return;
@@ -125,7 +112,7 @@ void mapibrowser::onRefreshTree()
 	foreach (const MapiFolder *data, list) {
 		QTreeWidgetItem *item = new QTreeWidgetItem(root);
 		item->setText(0, data->name);
-		item->setText(1, toStringId(data->id()));
+		item->setText(1, data->id().toString());
 		delete data;
 	}
 
@@ -152,7 +139,8 @@ void mapibrowser::itemDoubleClicked(QTreeWidgetItem* clickedItem, int )
 		return;
 	}
 
-	MapiFolder parentFolder(&con, "mapibrowser::itemDoubleClicked", fromStringId(remoteId));
+	MapiId id(remoteId);
+	MapiFolder parentFolder(&con, "mapibrowser::itemDoubleClicked", id);
 	if (!parentFolder.open()) {
 		return;
 	}
@@ -170,7 +158,7 @@ void mapibrowser::itemDoubleClicked(QTreeWidgetItem* clickedItem, int )
 	int row=0;
 	foreach (const MapiItem *data, list) {
 		QTableWidgetItem *newItem;
-		newItem = new QTableWidgetItem(toStringId(data->id()));
+		newItem = new QTableWidgetItem(data->id().toString());
 		main->tableWidget->setItem(row, 0, newItem);
 		newItem = new QTableWidgetItem(data->name());
 		main->tableWidget->setItem(row, 1, newItem);
@@ -207,8 +195,10 @@ void mapibrowser::itemDoubleClicked(QTableWidgetItem* clickedItem)
 	appoint.propertiesPull();
 // JUST FOR DEBUG --END--
 #endif
-	
-	MapiMessage message(&con, "mapibrowser::itemDoubleClicked", fromStringId(folderId), fromStringId(messageId));
+	// For now, hardcode the provider to EMSDB.
+	QString remoteId = QString::fromAscii("1/%1/%2").arg(folderId).arg(messageId);
+	MapiId id(remoteId);
+	MapiMessage message(&con, "mapibrowser::itemDoubleClicked", id);
 	if (!message.open()) {
 		QMessageBox::warning(this, QString::fromLocal8Bit("Error"), QString::fromLocal8Bit("open failed!\n")+folderId+QString::fromLocal8Bit(":")+messageId);
 		return;

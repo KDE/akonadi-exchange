@@ -36,11 +36,6 @@
 #include "profiledialog.h"
 
 /**
- * Display ids in the same format we use when stored in Akonadi.
- */
-#define ID_BASE 36
-
-/**
  * Set this to 1 to pull all the properties, e.g. to see what a server has
  * available.
  */
@@ -60,7 +55,7 @@ using namespace Akonadi;
 class MapiAppointment : public MapiMessage
 {
 public:
-	MapiAppointment(MapiConnector2 *connection, const char *tallocName, mapi_id_t folderId, mapi_id_t id);
+	MapiAppointment(MapiConnector2 *connection, const char *tallocName, MapiId &id);
 
 	/**
 	 * Fetch all properties.
@@ -371,21 +366,21 @@ void ExCalResource::createKCalRecurrency(KCal::Recurrence* rec, const MapiRecurr
 	} 
 }
 
-MapiAppointment::MapiAppointment(MapiConnector2 *connector, const char *tallocName, mapi_id_t folderId, mapi_id_t id) :
-	MapiMessage(connector, tallocName, folderId, id)
+MapiAppointment::MapiAppointment(MapiConnector2 *connector, const char *tallocName, MapiId &id) :
+	MapiMessage(connector, tallocName, id)
 {
 }
 
 QDebug MapiAppointment::debug() const
 {
-	static QString prefix = QString::fromAscii("MapiAppointment: %1/%2:");
-	return MapiObject::debug(prefix.arg(m_folderId, 0, ID_BASE).arg(m_id, 0, ID_BASE)) /*<< title*/;
+	static QString prefix = QString::fromAscii("MapiAppointment: %1:");
+	return MapiObject::debug(prefix.arg(m_id.toString()));
 }
 
 QDebug MapiAppointment::error() const
 {
-	static QString prefix = QString::fromAscii("MapiAppointment: %1/%2:");
-	return MapiObject::error(prefix.arg(m_folderId, 0, ID_BASE).arg(m_id, 0, ID_BASE)) /*<< title*/;
+	static QString prefix = QString::fromAscii("MapiAppointment: %1:");
+	return MapiObject::error(prefix.arg(m_id.toString()));
 }
 
 bool MapiAppointment::debugRecurrencyPattern(RecurrencePattern *pattern)

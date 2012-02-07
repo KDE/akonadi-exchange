@@ -42,11 +42,6 @@
 #include "profiledialog.h"
 
 /**
- * Display ids in the same format we use when stored in Akonadi.
- */
-#define ID_BASE 36
-
-/**
  * Set this to 1 to pull all the properties, e.g. to see what a server has
  * available.
  */
@@ -143,7 +138,7 @@ using namespace Akonadi;
 class MapiNote : public MapiMessage, public KMime::Message
 {
 public:
-	MapiNote(MapiConnector2 *connection, const char *tallocName, mapi_id_t folderId, mapi_id_t id);
+	MapiNote(MapiConnector2 *connection, const char *tallocName, MapiId &id);
 
 	virtual ~MapiNote();
 
@@ -239,7 +234,7 @@ protected:
 class MapiEmbeddedNote: public MapiNote
 {
 public:
-	MapiEmbeddedNote(MapiConnector2 *connector, const char *tallocName, mapi_id_t grandParentId, mapi_id_t parentAttachmentId, mapi_object_t *parentAttachment);
+	MapiEmbeddedNote(MapiConnector2 *connector, const char *tallocName, MapiId &id, mapi_object_t *parentAttachment);
 
 	bool open();
 
@@ -500,8 +495,8 @@ void ExMailResource::itemRemoved( const Akonadi::Item &item )
   // of this template code to keep it simple
 }
 
-MapiEmbeddedNote::MapiEmbeddedNote(MapiConnector2 *connector, const char *tallocName, mapi_id_t grandParentId, mapi_id_t parentAttachmentId, mapi_object_t *parentAttachment) :
-	MapiNote(connector, tallocName, grandParentId, parentAttachmentId),
+MapiEmbeddedNote::MapiEmbeddedNote(MapiConnector2 *connector, const char *tallocName, MapiId &id, mapi_object_t *parentAttachment) :
+	MapiNote(connector, tallocName, id),
 	m_parentAttachment(parentAttachment)
 {
 }
@@ -561,8 +556,8 @@ bool MapiEmbeddedNote::propertiesPull()
 }
 #endif
 
-MapiNote::MapiNote(MapiConnector2 *connector, const char *tallocName, mapi_id_t folderId, mapi_id_t id) :
-	MapiMessage(connector, tallocName, folderId, id),
+MapiNote::MapiNote(MapiConnector2 *connector, const char *tallocName, MapiId &id) :
+	MapiMessage(connector, tallocName, id),
 	KMime::Message()
 {
 	mapi_object_init(&m_attachments);
@@ -577,14 +572,14 @@ MapiNote::~MapiNote()
 
 QDebug MapiNote::debug() const
 {
-	static QString prefix = QString::fromAscii("MapiNote: %1/%2:");
-	return MapiObject::debug(prefix.arg(m_folderId, 0, ID_BASE).arg(m_id, 0, ID_BASE)) /*<< title*/;
+	static QString prefix = QString::fromAscii("MapiNote: %1:");
+	return MapiObject::debug(prefix.arg(m_id.toString()));
 }
 
 QDebug MapiNote::error() const
 {
-	static QString prefix = QString::fromAscii("MapiNote: %1/%2");
-	return MapiObject::error(prefix.arg(m_folderId, 0, ID_BASE).arg(m_id, 0, ID_BASE)) /*<< title*/;
+	static QString prefix = QString::fromAscii("MapiNote: %1");
+	return MapiObject::error(prefix.arg(m_id.toString()));
 }
 
 /**
@@ -1012,7 +1007,10 @@ DONE:
 					error() << "cannot open embedded attachment" << mapiError();
 					return false;
 				}
-				embeddedMsg = new MapiEmbeddedNote(m_connection, "MapiEmbeddedNote", m_id, (mapi_id_t)number, &m_attachment);
+				{
+				MapiId attachmentId(m_id, (mapi_id_t)number);
+				embeddedMsg = new MapiEmbeddedNote(m_connection, "MapiEmbeddedNote", attachmentId, &m_attachment);
+				}
 				if (!embeddedMsg->open()) {
 					return false;
 				}

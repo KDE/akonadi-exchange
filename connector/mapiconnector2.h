@@ -72,6 +72,47 @@ typedef enum
 } MapiDefaultFolder;
 
 /**
+ * The id for a MAPI object is (a) hierarchical and (b) associated with a 
+ * provider.
+ */
+class MapiId : public QPair<mapi_id_t, mapi_id_t>
+{
+public:
+	/**
+	 * For a default folder.
+	 */
+	MapiId(class MapiConnector2 *connection, MapiDefaultFolder folderType);
+
+	/**
+	 * For a child object.
+	 */
+	MapiId(const MapiId &parent, const mapi_id_t &child);
+
+	/**
+	 * From an Akonadi id.
+	 */
+	MapiId(const QString &id);
+
+	/**
+	 * To Akonadi id.
+	 */
+	QString toString() const;
+
+	bool isValid() const;
+
+	static const QChar fidIdSeparator;
+
+private:
+	enum Provider
+	{
+		INVALID,
+		EMSDB,
+		NSPI
+	} m_provider;
+	friend class MapiConnector2;
+};
+
+/**
  * Stringified errors.
  */
 extern QString mapiError();
@@ -397,7 +438,7 @@ public:
 	 * Factory for getting default folder ids. MAPI has two kinds of folder,
 	 * Public and user-specific. This wraps the two together.
 	 */
-	bool defaultFolder(MapiDefaultFolder folderType, mapi_id_t *id);
+	bool defaultFolder(MapiDefaultFolder folderType, MapiId *id);
 
 	/**
 	 * How many entries are there in the GAL?
@@ -414,9 +455,17 @@ public:
 
 	bool GALRewind();
 
-	mapi_object_t *d()
+	mapi_object_t *store(const MapiId &id)
 	{
-		return &m_store;
+		switch (id.m_provider)
+		{
+		case MapiId::EMSDB:
+			return &m_store;
+		case MapiId::NSPI:
+			return &m_nspiStore;
+		default:
+			return 0;
+		}
 	}
 
 	/**
@@ -433,7 +482,7 @@ private:
 
 	mapi_session *m_session;
 	mapi_object_t m_store;
-	mapi_object_t m_publicFolderStore;
+	mapi_object_t m_nspiStore;
 
 	virtual QDebug debug() const;
 	virtual QDebug error() const;
@@ -446,13 +495,13 @@ private:
 class MapiObject : protected TallocContext
 {
 public:
-	MapiObject(MapiConnector2 *connection, const char *tallocName, mapi_id_t id);
+	MapiObject(MapiConnector2 *connection, const char *tallocName, MapiId &id);
 
 	virtual ~MapiObject();
 
 	mapi_object_t *d() const;
 
-	mapi_id_t id() const;
+	const MapiId &id() const;
 
 	virtual bool open() = 0;
 
@@ -519,7 +568,7 @@ public:
 
 protected:
 	MapiConnector2 *m_connection;
-	const mapi_id_t m_id;
+	const MapiId m_id;
 	struct SPropValue *m_properties;
 	uint32_t m_propertyCount;
 	mutable mapi_object_t m_object;
@@ -556,12 +605,12 @@ private:
 class MapiItem
 {
 public:
-	MapiItem(mapi_id_t id, QString &name, QDateTime &modified);
+	MapiItem(const MapiId &id, QString &name, QDateTime &modified);
 
 	/**
 	 * The id of the full item.
 	 */
-	mapi_id_t id() const;
+	const MapiId &id() const;
 
 	/**
 	 * The name of this item.
@@ -574,7 +623,7 @@ public:
 	QDateTime modified() const;
 
 private:
-	const mapi_id_t m_id;
+	const MapiId m_id;
 	const QString m_name;
 	const QDateTime m_modified;
 };
@@ -586,7 +635,7 @@ private:
 class MapiFolder : public MapiObject
 {
 public:
-	MapiFolder(MapiConnector2 *connection, const char *tallocName, mapi_id_t id);
+	MapiFolder(MapiConnector2 *connection, const char *tallocName, MapiId &id);
 
 	virtual ~MapiFolder();
 
@@ -629,14 +678,9 @@ private:
 class MapiMessage : public MapiObject
 {
 public:
-	MapiMessage(MapiConnector2 *connection, const char *tallocName, mapi_id_t folderId, mapi_id_t id);
+	MapiMessage(MapiConnector2 *connection, const char *tallocName, MapiId &id);
 
 	virtual bool open();
-
-	/**
-	 * The folderId of the item.
-	 */
-	mapi_id_t folderId() const;
 
 	/**
 	 * Fetch all properties.
@@ -661,7 +705,6 @@ public:
 	void addUniqueRecipient(const char *source, MapiRecipient &candidate);
 
 protected:
-	const mapi_id_t m_folderId;
 	QList<MapiRecipient> m_recipients;
 
 	/**

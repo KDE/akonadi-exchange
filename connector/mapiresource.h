@@ -30,27 +30,6 @@ class MapiFolder;
 class MapiMessage;
 
 /**
- * Represent a "full", i.e. hierarchical id.
- */
-class FullId : public QPair<qulonglong, qulonglong>
-{
-public:
-	FullId(qulonglong f, qulonglong s);
-
-	/**
-	 * From an Akonadi id.
-	 */
-	FullId(const QString &id);
-
-	/**
-	 * To Akonadi id.
-	 */
-	QString toString() const;
-
-	static const QChar fidIdSeparator;
-};
-
-/**
  * The purpose of this class is to actas a base for individual resources which
  * implement MAPI services. It hides the networking/logon and other details
  * as much as possible.
@@ -62,7 +41,12 @@ class MapiResource :
 Q_OBJECT
 
 public:
-	MapiResource(const QString &id, const QString &desktopName, const char *mapiFolderFilter, const char *mapiMessageType, const QString &itemMimeType);
+	/**
+	 * @param folderFilter	Folder filter (i.e. an IPF_xxx value, which 
+	 * 			matches a PidTagContainerClass). Set to the 
+	 * 			empty string if no filtering is needed.
+	 */
+	MapiResource(const QString &id, const QString &desktopName, const char *folderFilter, const char *messageType, const QString &itemMimeType);
 	virtual ~MapiResource();
 
 protected:
@@ -74,12 +58,9 @@ protected:
 
 	/**
 	 * Recursively find all folders starting at the given root which match
-	 * the given filter (i.e. an IPF_xxx value, which matches a 
-	 * PidTagContainerClass, or null).
+	 * the given filter.
 	 * 
 	 * @param rootFolder 	Identifies where to start the search.
-	 * @param filter	The the needed filter. Set to the empty string 
-	 * 			if no filtering is needed.
 	 * @param collections	List to which any matches are to be appended.
 	 */
 	void fetchCollections(MapiDefaultFolder rootFolder, Akonadi::Collection::List &collections);
@@ -149,15 +130,15 @@ protected:
 template <class Message>
 Message *MapiResource::fetchItem(const Akonadi::Item &itemOrig)
 {
-	kError() << "fetch item:" << currentCollection().name() << FullId::fidIdSeparator << itemOrig.id() <<
+	kError() << "fetch item:" << currentCollection().name() << itemOrig.id() <<
 			", " << itemOrig.remoteId();
 
 	if (!logon()) {
 		return 0;
 	}
 
-	FullId remoteId(itemOrig.remoteId());
-	Message *message = new Message(m_connection, "MapiResource::retrieveItem", remoteId.first, remoteId.second);
+	MapiId remoteId(itemOrig.remoteId());
+	Message *message = new Message(m_connection, "MapiResource::retrieveItem", remoteId);
 	if (!message->open()) {
 		kError() << "open failed!";
 		emit status(Broken, i18n("Unable to open item: %1/%2", currentCollection().name(), itemOrig.id()));

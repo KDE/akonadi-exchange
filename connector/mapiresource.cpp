@@ -34,53 +34,12 @@
 
 #include "mapiconnector2.h"
 
-/**
- * Display ids in the same format we use when stored in Akonadi.
- */
-#define ID_BASE 36
-
 using namespace Akonadi;
 
-/**
- * We store all objects in Akonadi using the densest string representation to hand.
- */
-static QString toStringId(qulonglong id)
-{
-	return QString::number(id, ID_BASE);
-}
-
-static qulonglong fromStringId(const QString &id)
-{
-	return id.toULongLong(0, ID_BASE);
-}
-
-/**
- * We store all objects in Akonadi using the densest string representation to hand.
- */
-const QChar FullId::fidIdSeparator = QChar::fromAscii('/');
-
-FullId::FullId(qulonglong f, qulonglong s)
-{
-	first = f;
-	second = s;
-}
-
-FullId::FullId(const QString &id)
-{
-	int separator = id.indexOf(fidIdSeparator);
-	first = fromStringId(id.left(separator));
-	second = fromStringId(id.mid(separator + 1));
-}
-
-QString FullId::toString() const
-{
-	return toStringId(first).append(fidIdSeparator).append(toStringId(second));
-}
-
-MapiResource::MapiResource(const QString &id, const QString &desktopName, const char *mapiFolderFilter, const char *mapiMessageType, const QString &itemMimeType) :
+MapiResource::MapiResource(const QString &id, const QString &desktopName, const char *folderFilter, const char *messageType, const QString &itemMimeType) :
 	ResourceBase(id),
-	m_mapiFolderFilter(QString::fromAscii(mapiFolderFilter)),
-	m_mapiMessageType(QString::fromAscii(mapiMessageType)),
+	m_mapiFolderFilter(QString::fromAscii(folderFilter)),
+	m_mapiMessageType(QString::fromAscii(messageType)),
 	m_itemMimeType(itemMimeType),
 	m_connection(new MapiConnector2()),
 	m_connected(false)
@@ -119,7 +78,7 @@ void MapiResource::error(const QString &message)
 void MapiResource::error(const MapiFolder &folder, const QString &body)
 {
 	static QString prefix = QString::fromAscii("Error %1: %2");
-	QString message = prefix.arg(toStringId(folder.id())).arg(body);
+	QString message = prefix.arg(folder.id().toString()).arg(body);
 
 	error(message);
 }
@@ -134,8 +93,8 @@ void MapiResource::error(const Akonadi::Collection &collection, const QString &b
 
 void MapiResource::error(const MapiMessage &msg, const QString &body)
 {
-	static QString prefix = QString::fromAscii("Error %1/%2: %3");
-	QString message = prefix.arg(toStringId(msg.folderId())).arg(toStringId(msg.id())).arg(body);
+	static QString prefix = QString::fromAscii("Error %1: %2");
+	QString message = prefix.arg(msg.id().toString()).arg(body);
 
 	error(message);
 }
@@ -151,19 +110,18 @@ void MapiResource::fetchCollections(MapiDefaultFolder rootFolder, Akonadi::Colle
 	}
 
 	// create the new collection
-	mapi_id_t rootId;
-	if (!m_connection->defaultFolder(rootFolder, &rootId))
+	MapiId rootId(m_connection, rootFolder);
+	kError() << "default folder:" << rootId.toString();
+	if (!rootId.isValid())
 	{
 		error(i18n("cannot find Exchange folder root"));
 		return;
 	}
 	Collection root;
-	FullId remoteId(0, rootId);
 	QStringList contentTypes;
-
 	contentTypes << m_itemMimeType << Akonadi::Collection::mimeType();
 	root.setName(name());
-	root.setRemoteId(remoteId.toString());
+	root.setRemoteId(rootId.toString());
 	root.setParentCollection(Collection::root());
 	root.setContentMimeTypes(contentTypes);
 	root.setRights(Akonadi::Collection::ReadOnly);
@@ -176,8 +134,9 @@ void MapiResource::fetchCollections(const QString &path, const Collection &paren
 {
 	kDebug() << "fetch collections in:" << path;
 
-	FullId parentRemoteId(parent.remoteId());
-	MapiFolder parentFolder(m_connection, "MapiResource::retrieveCollection", parentRemoteId.second);
+	MapiId parentId(parent.remoteId());
+	kError() << "parent folder:" << parentId.toString();
+	MapiFolder parentFolder(m_connection, "MapiResource::retrieveCollection", parentId);
 	if (!parentFolder.open()) {
 		error(parentFolder, i18n("cannot open Exchange folder list"));
 		return;
@@ -196,10 +155,10 @@ void MapiResource::fetchCollections(const QString &path, const Collection &paren
 	contentTypes << m_itemMimeType << Akonadi::Collection::mimeType();
 	foreach (MapiFolder *data, list) {
 		Collection child;
-		FullId remoteId(parentRemoteId.second, data->id());
+	kError() << "child folder:" << data->id().toString();
 
 		child.setName(data->name);
-		child.setRemoteId(remoteId.toString());
+		child.setRemoteId(data->id().toString());
 		child.setParentCollection(parent);
 		child.setContentMimeTypes(contentTypes);
 		collections.append(child);
@@ -222,8 +181,8 @@ void MapiResource::fetchItems(const Akonadi::Collection &collection, Item::List 
 	}
 
 	// Find all item that are already in this collection in Akonadi.
-	QSet<FullId> knownRemoteIds;
-	QMap<FullId, Item> knownItems;
+	QSet<MapiId> knownRemoteIds;
+	QMap<MapiId, Item> knownItems;
 	{
 		emit status(Running, i18n("Fetching items from Akonadi cache"));
 		ItemFetchJob *fetch = new ItemFetchJob( collection );
@@ -241,15 +200,16 @@ void MapiResource::fetchItems(const Akonadi::Collection &collection, Item::List 
 		Item::List existingItems = fetch->items();
 		foreach (Item item, existingItems) {
 			// store all the items that we already know
-			FullId remoteId(item.remoteId());
-			knownRemoteIds.insert(remoteId);
-			knownItems.insert(remoteId, item);
+			MapiId id(item.remoteId());
+	kError() << "child item:" << id.toString();
+			knownRemoteIds.insert(id);
+			knownItems.insert(id, item);
 		}
 	}
 	kError() << "knownRemoteIds:" << knownRemoteIds.size();
 
-	FullId parentRemoteId(collection.remoteId());
-	MapiFolder parentFolder(m_connection, "MapiResource::retrieveItems", parentRemoteId.second);
+	MapiId parentId(collection.remoteId());
+	MapiFolder parentFolder(m_connection, "MapiResource::retrieveItems", parentId);
 	if (!parentFolder.open()) {
 		error(collection, i18n("unable to open collection"));
 		return;
@@ -264,10 +224,10 @@ void MapiResource::fetchItems(const Akonadi::Collection &collection, Item::List 
 	}
 	kError() << "fetched:" << list.size() << "items from collection:" << collection.name();
 
-	QSet<FullId> checkedRemoteIds;
+	QSet<MapiId> checkedRemoteIds;
 	// run though all the found data...
 	foreach (MapiItem *data, list) {
-		FullId remoteId(parentRemoteId.second, data->id());
+		MapiId remoteId(data->id());
 		checkedRemoteIds << remoteId; // store for later use
 
 		if (!knownRemoteIds.contains(remoteId)) {
@@ -303,7 +263,7 @@ void MapiResource::fetchItems(const Akonadi::Collection &collection, Item::List 
 	// now check if some of the items need to be removed
 	knownRemoteIds.subtract(checkedRemoteIds);
 
-	foreach (const FullId &remoteId, knownRemoteIds) {
+	foreach (const MapiId &remoteId, knownRemoteIds) {
 		deletedItems << knownItems.value(remoteId);
 	}
 

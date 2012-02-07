@@ -29,13 +29,6 @@
 
 #include <kpimutils/email.h>
 
-#define PUBLIC_FOLDERS 0
-
-/**
- * Display ids in the same format we use when stored in Akonadi.
- */
-#define ID_BASE 36
-
 #define CASE_PREFER_A_OVER_B(a, b, lvalue, rvalue) \
 case b: \
 	if (lvalue.isEmpty()) { \
@@ -246,22 +239,17 @@ MapiConnector2::MapiConnector2() :
 	m_session(0)
 {
 	mapi_object_init(&m_store);
-#if PUBLIC_FOLDERS
-	mapi_object_init(&m_publicFolderStore);
-#endif
+	mapi_object_init(&m_nspiStore);
 }
 
 MapiConnector2::~MapiConnector2()
 {
+	// TODO The calls to tidy up m_nspiStore seem to break things.
 	if (m_session) {
+		//Logoff(&m_nspiStore);
 		Logoff(&m_store);
-#if PUBLIC_FOLDERS
-		Logoff(&m_publicFolderStore);
-#endif
 	}
-#if PUBLIC_FOLDERS
-	mapi_object_release(&m_publicFolderStore);
-#endif
+	//mapi_object_release(&m_nspiStore);
 	mapi_object_release(&m_store);
 }
 
@@ -271,21 +259,29 @@ QDebug MapiConnector2::debug() const
 	return TallocContext::debug(prefix);
 }
 
-bool MapiConnector2::defaultFolder(MapiDefaultFolder folderType, mapi_id_t *id)
+bool MapiConnector2::defaultFolder(MapiDefaultFolder folderType, MapiId *id)
 {
-#if PUBLIC_FOLDERS
+	// In case we fail...
+	id->m_provider = MapiId::INVALID;
+
+	// NSPI-based assets.
 	if ((PublicRoot <= folderType) && (folderType <= PublicNNTPArticle)) {
-		if (MAPI_E_SUCCESS != GetDefaultPublicFolder(&m_publicFolderStore, id, folderType)) {
+		if (MAPI_E_SUCCESS != GetDefaultPublicFolder(&m_nspiStore, &id->second, folderType)) {
 			error() << "cannot get default public folder: %1" << folderType << mapiError();
 			return false;
 		}
+		id->first = 0;
+		id->m_provider = MapiId::NSPI;
 		return true;
 	}
-#endif
-	if (MAPI_E_SUCCESS != GetDefaultFolder(&m_store, id, folderType)) {
+
+	// EMSDB-based assets.
+	if (MAPI_E_SUCCESS != GetDefaultFolder(&m_store, &id->second, folderType)) {
 		error() << "cannot get default folder: %1" << folderType << mapiError();
 		return false;
 	}
+	id->first = 0;
+	id->m_provider = MapiId::EMSDB;
 	return true;
 }
 
@@ -381,12 +377,10 @@ bool MapiConnector2::login(QString profile)
 		error() << "cannot open message store" << mapiError();
 		return false;
 	}
-#if PUBLIC_FOLDERS
-	if (MAPI_E_SUCCESS != OpenPublicFolder(m_session, &m_publicFolderStore)) {
+	if (MAPI_E_SUCCESS != OpenPublicFolder(m_session, &m_nspiStore)) {
 		error() << "cannot open public folder" << mapiError();
 		return false;
 	}
-#endif
 	return true;
 }
 
@@ -400,12 +394,12 @@ bool MapiConnector2::resolveNames(const char *names[], SPropTagArray *tags,
 	return true;
 }
 
-MapiFolder::MapiFolder(MapiConnector2 *connection, const char *tallocName, mapi_id_t id) :
+MapiFolder::MapiFolder(MapiConnector2 *connection, const char *tallocName, MapiId &id) :
 	MapiObject(connection, tallocName, id)
 {
 	mapi_object_init(&m_contents);
 	// A temporary name.
-	name = QString::number(id, ID_BASE);
+	name = id.toString();
 }
 
 MapiFolder::~MapiFolder()
@@ -416,13 +410,13 @@ MapiFolder::~MapiFolder()
 QDebug MapiFolder::debug() const
 {
 	static QString prefix = QString::fromAscii("MapiFolder: %1:");
-	return MapiObject::debug(prefix.arg(m_id, 0, ID_BASE));
+	return MapiObject::debug(prefix.arg(m_id.toString()));
 }
 
 QDebug MapiFolder::error() const
 {
 	static QString prefix = QString::fromAscii("MapiFolder: %1:");
-	return MapiObject::error(prefix.arg(m_id, 0, ID_BASE));
+	return MapiObject::error(prefix.arg(m_id.toString()));
 }
 
 bool MapiFolder::childrenPull(QList<MapiFolder *> &children, const QString &filter)
@@ -488,7 +482,8 @@ bool MapiFolder::childrenPull(QList<MapiFolder *> &children, const QString &filt
 			}
 
 			// Add the entry to the output list!
-			MapiFolder *data = new MapiFolder(m_connection, "MapiFolder::childrenPull", fid);
+			MapiId folderId(m_id, fid);
+			MapiFolder *data = new MapiFolder(m_connection, "MapiFolder::childrenPull", folderId);
 			data->name = name;
 			children.append(data);
 		}
@@ -555,7 +550,8 @@ bool MapiFolder::childrenPull(QList<MapiItem *> &children)
 			}
 
 			// Add the entry to the output list!
-			MapiItem *data = new MapiItem(id, name, modified);
+			MapiId itemId(m_id, id);
+			MapiItem *data = new MapiItem(itemId, name, modified);
 			children.append(data);
 			//TODO Just for debugging (in case the content list ist very long)
 			//if (i >= 10) break;
@@ -566,21 +562,65 @@ bool MapiFolder::childrenPull(QList<MapiItem *> &children)
 
 bool MapiFolder::open()
 {
-	if (MAPI_E_SUCCESS != OpenFolder(m_connection->d(), m_id, &m_object)) {
+	if (MAPI_E_SUCCESS != OpenFolder(m_connection->store(m_id), m_id.second, &m_object)) {
 		error() << "cannot open folder" << m_id << mapiError();
 		return false;
 	}
 	return true;
 }
 
-MapiItem::MapiItem(mapi_id_t id, QString &name, QDateTime &modified) :
+/**
+ * We store all objects in Akonadi using the densest string representation to hand:
+ * 
+ * 	(0|1)/base-36-parentId/base-36-id
+ * 
+ * where the leading 0|1 signifies whether the provider is EMSDB or NSPI.
+ */
+const QChar MapiId::fidIdSeparator = QChar::fromAscii('/');
+
+#define ID_BASE 36
+
+MapiId::MapiId(class MapiConnector2 *connection, MapiDefaultFolder folderType)
+{
+	connection->defaultFolder(folderType, this);
+}
+
+MapiId::MapiId(const MapiId &parent, const mapi_id_t &child)
+{
+	m_provider = parent.m_provider;
+	first = parent.second;
+	second = child;
+}
+
+MapiId::MapiId(const QString &id)
+{
+	m_provider = (Provider)id.at(0).digitValue();
+	int separator = id.indexOf(fidIdSeparator, 2);
+	first = id.mid(2, separator - 2).toULongLong(0, ID_BASE);
+	second = id.mid(separator + 1).toULongLong(0, ID_BASE);
+}
+
+QString MapiId::toString() const
+{
+	QChar provider = QChar::fromAscii('0' + m_provider);
+	QString parentId = QString::number(first, ID_BASE);
+	QString id = QString::number(second, ID_BASE);
+	return QString::fromAscii("%1/%2/%3").arg(provider).arg(parentId).arg(id);
+}
+
+bool MapiId::isValid() const
+{
+	return (m_provider == EMSDB) || (m_provider == NSPI);
+}
+
+MapiItem::MapiItem(const MapiId &id, QString &name, QDateTime &modified) :
 	m_id(id),
 	m_name(name),
 	m_modified(modified)
 {
 }
 
-mapi_id_t MapiItem::id() const
+const MapiId &MapiItem::id() const
 {
 	return m_id;
 }
@@ -595,9 +635,8 @@ QDateTime MapiItem::modified() const
 	return m_modified;
 }
 
-MapiMessage::MapiMessage(MapiConnector2 *connection, const char *tallocName, mapi_id_t folderId, mapi_id_t id) :
-	MapiObject(connection, tallocName, id),
-	m_folderId(folderId)
+MapiMessage::MapiMessage(MapiConnector2 *connection, const char *tallocName, MapiId &id) :
+	MapiObject(connection, tallocName, id)
 {
 }
 
@@ -665,24 +704,19 @@ void MapiMessage::addUniqueRecipient(const char *source, MapiRecipient &candidat
 
 QDebug MapiMessage::debug() const
 {
-	static QString prefix = QString::fromAscii("MapiMessage: %1/%2:");
-	return MapiObject::debug(prefix.arg(m_folderId, 0, ID_BASE).arg(m_id, 0, ID_BASE));
+	static QString prefix = QString::fromAscii("MapiMessage: %1:");
+	return MapiObject::debug(prefix.arg(m_id.toString()));
 }
 
 QDebug MapiMessage::error() const
 {
-	static QString prefix = QString::fromAscii("MapiMessage: %1/%2:");
-	return MapiObject::error(prefix.arg(m_folderId, 0, ID_BASE).arg(m_id, 0, ID_BASE));
-}
-
-mapi_id_t MapiMessage::folderId() const
-{
-	return m_folderId;
+	static QString prefix = QString::fromAscii("MapiMessage: %1:");
+	return MapiObject::error(prefix.arg(m_id.toString()));
 }
 
 bool MapiMessage::open()
 {
-	if (MAPI_E_SUCCESS != OpenMessage(m_connection->d(), m_folderId, m_id, &m_object, 0x0)) {
+	if (MAPI_E_SUCCESS != OpenMessage(m_connection->store(m_id), m_id.first, m_id.second, &m_object, 0x0)) {
 		error() << "cannot open message, error:" << mapiError();
 		return false;
 	}
@@ -1168,7 +1202,7 @@ const QList<MapiRecipient> &MapiMessage::recipients()
 	return m_recipients;
 }
 
-MapiObject::MapiObject(MapiConnector2 *connection, const char *tallocName, mapi_id_t id) :
+MapiObject::MapiObject(MapiConnector2 *connection, const char *tallocName, MapiId &id) :
 	TallocContext(tallocName),
 	m_connection(connection),
 	m_id(id),
@@ -1189,7 +1223,7 @@ mapi_object_t *MapiObject::d() const
 	return &m_object;
 }
 
-mapi_id_t MapiObject::id() const
+const MapiId &MapiObject::id() const
 {
 	return m_id;
 }
