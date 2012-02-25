@@ -272,6 +272,16 @@ bool MapiConnector2::defaultFolder(MapiDefaultFolder folderType, MapiId *id)
 		}
 		id->first = 0;
 		id->m_provider = MapiId::NSPI;
+#if 0
+		if (MAPI_E_SUCCESS != SetMAPIDebugLevel(m_context, 9)) {
+			error() << "cannot set debug level" << mapiError();
+			return false;
+		}
+		if (MAPI_E_SUCCESS != SetMAPIDumpData(m_context, true)) {
+			error() << "cannot set dump data" << mapiError();
+			return false;
+		}
+#endif
 		return true;
 	}
 
@@ -394,7 +404,7 @@ bool MapiConnector2::resolveNames(const char *names[], SPropTagArray *tags,
 	return true;
 }
 
-MapiFolder::MapiFolder(MapiConnector2 *connection, const char *tallocName, MapiId &id) :
+MapiFolder::MapiFolder(MapiConnector2 *connection, const char *tallocName, const MapiId &id) :
 	MapiObject(connection, tallocName, id)
 {
 	mapi_object_init(&m_contents);
@@ -494,7 +504,7 @@ bool MapiFolder::childrenPull(QList<MapiFolder *> &children, const QString &filt
 bool MapiFolder::childrenPull(QList<MapiItem *> &children)
 {
 	// Retrieve folder's content table
-	if (MAPI_E_SUCCESS != GetContentsTable(&m_object, &m_contents, 0, NULL)) {
+	if (MAPI_E_SUCCESS != GetContentsTable(&m_object, &m_contents, TableFlags_UseUnicode, NULL)) {
 		error() << "cannot get content table" << mapiError();
 		return false;
 	}
@@ -635,7 +645,7 @@ QDateTime MapiItem::modified() const
 	return m_modified;
 }
 
-MapiMessage::MapiMessage(MapiConnector2 *connection, const char *tallocName, MapiId &id) :
+MapiMessage::MapiMessage(MapiConnector2 *connection, const char *tallocName, const MapiId &id) :
 	MapiObject(connection, tallocName, id)
 {
 }
@@ -1202,7 +1212,7 @@ const QList<MapiRecipient> &MapiMessage::recipients()
 	return m_recipients;
 }
 
-MapiObject::MapiObject(MapiConnector2 *connection, const char *tallocName, MapiId &id) :
+MapiObject::MapiObject(MapiConnector2 *connection, const char *tallocName, const MapiId &id) :
 	TallocContext(tallocName),
 	m_connection(connection),
 	m_id(id),

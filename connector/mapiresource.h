@@ -93,7 +93,7 @@ protected:
 	 * Recurse through a hierarchy of Exchange folders which match the
 	 * given filter.
 	 */
-	void fetchCollections(const QString &path, const Akonadi::Collection &parent, Akonadi::Collection::List &collections);
+	void fetchCollections(const QString &path, const MapiId &parentId, const Akonadi::Collection &parent, Akonadi::Collection::List &collections);
 
 	/**
 	 * Consistent error handling for task-based routines.

@@ -126,15 +126,14 @@ void MapiResource::fetchCollections(MapiDefaultFolder rootFolder, Akonadi::Colle
 	root.setContentMimeTypes(contentTypes);
 	root.setRights(Akonadi::Collection::ReadOnly);
 	collections.append(root);
-	fetchCollections(root.name(), root, collections);
+	fetchCollections(root.name(), rootId, root, collections);
 	emit status(Running, i18n("fetched collections: %1").arg(collections.size()));
 }
 
-void MapiResource::fetchCollections(const QString &path, const Collection &parent, Akonadi::Collection::List &collections)
+void MapiResource::fetchCollections(const QString &path, const MapiId &parentId, const Collection &parent, Akonadi::Collection::List &collections)
 {
 	kDebug() << "fetch collections in:" << path;
 
-	MapiId parentId(parent.remoteId());
 	kError() << "parent folder:" << parentId.toString();
 	MapiFolder parentFolder(m_connection, "MapiResource::retrieveCollection", parentId);
 	if (!parentFolder.open()) {
@@ -165,7 +164,7 @@ void MapiResource::fetchCollections(const QString &path, const Collection &paren
 
 		// Recurse down...
 		QString currentPath = path + separator + child.name();
-		fetchCollections(currentPath, child, collections);
+		fetchCollections(currentPath, data->id(), child, collections);
 		delete data;
 	}
 }

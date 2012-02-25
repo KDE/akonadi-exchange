@@ -496,7 +496,7 @@ private:
 class MapiObject : protected TallocContext
 {
 public:
-	MapiObject(MapiConnector2 *connection, const char *tallocName, MapiId &id);
+	MapiObject(MapiConnector2 *connection, const char *tallocName, const MapiId &id);
 
 	virtual ~MapiObject();
 
@@ -636,7 +636,7 @@ private:
 class MapiFolder : public MapiObject
 {
 public:
-	MapiFolder(MapiConnector2 *connection, const char *tallocName, MapiId &id);
+	MapiFolder(MapiConnector2 *connection, const char *tallocName, const MapiId &id);
 
 	virtual ~MapiFolder();
 
@@ -679,7 +679,7 @@ private:
 class MapiMessage : public MapiObject
 {
 public:
-	MapiMessage(MapiConnector2 *connection, const char *tallocName, MapiId &id);
+	MapiMessage(MapiConnector2 *connection, const char *tallocName, const MapiId &id);
 
 	virtual bool open();
 
