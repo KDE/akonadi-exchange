@@ -664,7 +664,7 @@ public:
 
 	bool sync(QString lastAddressee)
 	{
-		// Set the modified attribute.
+		// Set the modified attribute to have the last addressee's name.
 		m_fetchStatus->setDisplayName(lastAddressee);
 		FetchStatusAttribute *tmp = new FetchStatusAttribute();
 		*tmp = *m_fetchStatus;
@@ -674,7 +674,7 @@ public:
 
 	bool close()
 	{
-		// Set the modified attribute.
+		// Set the modified attribute to have an end time.
 		m_fetchStatus->setDateTime(KDateTime::currentUtcDateTime());
 		FetchStatusAttribute *tmp = new FetchStatusAttribute();
 		*tmp = *m_fetchStatus;
@@ -752,10 +752,11 @@ void ExGalResource::retrieveItems(const Akonadi::Collection &collection)
 
 	kError() << __FUNCTION__ << collection.name();
 	if (collection.remoteId() == m_gal->id().toString()) {
+#if 1
 		// Assume the GAL is going to take a while to fetch.
 		setAutomaticProgressReporting(false);
 
-		// Now that the collection has come back to us form the backend,
+		// Now that the collection has come back to us from the backend,
 		// it isValid(). Make m_gal valid too...
 		const FetchStatusAttribute *fetchStatus = m_gal->open(collection);
 
@@ -777,12 +778,14 @@ void ExGalResource::retrieveItems(const Akonadi::Collection &collection)
 
 		// Start an asynchronous effort to read the GAL.
 		QMetaObject::invokeMethod(this, "retrieveGALBatch", Qt::QueuedConnection);
+#endif
 		cancelTask();
 	} else {
 		// This request is NOT for the GAL. We don't bother with 
 		// streaming mode.
 		setAutomaticProgressReporting(true);
 		fetchItems(collection, items, deletedItems);
+		kError() <<"calling retrieved"<<items.size() << deletedItems.size();
 		itemsRetrievedIncremental(items, deletedItems);
 		itemsRetrievalDone();
 		kDebug() << "new/changed items:" << items.size() << "deleted items:" << deletedItems.size();
@@ -834,7 +837,7 @@ void ExGalResource::retrieveGALBatch()
 
 	// Push the batch into Akonadi.
 	QString lastDisplayName = m_galItems.last().payload<KABC::Addressee>().name();
-	emit status(Running, i18n("Writing backend through item: %1", lastDisplayName));
+	emit status(Running, i18n("Saving items through to item: %1", lastDisplayName));
 #if MEASURE_PERFORMANCE
 	m_msNonExchange -= QDateTime::currentMSecsSinceEpoch();
 #endif
@@ -871,14 +874,14 @@ void ExGalResource::retrieveGALBatchDone(KJob *job)
 void ExGalResource::updateGALStatus(QString lastAddressee)
 {
 	if (lastAddressee.isEmpty()) {
+		// All done.
 		m_gal->close();
 	} else {
 		emit status(Running, i18n("Updating status with item: %1", lastAddressee));
 		m_gal->sync(lastAddressee);
 	}
 
-	// Push the fetch state out to Akonadi if there is not already a job
-	// running for that.
+	// Push the "fetched" state out to Akonadi.
 	CollectionAttributesSynchronizationJob *job = new CollectionAttributesSynchronizationJob(*m_gal);
 	connect(job, SIGNAL(result(KJob *)), SLOT(updateGALStatusDone(KJob *)));
 	job->start();
@@ -899,8 +902,10 @@ void ExGalResource::updateGALStatusDone(KJob *job)
 		qCritical() << "updateGALStatusDone:" << job->errorString();
 	}
 
-	// Go get the next batch.
-	QMetaObject::invokeMethod(this, "retrieveGALBatch", Qt::QueuedConnection);
+	if (m_galItems.size()) {
+		// Go get the next batch.
+		QMetaObject::invokeMethod(this, "retrieveGALBatch", Qt::QueuedConnection);
+	}
 }
 
 /**
