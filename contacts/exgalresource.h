@@ -64,14 +64,16 @@ private:
 	 */
 	class MapiGAL *m_gal;
 	Akonadi::Item::List m_galItems;
-	qint64 m_msExchange;
-	qint64 m_msNonExchange;
+	qint64 m_msExchangeFetch;
+	qint64 m_msAkonadiWrite;
+	qint64 m_msAkonadiWriteStatus;
+	void updateAkonadiBatchStatus(QString lastAddressee = QString());
 
 private Q_SLOTS:
-	void retrieveGALBatch();
-	void retrieveGALBatchDone(KJob *job);
-	void updateGALStatus(QString lastAddressee = QString());
-	void updateGALStatusDone(KJob *job);
+	void fetchExchangeBatch();
+	void createAkonadiItem(KJob *job);
+	void createAkonadiItemDone(KJob *job);
+	void updateAkonadiBatchStatusDone(KJob *job);
 };
 
 #endif

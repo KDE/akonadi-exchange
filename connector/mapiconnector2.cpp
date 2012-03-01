@@ -27,6 +27,7 @@
 #include <QRegExp>
 #include <QVariant>
 
+#include <KLocale>
 #include <kpimutils/email.h>
 
 #define CASE_PREFER_A_OVER_B(a, b, lvalue, rvalue) \
@@ -582,9 +583,9 @@ bool MapiFolder::open()
 /**
  * We store all objects in Akonadi using the densest string representation to hand:
  * 
- * 	(0|1)/base-36-parentId/base-36-id
+ * 	(0|1|2)/base-36-parentId/base-36-id
  * 
- * where the leading 0|1 signifies whether the provider is EMSDB or NSPI.
+ * where the leading 0|1|2 signifies whether the provider is INVALID, EMSDB or NSPI.
  */
 const QChar MapiId::fidIdSeparator = QChar::fromAscii('/');
 
@@ -593,6 +594,7 @@ const QChar MapiId::fidIdSeparator = QChar::fromAscii('/');
 MapiId::MapiId(class MapiConnector2 *connection, MapiDefaultFolder folderType)
 {
 	connection->defaultFolder(folderType, this);
+	m_provider = EMSDB;
 }
 
 MapiId::MapiId(const MapiId &parent, const mapi_id_t &child)
@@ -1861,30 +1863,35 @@ QString MapiRecipient::toString() const
 
 QString MapiRecipient::displayTypeString() const
 {
-	switch (m_displayType)
+	return toString(m_displayType);
+}
+
+QString MapiRecipient::toString(DisplayType type, unsigned pluralForm)
+{
+	switch (type)
 	{
 	case DtMailuser:
-		return QString::fromAscii("Messaging user");
+		return i18np("User", "Users", pluralForm);
 	case DtDistlist:
-		return QString::fromAscii("Distribution list");
+		return i18np("List", "Lists", pluralForm);
 	case DtForum:
-		return QString::fromAscii("Forum");
+		return i18np("Forum", "Forums", pluralForm);
 	case DtAgent:
-		return QString::fromAscii("Automated agent");
+		return i18np("Agent", "Agents", pluralForm);
 	case DtOrganization:
-		return QString::fromAscii("Group alias");
+		return i18np("Group Alias", "Group Aliases", pluralForm);
 	case DtPrivateDistlist:
-		return QString::fromAscii("Private distribution list");
+		return i18np("Private List", "Private Lists", pluralForm);
 	case DtRemoteMailuser:
-		return QString::fromAscii("Foreign/remote messaging user");
+		return i18np("External User", "External Users", pluralForm);
 	case DtRoom:
-		return QString::fromAscii("Room");
+		return i18np("Room", "Rooms", pluralForm);
 	case DtEquipment:
-		return QString::fromAscii("Equipment");
+		return i18np("Equipment", "Equipment", pluralForm);
 	case DtSecurityGroup:
-		return QString::fromAscii("Security group");
+		return i18np("Security Group", "Security Groups", pluralForm);
 	default:
-		return QString::fromAscii("MAPI_0x%1 display type").arg(m_objectType, 0, 16);
+		return i18n("DisplayType%1", type);
 	}
 }
 

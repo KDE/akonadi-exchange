@@ -28,9 +28,8 @@
 #include <akonadi/collectionattributessynchronizationjob.h>
 #include <akonadi/item.h>
 #include <akonadi/itemcreatejob.h>
-#include <akonadi/itemfetchjob.h>
+#include <akonadi/itemdeletejob.h>
 #include <akonadi/itemmodifyjob.h>
-#include <akonadi/transactionsequence.h>
 #include <KLocalizedString>
 #include <KABC/Address>
 #include <KABC/Addressee>
@@ -560,7 +559,7 @@ class MapiGAL : public Akonadi::Collection
 {
 public:
 	MapiGAL(MapiConnector2 *connection, const QString &profile, QStringList itemMimeType) :
-		m_galId(QString::fromAscii("2/0/0")),
+		m_galId(QString::fromAscii("2/gal/gal")),
 		m_profile(profile),
 		m_connection(connection),
 		m_fetchStatus(0)
@@ -634,6 +633,7 @@ public:
 				qCritical() << "Skipped malformed GAL entry";
 				continue;
 			}
+
 			Item item(contentMimeTypes()[0]);
 			item.setParentCollection(*this);
 			item.setRemoteId(addressee.name());
@@ -651,7 +651,13 @@ public:
 		if (!m_connection->GALSeek(displayName, percentagePosition)) {
 			return false;
 		}
+		sync(displayName);
 		return true;
+	}
+
+	const FetchStatusAttribute *offset() const
+	{
+		return m_fetchStatus;
 	}
 
 	bool rewind()
@@ -659,6 +665,7 @@ public:
 		if (!m_connection->GALRewind()) {
 			return false;
 		}
+		sync(QString());
 		return true;
 	}
 
@@ -695,9 +702,9 @@ private:
 ExGalResource::ExGalResource(const QString &id) : 
 	MapiResource(id, i18n("Exchange Contacts"), IPF_CONTACT, "IPM.Contact", QString::fromAscii("text/directory")),
 	m_gal(new MapiGAL(m_connection, profile(), QStringList(m_itemMimeType))),
-	m_msExchange(0),
-	m_msNonExchange(0)
-
+	m_msExchangeFetch(0),
+	m_msAkonadiWrite(0),
+	m_msAkonadiWriteStatus(0)
 {
 	new SettingsAdaptor(Settings::self());
 	QDBusConnection::sessionBus().registerObject(QLatin1String("/Settings"),
@@ -739,6 +746,7 @@ void ExGalResource::retrieveCollections()
 	fetchCollections(PublicOfflineAB, collections);
 	fetchCollections(PublicLocalOfflineAB, collections);
 #endif
+
 	fetchCollections(Contacts, collections);
 
 	// Notify Akonadi about the new collections.
@@ -777,7 +785,10 @@ void ExGalResource::retrieveItems(const Akonadi::Collection &collection)
 		}
 
 		// Start an asynchronous effort to read the GAL.
-		QMetaObject::invokeMethod(this, "retrieveGALBatch", Qt::QueuedConnection);
+		m_msExchangeFetch = 0;
+		m_msAkonadiWrite = 0;
+		m_msAkonadiWriteStatus = 0;
+		QMetaObject::invokeMethod(this, "fetchExchangeBatch", Qt::QueuedConnection);
 #endif
 		cancelTask();
 	} else {
@@ -795,15 +806,13 @@ void ExGalResource::retrieveItems(const Akonadi::Collection &collection)
 /**
  * Streamed fetch of the GAL from Exchange, one batch at a time.
  * 
- * Next state: If we have read the entire GAL, @ref updateGALStatus for the 
- * last time, otherwise @ref retrieveGALBatchDone().
+ * Next state: If we have read the entire GAL, @ref updateAkonadiBatchStatus for the 
+ * last time, otherwise @ref createAkonadiItem().
  */
-void ExGalResource::retrieveGALBatch()
+void ExGalResource::fetchExchangeBatch()
 {
-	// The size of a batch is arbitrary. On my laptop, we spend much more 
-	// time doing stuff in Akonadi than Exchange, and the number here gives
-	// about 4 seconds in Exchange, and about 10 times than Akonadi. Smaller
-	// numbers tend to make the ratio head up towards 15 times.
+	// The size of a batch is arbitrary. On my laptop, the number here gives
+	// about 4 seconds in Exchange, and about 4 seconds in Akonadi.
 	unsigned requestedCount = 500;
 	unsigned percentagePosition;
 
@@ -814,98 +823,136 @@ void ExGalResource::retrieveGALBatch()
 
 	// Actually do the fetching.
 	m_galItems.clear();
-	emit status(Running, i18n("Reading GAL"));
+	const FetchStatusAttribute *fetchStatus = m_gal->offset();
+	QString savedDisplayName = fetchStatus->displayName();
+	if (savedDisplayName.isEmpty()) {
+		emit status(Running, i18n("Start fetching GAL"));
+	} else {
+		emit status(Running, i18n("Fetching GAL from item: %1", savedDisplayName));
+	}
 #if MEASURE_PERFORMANCE
-	m_msExchange -= QDateTime::currentMSecsSinceEpoch();
+	m_msExchangeFetch -= QDateTime::currentMSecsSinceEpoch();
 #endif
 	if (!m_gal->read(requestedCount, m_galItems, &percentagePosition)) {
-		error(i18n("cannot read GAL"));
+		error(i18n("cannot fetch GAL from Exchange"));
 		return;
 	}
 #if MEASURE_PERFORMANCE
-	m_msExchange += QDateTime::currentMSecsSinceEpoch();
+	m_msExchangeFetch += QDateTime::currentMSecsSinceEpoch();
 #endif
 	logoff();
 
 	if (!m_galItems.size()) {
 		// All done!
-		emit status(Running, i18n("GAL entries read"));
-		updateGALStatus();
+		emit status(Running, i18n("Finished fetching GAL"));
+		updateAkonadiBatchStatus();
 		return;
 	}
 	emit percent(percentagePosition);
 
 	// Push the batch into Akonadi.
 	QString lastDisplayName = m_galItems.last().payload<KABC::Addressee>().name();
-	emit status(Running, i18n("Saving items through to item: %1", lastDisplayName));
+	emit status(Running, i18n("Saving GAL through to item: %1", lastDisplayName));
 #if MEASURE_PERFORMANCE
-	m_msNonExchange -= QDateTime::currentMSecsSinceEpoch();
+	m_msAkonadiWrite -= QDateTime::currentMSecsSinceEpoch();
 #endif
-	Akonadi::ItemSync *job = new ItemSync(*m_gal);
-	connect(job, SIGNAL(result(KJob *)), SLOT(retrieveGALBatchDone(KJob *)));
-	job->setIncrementalSyncItems(m_galItems, Item::List());
+	Akonadi::ItemDeleteJob *job = new Akonadi::ItemDeleteJob(m_galItems);
+	connect(job, SIGNAL(result(KJob *)), SLOT(createAkonadiItem(KJob *)));
 }
 
 /**
- * Complete the creation/update of a batch of GAL item.
+ * Initiate the creation of a single GAL item if we didn't find an existing item
+ * or else modify the existing one.
  * 
- * Next state: @ref updateGALStatus for the current batch.
+ * Next state: @ref createAkonadiItemDone().
  */
-void ExGalResource::retrieveGALBatchDone(KJob *job)
+void ExGalResource::createAkonadiItem(KJob *job)
 {
 	if (job->error()) {
-		qCritical() << "itemCreateJobDone:" << job->errorString();
+		// Modify normal error reporting, since a delete can give us the
+		// error "Unknown error. (No items found)".
+		static QString noItems = QString::fromAscii("Unknown error. (No items found)");
+		if (job->errorString() != noItems) {
+			qCritical() << __FUNCTION__ << job->errorString();
+		}
 	}
+	Akonadi::Item item = m_galItems.first();
+	m_galItems.removeFirst();
 
-	// Update the status of the current batch.
-	QString lastDisplayName = m_galItems.last().payload<KABC::Addressee>().name();
-	updateGALStatus(lastDisplayName);
+	// Save the new item in Akonadi.
+	Akonadi::ItemCreateJob *createJob = new Akonadi::ItemCreateJob(item, *m_gal);
+	connect(createJob, SIGNAL(result(KJob *)), SLOT(createAkonadiItemDone(KJob *)));
+}
+ 
+/**
+ * Complete the creation of a single GAL item.
+ * 
+ * Next state: If there are more items in the batch, create the next item
+ * @ref fetchAkonadiItem(), otherwise @ref updateAkonadiBatchStatus for the current batch.
+ */
+void ExGalResource::createAkonadiItemDone(KJob *job)
+{
+	if (job->error()) {
+		qCritical() << __FUNCTION__ << job->errorString();
+	}
+	if (m_galItems.size()) {
+		// Go back and create the next item.
+		createAkonadiItem(job);
+	} else if (Akonadi::ItemCreateJob *realJob = dynamic_cast<Akonadi::ItemCreateJob *>(job)) {
+		// Update the status of the current batch.
+		updateAkonadiBatchStatus(realJob->item().payload<KABC::Addressee>().name());
+	}
 }
 
 /**
- * Initiate update of the fetch status of the GAL, see @ref FetchStatusAttribute.
+ * Complete the creation/update of a batch of GAL item bt initiating an update
+ * of the fetch status of the GAL, see @ref FetchStatusAttribute.
  * 
  * @param lastAddressee		If not empty, the displayName of the last
  * 				item written. If empty, we will write a final
  * 				timestamp instead.
  * 
- * Next state: @ref updateGALStatusDone().
+ * Next state: @ref updateAkonadiBatchStatusDone().
  */
-void ExGalResource::updateGALStatus(QString lastAddressee)
+void ExGalResource::updateAkonadiBatchStatus(QString lastAddressee)
 {
+#if MEASURE_PERFORMANCE
+	m_msAkonadiWrite += QDateTime::currentMSecsSinceEpoch();
+	m_msAkonadiWriteStatus -= QDateTime::currentMSecsSinceEpoch();
+#endif
 	if (lastAddressee.isEmpty()) {
 		// All done.
 		m_gal->close();
 	} else {
-		emit status(Running, i18n("Updating status with item: %1", lastAddressee));
+		emit status(Running, i18n("Saved GAL through to item: %1", lastAddressee));
 		m_gal->sync(lastAddressee);
 	}
 
 	// Push the "fetched" state out to Akonadi.
 	CollectionAttributesSynchronizationJob *job = new CollectionAttributesSynchronizationJob(*m_gal);
-	connect(job, SIGNAL(result(KJob *)), SLOT(updateGALStatusDone(KJob *)));
+	connect(job, SIGNAL(result(KJob *)), SLOT(updateAkonadiBatchStatusDone(KJob *)));
 	job->start();
 }
 
 /**
  * Complete the update of the fetch status of the GAL.
  * 
- * Next state: Go get the next batch, @ref retrieveGALBatch().
+ * Next state: Go get the next batch, @ref fetchExchangeBatch().
  */
-void ExGalResource::updateGALStatusDone(KJob *job)
+void ExGalResource::updateAkonadiBatchStatusDone(KJob *job)
 {
-#if MEASURE_PERFORMANCE
-	m_msNonExchange += QDateTime::currentMSecsSinceEpoch();
-	qCritical() << "updateGALStatusDone: Exchange ms:" << m_msExchange << "non Exchange ms:" << m_msNonExchange;
-#endif
 	if (job->error()) {
-		qCritical() << "updateGALStatusDone:" << job->errorString();
+		qCritical() << __FUNCTION__ << job->errorString();
 	}
+#if MEASURE_PERFORMANCE
+	m_msAkonadiWriteStatus += QDateTime::currentMSecsSinceEpoch();
+	qCritical() << "updateAkonadiBatchStatusDone: Exchange fetch ms:" << m_msExchangeFetch <<
+		"Akonadi write ms:" << m_msAkonadiWrite <<
+		"Akonadi status write ms:" << m_msAkonadiWriteStatus;
+#endif
 
-	if (m_galItems.size()) {
-		// Go get the next batch.
-		QMetaObject::invokeMethod(this, "retrieveGALBatch", Qt::QueuedConnection);
-	}
+	// Go get the next batch.
+	QMetaObject::invokeMethod(this, "fetchExchangeBatch", Qt::QueuedConnection);
 }
 
 /**

@@ -195,6 +195,11 @@ public:
 	} DisplayType;
 
 	/**
+	 * An i18n value for the type.
+	 */
+	static QString toString(DisplayType type, unsigned pluralForm = 1);
+
+	/**
 	 * Legal values for the type of object. Other values are not valid,
 	 * but will be stringified by @ref objectTypeString.
 	 */
