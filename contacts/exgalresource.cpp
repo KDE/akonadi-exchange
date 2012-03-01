@@ -509,7 +509,7 @@ static bool preparePayload(SPropValue *properties, unsigned propertyCount, KABC:
 	}
 	if (objectType != MAPI_MAILUSER) {
 		//this->objectType = mapiObjectType(objectType);
-		qCritical() << "email" << email << objectType;
+		kError() << "email" << email << objectType;
 	}
 
 	// Don't override an SMTP address.
@@ -630,7 +630,7 @@ public:
 			KABC::Addressee addressee;
 
 			if (!preparePayload(contact.lpProps, contact.cValues, addressee)) {
-				qCritical() << "Skipped malformed GAL entry";
+				kError() << "Skipped malformed GAL entry";
 				continue;
 			}
 
@@ -785,9 +785,6 @@ void ExGalResource::retrieveItems(const Akonadi::Collection &collection)
 		}
 
 		// Start an asynchronous effort to read the GAL.
-		m_msExchangeFetch = 0;
-		m_msAkonadiWrite = 0;
-		m_msAkonadiWriteStatus = 0;
 		QMetaObject::invokeMethod(this, "fetchExchangeBatch", Qt::QueuedConnection);
 #endif
 		cancelTask();
@@ -831,12 +828,16 @@ void ExGalResource::fetchExchangeBatch()
 		emit status(Running, i18n("Fetching GAL from item: %1", savedDisplayName));
 	}
 #if MEASURE_PERFORMANCE
+	m_msExchangeFetch = 0;
+	m_msAkonadiWrite = 0;
+	m_msAkonadiWriteStatus = 0;
 	m_msExchangeFetch -= QDateTime::currentMSecsSinceEpoch();
 #endif
 	if (!m_gal->read(requestedCount, m_galItems, &percentagePosition)) {
 		error(i18n("cannot fetch GAL from Exchange"));
 		return;
 	}
+	emit percent(percentagePosition);
 #if MEASURE_PERFORMANCE
 	m_msExchangeFetch += QDateTime::currentMSecsSinceEpoch();
 #endif
@@ -845,10 +846,10 @@ void ExGalResource::fetchExchangeBatch()
 	if (!m_galItems.size()) {
 		// All done!
 		emit status(Running, i18n("Finished fetching GAL"));
+		emit percent(100);
 		updateAkonadiBatchStatus();
 		return;
 	}
-	emit percent(percentagePosition);
 
 	// Push the batch into Akonadi.
 	QString lastDisplayName = m_galItems.last().payload<KABC::Addressee>().name();
@@ -873,7 +874,7 @@ void ExGalResource::createAkonadiItem(KJob *job)
 		// error "Unknown error. (No items found)".
 		static QString noItems = QString::fromAscii("Unknown error. (No items found)");
 		if (job->errorString() != noItems) {
-			qCritical() << __FUNCTION__ << job->errorString();
+			kError() << __FUNCTION__ << job->errorString();
 		}
 	}
 	Akonadi::Item item = m_galItems.first();
@@ -893,14 +894,15 @@ void ExGalResource::createAkonadiItem(KJob *job)
 void ExGalResource::createAkonadiItemDone(KJob *job)
 {
 	if (job->error()) {
-		qCritical() << __FUNCTION__ << job->errorString();
+		kError() << __FUNCTION__ << job->errorString();
 	}
 	if (m_galItems.size()) {
 		// Go back and create the next item.
 		createAkonadiItem(job);
-	} else if (Akonadi::ItemCreateJob *realJob = dynamic_cast<Akonadi::ItemCreateJob *>(job)) {
+	} else {
+		Akonadi::ItemCreateJob *createJob = qobject_cast<Akonadi::ItemCreateJob *>(job);
 		// Update the status of the current batch.
-		updateAkonadiBatchStatus(realJob->item().payload<KABC::Addressee>().name());
+		updateAkonadiBatchStatus(createJob->item().payload<KABC::Addressee>().name());
 	}
 }
 
@@ -942,11 +944,11 @@ void ExGalResource::updateAkonadiBatchStatus(QString lastAddressee)
 void ExGalResource::updateAkonadiBatchStatusDone(KJob *job)
 {
 	if (job->error()) {
-		qCritical() << __FUNCTION__ << job->errorString();
+		kError() << __FUNCTION__ << job->errorString();
 	}
 #if MEASURE_PERFORMANCE
 	m_msAkonadiWriteStatus += QDateTime::currentMSecsSinceEpoch();
-	qCritical() << "updateAkonadiBatchStatusDone: Exchange fetch ms:" << m_msExchangeFetch <<
+	kDebug() << "Exchange fetch ms:" << m_msExchangeFetch <<
 		"Akonadi write ms:" << m_msAkonadiWrite <<
 		"Akonadi status write ms:" << m_msAkonadiWriteStatus;
 #endif
@@ -962,7 +964,7 @@ bool ExGalResource::retrieveItem(const Akonadi::Item &itemOrig, const QSet<QByte
 {
 	Q_UNUSED(parts);
 
-	qCritical() << "GAL retrieveItem";
+	kError() << "GAL retrieveItem";
 	MapiContact *message = fetchItem<MapiContact>(itemOrig);
 	if (!message) {
 		return false;
