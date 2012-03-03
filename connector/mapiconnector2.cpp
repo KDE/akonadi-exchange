@@ -1486,7 +1486,7 @@ bool MapiProfiles::add(QString profile, QString username, QString password, QStr
 	QByteArray baPass(password.toUtf8());
 	QByteArray baDomain(domain.toUtf8());
 	QByteArray baServer(server.toUtf8());
-	
+
 	const char *profile8 = baProfile.constData();
 	qDebug() << "New profile is:"<<profile8;
 

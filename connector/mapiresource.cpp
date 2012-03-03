@@ -109,7 +109,7 @@ void MapiResource::fetchCollections(MapiDefaultFolder rootFolder, Akonadi::Colle
 		return;
 	}
 
-	// create the new collection
+	// Create the new root collection.
 	MapiId rootId(m_connection, rootFolder);
 	kError() << "default folder:" << rootId.toString();
 	if (!rootId.isValid())

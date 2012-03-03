@@ -52,8 +52,6 @@
 
 #define MEASURE_PERFORMANCE 1
 
-#define FETCH_STATUS "FetchStatus"
-
 using namespace Akonadi;
 
 /**
@@ -92,6 +90,8 @@ class FetchStatusAttribute :
 	public Akonadi::Attribute
 {
 public:
+#define FETCH_STATUS "FetchStatus"
+
 	FetchStatusAttribute()
 	{
 	}
@@ -558,15 +558,14 @@ static bool preparePayload(SPropValue *properties, unsigned propertyCount, KABC:
 class MapiGAL : public Akonadi::Collection
 {
 public:
-	MapiGAL(MapiConnector2 *connection, const QString &profile, QStringList itemMimeType) :
+	MapiGAL(MapiConnector2 *connection, Collection &parent, QStringList itemMimeType) :
 		m_galId(QString::fromAscii("2/gal/gal")),
-		m_profile(profile),
 		m_connection(connection),
 		m_fetchStatus(0)
 	{
-		setName(i18n("Exchange Global Address List for %1", profile));
+		setName(i18n("Global Address List"));
 		setRemoteId(m_galId.toString());
-		setParentCollection(Collection::root());
+		setParentCollection(parent);
 		setContentMimeTypes(itemMimeType);
 		setRights(Akonadi::Collection::ReadOnly);
 		cachePolicy().setSyncOnDemand(true);
@@ -694,14 +693,13 @@ private:
 	 * A reserved id is used to represent the GAL.
 	 */
 	const MapiId m_galId;
-	QString m_profile;
 	MapiConnector2 *m_connection;
 	FetchStatusAttribute *m_fetchStatus;
 };
 
 ExGalResource::ExGalResource(const QString &id) : 
-	MapiResource(id, i18n("Exchange Contacts"), IPF_CONTACT, "IPM.Contact", QString::fromAscii("text/directory")),
-	m_gal(new MapiGAL(m_connection, profile(), QStringList(m_itemMimeType))),
+	MapiResource(id, i18n("Exchange Address Lists"), IPF_CONTACT, "IPM.Contact", QString::fromAscii("text/directory")),
+	m_gal(0),
 	m_msExchangeFetch(0),
 	m_msAkonadiWrite(0),
 	m_msAkonadiWriteStatus(0)
@@ -736,23 +734,47 @@ void ExGalResource::retrieveCollectionAttributes(const Akonadi::Collection &coll
 
 void ExGalResource::retrieveCollections()
 {
-	// We are going to return both the user's contacts as well as the GAL.
-	// First, the GAL, then the user's contacts...
 	Collection::List collections;
 
-	setName(i18n("Exchange Contacts for %1", profile()));
+	// Create the new root collection.
+	MapiId rootId(QString::fromAscii("2/gal/galRoot"));
+	kError() << "default folder:" << rootId.toString();
+	Collection root;
+	QStringList contentTypes;
+	contentTypes << m_itemMimeType << Akonadi::Collection::mimeType();
+	root.setName(name());
+	root.setRemoteId(rootId.toString());
+	root.setParentCollection(Collection::root());
+	root.setContentMimeTypes(contentTypes);
+	root.setRights(Akonadi::Collection::ReadOnly);
+	collections.append(root);
+
+	// We are going to return both the user's contacts as well as the GAL.
+	// First, the GAL, then the user's contacts...
+	m_gal = new MapiGAL(m_connection, root, QStringList(m_itemMimeType));
 	collections.append(*m_gal);
 #if 0
 	fetchCollections(PublicOfflineAB, collections);
 	fetchCollections(PublicLocalOfflineAB, collections);
 #endif
-
-	fetchCollections(Contacts, collections);
+	// Get the Contacts folders, and place them under m_root.
+	Collection::List tmp;
+	fetchCollections(Contacts, tmp);
+	Collection collection = tmp.first();
+	tmp.removeFirst();
+	collection.setName(QString::fromAscii("Contacts"));
+	collection.setParentCollection(root);
+	collections.append(collection);
+	while (tmp.size()) {
+		Collection collection = tmp.first();
+		tmp.removeFirst();
+		collections.append(collection);
+	}
 
 	// Notify Akonadi about the new collections.
 	collectionsRetrieved(collections);
 }
- 
+
 void ExGalResource::retrieveItems(const Akonadi::Collection &collection)
 {
 	Item::List items;
