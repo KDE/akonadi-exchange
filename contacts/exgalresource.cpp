@@ -735,13 +735,15 @@ void ExGalResource::retrieveCollections()
 {
 	Collection::List collections;
 
-	// Create the new root collection.
+	// Create the new root collection. Note that we set the content types
+	// to include leaf items, otherwise nothing is shown in kaddressbook
+	// until a restart.
 	setName(i18n("Exchange Address Lists for %1", profile()));
-	MapiId rootId(QString::fromAscii("2/gal/galRoot"));
+	MapiId rootId(QString::fromAscii("0/gal/galRoot"));
 	kError() << "default folder:" << rootId.toString();
 	Collection root;
 	QStringList contentTypes;
-	contentTypes << Akonadi::Collection::mimeType();
+	contentTypes << m_itemMimeType << Akonadi::Collection::mimeType();
 	root.setName(name());
 	root.setRemoteId(rootId.toString());
 	root.setParentCollection(Collection::root());
@@ -781,7 +783,14 @@ void ExGalResource::retrieveItems(const Akonadi::Collection &collection)
 	Item::List deletedItems;
 
 	kError() << __FUNCTION__ << collection.name();
-	if (collection.remoteId() == m_gal->id().toString()) {
+	MapiId id(collection.remoteId());
+	if (!id.isValid()) {
+		// This is the case for the 0/gal/galRoot See above.
+		kDebug() << "No items to fetch for" << id.toString();
+		cancelTask();
+		return;
+	}
+	if (id == m_gal->id()) {
 #if 1
 		// Assume the GAL is going to take a while to fetch.
 		setAutomaticProgressReporting(false);
