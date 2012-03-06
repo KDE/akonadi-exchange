@@ -124,7 +124,6 @@ void MapiResource::fetchCollections(MapiDefaultFolder rootFolder, Akonadi::Colle
 	root.setRemoteId(rootId.toString());
 	root.setParentCollection(Collection::root());
 	root.setContentMimeTypes(contentTypes);
-	root.setRights(Akonadi::Collection::ReadOnly);
 	collections.append(root);
 	fetchCollections(root.name(), rootId, root, collections);
 	emit status(Running, i18n("fetched collections: %1").arg(collections.size()));
