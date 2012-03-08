@@ -144,7 +144,7 @@ bool ExCalResource::retrieveItem( const Akonadi::Item &itemOrig, const QSet<QByt
 	// Create a clone of the passed in Item and fill it with the payload.
 	Akonadi::Item item(itemOrig);
 
-	KCal::Event* event = new KCal::Event;
+	KCal::Event *event = new KCal::Event;
 	event->setUid(item.remoteId());
 	event->setSummary(message->title);
 	event->setDtStart(KDateTime(message->begin));
@@ -153,7 +153,7 @@ bool ExCalResource::retrieveItem( const Akonadi::Item &itemOrig, const QSet<QByt
 	event->setLastModified(KDateTime(message->modified));
 	event->setDescription(message->text);
 	foreach (MapiRecipient recipient, message->recipients()) {
-		if (recipient.type() == MapiRecipient::Sender) {
+		if (recipient.type() == MapiRecipient::ReplyTo) {
 			KCal::Person person(recipient.name, recipient.email);
 			event->setOrganizer(person);
 		} else {
