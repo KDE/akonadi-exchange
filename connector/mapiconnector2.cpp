@@ -49,6 +49,10 @@ case a: \
 #define DEBUG_MESSAGE_PROPERTIES 0
 #endif
 
+#ifndef DEBUG_RECIPIENTS
+#define DEBUG_RECIPIENTS 0
+#endif
+
 #define STR(def) \
 case def: return QString::fromLatin1(#def)
 
@@ -654,7 +658,9 @@ MapiMessage::MapiMessage(MapiConnector2 *connection, const char *tallocName, con
 
 void MapiMessage::addUniqueRecipient(const char *source, MapiRecipient &candidate)
 {
+#if DEBUG_RECIPIENTS
 	debug() << "candidate address:" << source << candidate.toString();
+#endif
 	if (candidate.name.isEmpty() && candidate.email.isEmpty()) {
 		// Discard garbage.
 		return;
@@ -710,7 +716,9 @@ void MapiMessage::addUniqueRecipient(const char *source, MapiRecipient &candidat
 	}
 
 	// Add the entry if it did not match.
+#if DEBUG_RECIPIENTS
 	debug() << "add new address:" << source << candidate.toString();
+#endif
 	m_recipients.append(candidate);
 }
 
@@ -1065,7 +1073,9 @@ void MapiMessage::recipientPopulate(const char *phase, SRow &recipient, MapiReci
 			needingResolution << i;
 		}
 	}
+#if DEBUG_RECIPIENTS
 	debug() << "recipients needing primary resolution:" << needingResolution.size() << "from a total:" << m_recipients.size();
+#endif
 
 	// Short-circuit exit.
 	if (!needingResolution.size()) {
@@ -1139,7 +1149,9 @@ void MapiMessage::recipientPopulate(const char *phase, SRow &recipient, MapiReci
 	}
 	MAPIFreeBuffer(results);
 	MAPIFreeBuffer(statuses);
+#if DEBUG_RECIPIENTS
 	debug() << "recipients needing secondary resolution:" << needingResolution.size();
+#endif
 
 	// Secondary resolution is to remove entries which have the the same 
 	// email. But we must take care since we'll still have unresolved 
@@ -1177,7 +1189,9 @@ void MapiMessage::recipientPopulate(const char *phase, SRow &recipient, MapiReci
 			}
 		}
 	}
+#if DEBUG_RECIPIENTS
 	debug() << "recipients needing tertiary resolution:" << needingResolution.size();
+#endif
 
 	// Tertiary resolution.
 	//
@@ -1203,9 +1217,13 @@ void MapiMessage::recipientPopulate(const char *phase, SRow &recipient, MapiReci
 	m_recipients.clear();
 	foreach (MapiRecipient recipient, uniqueResolvedRecipients) {
 		m_recipients.append(recipient);
-	error() << "recipient name:" << recipient.toString();
+#if DEBUG_RECIPIENTS
+		debug() << "recipient name:" << recipient.toString();
+#endif
 	}
+#if DEBUG_RECIPIENTS
 	debug() << "recipients after resolution:" << m_recipients.size();
+#endif
 	return true;
 }
 
