@@ -471,6 +471,7 @@ bool MapiAppointment::propertiesPull(QVector<int> &tags, const bool tagsAppended
 		PidLidReminderDelta,
 		PidLidRecurrenceType,
 		PidLidAppointmentRecur,
+		PidTagTransportMessageHeaders,
 		0 };
 	static SPropTagArray ourTags = {
 		(sizeof(ourTagList) / sizeof(ourTagList[0])) - 1,
@@ -496,6 +497,8 @@ bool MapiAppointment::propertiesPull(QVector<int> &tags, const bool tagsAppended
 	// properties here should be aligned with the list pulled above.
 	unsigned recurrenceType = 0;
 	RecurrencePattern *pattern = 0;
+	bool embeddedInBody = false;
+	QString header;
 
 	for (unsigned i = 0; i < m_propertyCount; i++) {
 		MapiProperty property(m_properties[i]);
@@ -504,8 +507,12 @@ bool MapiAppointment::propertiesPull(QVector<int> &tags, const bool tagsAppended
 		case PidTagMessageClass:
 			// Sanity check the message class.
 			if (QLatin1String("IPM.Appointment") != property.value().toString()) {
-				error() << "retrieved item is not an appointment:" << property.value().toString();
-				return false;
+				if (QLatin1String("IPM.Note") != property.value().toString()) {
+					error() << "retrieved item is not an appointment:" << property.value().toString();
+					return false;
+				} else {
+					embeddedInBody = true;
+				}
 			}
 			break;
 		case PidTagConversationTopic:
@@ -544,6 +551,9 @@ bool MapiAppointment::propertiesPull(QVector<int> &tags, const bool tagsAppended
 		case PidLidAppointmentRecur:
 			pattern = get_RecurrencePattern(ctx(), &m_properties[i].value.bin);
 			break;
+		case PidTagTransportMessageHeaders:
+			header = property.value().toString();
+			break;
 		default:
 			// Handle oversize objects.
 			if (MAPI_E_NOT_ENOUGH_MEMORY == property.value().toInt()) {
@@ -563,6 +573,65 @@ bool MapiAppointment::propertiesPull(QVector<int> &tags, const bool tagsAppended
 		}
 	}
 
+	if (embeddedInBody) {
+		// Exchange puts half the information in the headers:
+		//
+		//	Microsoft Mail Internet Headers Version 2.0
+		//	BEGIN:VCALENDAR
+		//	PRODID:-//K Desktop Environment//NONSGML libkcal 4.3//EN
+		//	VERSION:2.0
+		//	BEGIN:VEVENT
+		//	DTSTAMP:20100420T092856Z
+		//	ORGANIZER;CN="xxx yyy (zzz)":MAILTO:zzz@foo.com
+		//	X-UID: 0
+		//
+		// and the rest in the body:
+		//
+		//	ATTENDEE;CN="aaa bbb (ccc)";RSVP=TRUE;PARTSTAT=NEEDS-ACTION;
+		//	...
+		//
+		// Unbelievable, but true! Anyway, start by fixing up the 
+		// header.
+		bool lastChWasNl = false;
+		int j = 0;
+		for (int i = 0; i < header.size(); i++) {
+			QChar ch = header.at(i);
+			bool chIsNl = false;
+
+			switch (ch.toAscii()) {
+			case '\r':
+				// Omit CRs. Propagate the NL state of the 
+				// previous character.
+				chIsNl = lastChWasNl;
+				break;
+			case '\n':
+				// End with the first double NL.
+				if (lastChWasNl) {
+					goto DONE;
+				}
+				chIsNl = true;
+				// Copy anything else.
+				header[j] = ch;
+				j++;
+				break;
+			default:
+				// Copy anything else.
+				header[j] = ch;
+				j++;
+				break;
+			}
+			lastChWasNl = chIsNl;
+		}
+DONE:
+		header.resize(j);
+		text = header + text;
+		if (text.isEmpty()) {
+			error() << "retrieved content is not an appointment";
+			return false;
+		}
+		return true;
+	}
+
 	// Is there a recurrance type set?
 	if (recurrenceType != 0) {
 		if (pattern) {
@@ -570,8 +639,8 @@ bool MapiAppointment::propertiesPull(QVector<int> &tags, const bool tagsAppended
 			recurrency.setData(pattern);
 		} else {
 			// TODO This should not happen. PidLidRecurrenceType says this is a recurring event, so why is there no PidLidAppointmentRecur???
-			debug() << "missing recurrencePattern";
-			return false;
+			debug() << "missing recurrencePattern for recurrenceType:" << recurrenceType;
+			recurrenceType = 0;
 		}
 	}
 	return true;

@@ -628,9 +628,9 @@ bool MapiNote::preparePayload()
 	// a fixed-up version to work with.
 	if (UINT_MAX > (index = propertyFind(PidTagTransportMessageHeaders))) {
 		QString header = propertyAt(index).toString().prepend(QString::fromAscii("X-Parsed-By: "));
-		bool lastChWasNl = false;
 
 		// Fixup the header.
+		bool lastChWasNl = false;
 		int j = 0;
 		for (int i = 0; i < header.size(); i++) {
 			QChar ch = header.at(i);
