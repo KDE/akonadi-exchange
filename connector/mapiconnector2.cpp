@@ -1687,6 +1687,19 @@ bool MapiProfiles::remove(QString profile)
 	return true;
 }
 
+bool MapiProfiles::updatePassword(QString profile, QString oldPassword, QString newPassword)
+{
+	if (!init()) {
+		return false;
+	}
+
+	if (MAPI_E_SUCCESS != ChangeProfilePassword(m_context, profile.toUtf8(), oldPassword.toUtf8(), newPassword.toUtf8())) {
+		error() << "cannot change password profile:" << profile << mapiError();
+		return false;
+	}
+	return true;
+}
+
 MapiProperty::MapiProperty(SPropValue &property) :
 	m_property(property)
 {

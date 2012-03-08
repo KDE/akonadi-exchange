@@ -121,10 +121,11 @@ void mapibrowser::onRefreshTree()
 
 void mapibrowser::onManageProfiles()
 {
-	ProfileDialog dlgConfig(selectedProfile);
+	ProfileDialog dlgConfig;
+	dlgConfig.setProfileName(selectedProfile);
 
 	if (dlgConfig.exec() == QDialog::Accepted) {
-		selectedProfile = dlgConfig.getProfileName();
+		selectedProfile = dlgConfig.profileName();
 	}
 }
 

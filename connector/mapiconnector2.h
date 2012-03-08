@@ -405,6 +405,11 @@ public:
 	bool add(QString profile, QString username, QString password, QString domain, QString server);
 
 	/**
+	 * Modify an existing profile's password.
+	 */
+	bool updatePassword(QString profile, QString oldPassword, QString newPassword);
+
+	/**
 	 * Remove a profile.
 	 */
 	bool remove(QString profile);

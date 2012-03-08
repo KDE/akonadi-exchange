@@ -1,6 +1,6 @@
 /*
  * This file is part of the Akonadi Exchange Resource.
- * Copyright 2011 Robert Gruber <rgruber@users.sourceforge.net>
+ * Copyright 2012 Shaheed Haque <srhaque@theiet.org>.
  *
  * Akonadi Exchange Resource is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -17,58 +17,49 @@
  * If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "createprofiledialog.h"
+#include "changepassworddialog.h"
 #include <QPushButton>
 #include <QTimer>
 #include <QDebug>
 
-CreateProfileDialog::CreateProfileDialog(QWidget* parent, Qt::WindowFlags f): QDialog(parent, f)
+ChangePasswordDialog::ChangePasswordDialog(QWidget* parent, Qt::WindowFlags f): QDialog(parent, f)
 {
 	setupUi(this);
 
-	connect(leProfile, SIGNAL(textEdited(QString)), this, SLOT(slotValidateData()));
-	connect(leUsername, SIGNAL(textEdited(QString)), this, SLOT(slotValidateData()));
+	connect(leOldPassword, SIGNAL(textEdited(QString)), this, SLOT(slotValidateData()));
 	connect(lePassword, SIGNAL(textEdited(QString)), this, SLOT(slotValidateData()));
-	connect(leDomain, SIGNAL(textEdited(QString)), this, SLOT(slotValidateData()));
-	connect(leServer, SIGNAL(textEdited(QString)), this, SLOT(slotValidateData()));
+	connect(leConfirmPassword, SIGNAL(textEdited(QString)), this, SLOT(slotValidateData()));
 
 	QTimer::singleShot(0, this, SLOT(slotValidateData()));
 }
 
-void CreateProfileDialog::slotValidateData()
+void ChangePasswordDialog::slotValidateData()
 {
 	bool valid = false;
 
 	if (!leProfile->text().isEmpty() && 
-		!leUsername->text().isEmpty() && 
+		!leOldPassword->text().isEmpty() && 
 		!lePassword->text().isEmpty() && 
-		!leDomain->text().isEmpty() && 
-		!leServer->text().isEmpty()) {
+		(lePassword->text() == leConfirmPassword->text())) {
 		valid = true;
 	}
 
 	buttonBox->button(QDialogButtonBox::Ok)->setEnabled(valid);
 }
 
-QString CreateProfileDialog::profileName() const
+QString ChangePasswordDialog::oldPassword() const
 {
-	return leProfile->text();
+	return leOldPassword->text();
 }
-QString CreateProfileDialog::username() const
-{
-	return leUsername->text();
-}
-QString CreateProfileDialog::password() const
+
+QString ChangePasswordDialog::newPassword() const
 {
 	return lePassword->text();
 }
-QString CreateProfileDialog::server() const
+
+void ChangePasswordDialog::setProfileName(QString value)
 {
-	return leServer->text();
-}
-QString CreateProfileDialog::domain() const
-{
-	return leDomain->text();
+	leProfile->setText(value);
 }
 
-#include "createprofiledialog.moc"
+#include "changepassworddialog.moc"

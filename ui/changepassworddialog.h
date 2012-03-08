@@ -1,6 +1,6 @@
 /*
  * This file is part of the Akonadi Exchange Resource.
- * Copyright 2011 Robert Gruber <rgruber@users.sourceforge.net>
+ * Copyright 2012 Shaheed Haque <srhaque@theiet.org>.
  *
  * Akonadi Exchange Resource is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -17,37 +17,28 @@
  * If not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef __PROFILEDIALOG_H__
-#define __PROFILEDIALOG_H__
+#ifndef CHANGEPASSWORD_H
+#define CHANGEPASSWORD_H
 
 #include <QDialog>
-#include "ui_profiledialog.h"
-#include "mapiconnector2.h"
 
-class ProfileDialog : public QDialog, public Ui::ProfileDialogBase
+#include "ui_changepassworddialog.h"
+
+class ChangePasswordDialog : public QDialog, public Ui::ChangePasswordDialogBase
 {
 Q_OBJECT
 public:
-	explicit ProfileDialog(QWidget *parent = 0);
-	virtual ~ProfileDialog() {}
+	explicit ChangePasswordDialog(QWidget* parent = 0, Qt::WindowFlags f = 0);
+	virtual ~ChangePasswordDialog() {}
 
-	QString profileName() const;
-	void setProfileName(QString profile);
+	void setProfileName(QString value);
+
+	QString oldPassword() const;
+
+	QString newPassword() const;
 
 private slots:
-	void readMapiProfiles();
-	void newProfileSelected(QListWidgetItem* newItem, QListWidgetItem* lastItem);
-	void slotValidate();
-
-	void slotCreateProfile();
-	void slotUpdateProfile();
-	void slotDeleteProfile();
-
-private:
-	void updateSelectedProfile();
-
-	MapiProfiles m_profiles;
-	QString selectedProfile;
+	void slotValidateData();
 };
 
-#endif
+#endif // CHANGEPASSWORD_H

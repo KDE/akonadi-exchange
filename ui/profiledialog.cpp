@@ -22,60 +22,52 @@
 #include <QDebug>
 #include <KMessageBox>
 
+#include "changepassworddialog.h"
 #include "createprofiledialog.h"
 
-ProfileDialog::ProfileDialog(QString selectedProfile, QWidget* parent)
- : QDialog(parent), selectedProfile(selectedProfile)
+ProfileDialog::ProfileDialog(QWidget *parent) : 
+	QDialog(parent)
 {
 	setupUi(this);
 
-	connect(btnCreate, SIGNAL(clicked()), this, SLOT(slotCreateNewProfile()));
-	connect(btnRemove, SIGNAL(clicked()), this, SLOT(slotRemoveProfile()));
+	connect(btnCreate, SIGNAL(clicked()), this, SLOT(slotCreateProfile()));
+	connect(btnUpdate, SIGNAL(clicked()), this, SLOT(slotUpdateProfile()));
+	connect(btnDelete, SIGNAL(clicked()), this, SLOT(slotDeleteProfile()));
 
-	connect(listWidget, SIGNAL(currentItemChanged(QListWidgetItem*, QListWidgetItem*)), 
+	connect(profileList, SIGNAL(currentItemChanged(QListWidgetItem*, QListWidgetItem*)), 
 			this, SLOT(newProfileSelected(QListWidgetItem*, QListWidgetItem*)));
 
 	QTimer::singleShot(0, this, SLOT(readMapiProfiles()));
-	QTimer::singleShot(0, this, SLOT(slotValidate()));
 }
 
 
 void ProfileDialog::readMapiProfiles()
 {
-	listWidget->clear();
+	profileList->clear();
 
-	QStringList profiles = m_profiles.list();
-
-	bool profileExist = false;
-	foreach (QString profile, profiles) {
-		QListWidgetItem* item = new QListWidgetItem(profile, listWidget);
-		if (selectedProfile == profile) {
-			listWidget->setCurrentItem(item);
-			profileExist = true;
+	foreach (QString entry, m_profiles.list()) {
+		QListWidgetItem* item = new QListWidgetItem(entry, profileList);
+		if (kcfg_ProfileName->text() == entry) {
+			profileList->setCurrentItem(item);
 		}
 	}
-
-	if (!profileExist) 
-		selectedProfile.clear();
-
 	updateSelectedProfile();
 }
 
 void ProfileDialog::updateSelectedProfile()
 {
-	labelSelectedProfile->setText(i18n("Selected Profile:")+QString::fromLatin1(" ")+selectedProfile);
+	if (profileList->currentItem()) {
+		kcfg_ProfileName->setText(profileList->currentItem()->text());
+	} else {
+		kcfg_ProfileName->clear();
+	}
 	slotValidate();
 }
 
 void ProfileDialog::newProfileSelected(QListWidgetItem* newItem, QListWidgetItem* lastItem)
 {
+	Q_UNUSED(newItem)
 	Q_UNUSED(lastItem)
-
-	if (newItem != NULL) {
-		selectedProfile = newItem->text();
-	} else {
-		selectedProfile.clear();
-	}
 
 	updateSelectedProfile();
 }
@@ -84,35 +76,65 @@ void ProfileDialog::slotValidate()
 {
 	bool valid = false;
 
-	if (!selectedProfile.isEmpty()) {
-		valid = true;
+	if (kcfg_ProfileName->text().isEmpty()) {
+		goto DONE;
 	}
-
+	valid = true;
+DONE:
 	buttonBox->button(QDialogButtonBox::Ok)->setEnabled(valid);
 }
 
-void ProfileDialog::slotCreateNewProfile()
+void ProfileDialog::slotCreateProfile()
 {
 	CreateProfileDialog dlg(this);
 	if (dlg.exec() == QDialog::Accepted) {
-		bool ok = m_profiles.add(dlg.getProfileName(), dlg.getUsername(), dlg.getPassword(), dlg.getDomain(), dlg.getServer());
-		if (!ok) 
+		bool ok = m_profiles.add(dlg.profileName(), dlg.username(), dlg.password(), dlg.domain(), dlg.server());
+		if (!ok) {
 			KMessageBox::error(this, i18n("An error occurred during the creation of the new profile"));
+		} else {
+			kcfg_ProfileName->setText(dlg.profileName());
+		}
 		readMapiProfiles();
 	}
 }
 
-void ProfileDialog::slotRemoveProfile()
+void ProfileDialog::slotUpdateProfile()
 {
-	if (selectedProfile.isEmpty())
+	ChangePasswordDialog dlg(this);
+	dlg.setProfileName(kcfg_ProfileName->text());
+	if (dlg.exec() == QDialog::Accepted) {
+		bool ok = m_profiles.updatePassword(kcfg_ProfileName->text(), dlg.oldPassword(), dlg.newPassword());
+		if (!ok) {
+			KMessageBox::error(this, i18n("An error occurred during the changing of the password: %1", mapiError()));
+		}
+		readMapiProfiles();
+	}
+}
+
+void ProfileDialog::slotDeleteProfile()
+{
+	if (kcfg_ProfileName->text().isEmpty())
 		return;
 
 	if (KMessageBox::questionYesNo(this, i18n("Do you really want to delete the selected profile?")) == KMessageBox::Yes) {
 		bool ok = m_profiles.remove(selectedProfile);
-		if (!ok) 
+		if (!ok)  {
 			KMessageBox::error(this, i18n("An error occurred during the deletion of the selected profile"));
+		}
 		readMapiProfiles();
 	}
 }
+
+QString ProfileDialog::profileName() const
+{
+	return kcfg_ProfileName->text();
+}
+
+void ProfileDialog::setProfileName(QString profile)
+{
+	kcfg_ProfileName->setText(profile);
+	readMapiProfiles();
+}
+
 
 #include "profiledialog.moc"

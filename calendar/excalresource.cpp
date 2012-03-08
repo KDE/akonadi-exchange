@@ -195,16 +195,15 @@ void ExCalResource::aboutToQuit()
   // event loop. The resource will terminate after this method returns
 }
 
-void ExCalResource::configure( WId windowId )
+void ExCalResource::configure(WId windowId)
 {
-	ProfileDialog dlgConfig(Settings::self()->profileName());
-  	if (windowId)
+	ProfileDialog dlgConfig;
+	dlgConfig.setProfileName(Settings::self()->profileName());
+	if (windowId) {
 		KWindowSystem::setMainWindow(&dlgConfig, windowId);
-
+	}
 	if (dlgConfig.exec() == KDialog::Accepted) {
-
-		QString profile = dlgConfig.getProfileName();
-		Settings::self()->setProfileName( profile );
+		Settings::self()->setProfileName(dlgConfig.profileName());
 		Settings::self()->writeConfig();
 
 		synchronize();

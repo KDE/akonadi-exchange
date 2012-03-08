@@ -6,43 +6,67 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>386</width>
-    <height>320</height>
+    <width>466</width>
+    <height>310</height>
    </rect>
   </property>
   <property name="windowTitle">
    <string>Select Profile</string>
   </property>
-  <layout class="QVBoxLayout" name="verticalLayout_2">
+  <layout class="QVBoxLayout" name="verticalLayout_4">
    <item>
     <widget class="QGroupBox" name="groupBox">
      <property name="title">
       <string>Profiles</string>
      </property>
-     <layout class="QVBoxLayout" name="verticalLayout">
+     <layout class="QVBoxLayout" name="verticalLayout_3">
       <item>
        <layout class="QHBoxLayout" name="horizontalLayout">
         <item>
-         <widget class="QPushButton" name="btnCreate">
-          <property name="text">
-           <string>&amp;Create Profile</string>
-          </property>
-         </widget>
+         <widget class="QListWidget" name="profileList"/>
         </item>
         <item>
-         <widget class="QPushButton" name="btnRemove">
-          <property name="text">
-           <string>&amp;Remove Profile</string>
-          </property>
-         </widget>
+         <layout class="QVBoxLayout" name="verticalLayout">
+          <item>
+           <widget class="QPushButton" name="btnCreate">
+            <property name="text">
+             <string>&amp;Add</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QPushButton" name="btnUpdate">
+            <property name="text">
+             <string>&amp;Change Password</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QPushButton" name="btnDelete">
+            <property name="text">
+             <string>&amp;Remove</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <spacer name="verticalSpacer">
+            <property name="orientation">
+             <enum>Qt::Vertical</enum>
+            </property>
+            <property name="sizeHint" stdset="0">
+             <size>
+              <width>20</width>
+              <height>40</height>
+             </size>
+            </property>
+           </spacer>
+          </item>
+         </layout>
         </item>
        </layout>
       </item>
       <item>
-       <widget class="QListWidget" name="listWidget"/>
-      </item>
-      <item>
-       <widget class="QLabel" name="labelSelectedProfile">
+       <widget class="QLabel" name="kcfg_ProfileName">
         <property name="text">
          <string>TextLabel</string>
         </property>
@@ -61,9 +85,10 @@
   </layout>
  </widget>
  <tabstops>
+  <tabstop>profileList</tabstop>
   <tabstop>btnCreate</tabstop>
-  <tabstop>btnRemove</tabstop>
-  <tabstop>listWidget</tabstop>
+  <tabstop>btnUpdate</tabstop>
+  <tabstop>btnDelete</tabstop>
   <tabstop>buttonBox</tabstop>
  </tabstops>
  <resources/>
