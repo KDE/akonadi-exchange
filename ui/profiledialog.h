@@ -35,7 +35,7 @@ public:
 	void setProfileName(QString profile);
 
 private slots:
-	void readMapiProfiles();
+	void readMapiProfiles(QString selection = QString());
 	void newProfileSelected(QListWidgetItem* newItem, QListWidgetItem* lastItem);
 	void slotValidate();
 
@@ -47,7 +47,6 @@ private:
 	void updateSelectedProfile();
 
 	MapiProfiles m_profiles;
-	QString selectedProfile;
 };
 
 #endif

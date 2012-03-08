@@ -19,7 +19,6 @@
 
 #include "createprofiledialog.h"
 #include <QPushButton>
-#include <QTimer>
 #include <QDebug>
 
 CreateProfileDialog::CreateProfileDialog(QWidget* parent, Qt::WindowFlags f): QDialog(parent, f)
@@ -28,11 +27,12 @@ CreateProfileDialog::CreateProfileDialog(QWidget* parent, Qt::WindowFlags f): QD
 
 	connect(leProfile, SIGNAL(textEdited(QString)), this, SLOT(slotValidateData()));
 	connect(leUsername, SIGNAL(textEdited(QString)), this, SLOT(slotValidateData()));
-	connect(lePassword, SIGNAL(textEdited(QString)), this, SLOT(slotValidateData()));
 	connect(leDomain, SIGNAL(textEdited(QString)), this, SLOT(slotValidateData()));
 	connect(leServer, SIGNAL(textEdited(QString)), this, SLOT(slotValidateData()));
+	connect(lePassword, SIGNAL(textEdited(QString)), this, SLOT(slotValidateData()));
+	connect(leConfirmPassword, SIGNAL(textEdited(QString)), this, SLOT(slotValidateData()));
 
-	QTimer::singleShot(0, this, SLOT(slotValidateData()));
+	slotValidateData();
 }
 
 void CreateProfileDialog::slotValidateData()
@@ -41,9 +41,10 @@ void CreateProfileDialog::slotValidateData()
 
 	if (!leProfile->text().isEmpty() && 
 		!leUsername->text().isEmpty() && 
-		!lePassword->text().isEmpty() && 
 		!leDomain->text().isEmpty() && 
-		!leServer->text().isEmpty()) {
+		!leServer->text().isEmpty() &&
+		!lePassword->text().isEmpty() && 
+		(lePassword->text() == leConfirmPassword->text())) {
 		valid = true;
 	}
 

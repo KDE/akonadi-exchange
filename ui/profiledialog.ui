@@ -13,8 +13,15 @@
   <property name="windowTitle">
    <string>Select Profile</string>
   </property>
-  <layout class="QVBoxLayout" name="verticalLayout_4">
-   <item>
+  <layout class="QGridLayout" name="gridLayout_2">
+   <item row="1" column="1">
+    <widget class="QDialogButtonBox" name="buttonBox">
+     <property name="standardButtons">
+      <set>QDialogButtonBox::Cancel|QDialogButtonBox::Ok</set>
+     </property>
+    </widget>
+   </item>
+   <item row="0" column="0" colspan="2">
     <widget class="QGroupBox" name="groupBox">
      <property name="title">
       <string>Profiles</string>
@@ -23,28 +30,28 @@
       <item>
        <layout class="QHBoxLayout" name="horizontalLayout">
         <item>
-         <widget class="QListWidget" name="profileList"/>
+         <widget class="QListWidget" name="kcfg_ProfileName"/>
         </item>
         <item>
          <layout class="QVBoxLayout" name="verticalLayout">
           <item>
            <widget class="QPushButton" name="btnCreate">
             <property name="text">
-             <string>&amp;Add</string>
-            </property>
-           </widget>
-          </item>
-          <item>
-           <widget class="QPushButton" name="btnUpdate">
-            <property name="text">
-             <string>&amp;Change Password</string>
+             <string>&amp;Add Profile</string>
             </property>
            </widget>
           </item>
           <item>
            <widget class="QPushButton" name="btnDelete">
             <property name="text">
-             <string>&amp;Remove</string>
+             <string>&amp;Delete Profile</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QPushButton" name="btnUpdate">
+            <property name="text">
+             <string>&amp;Change Profile Password</string>
             </property>
            </widget>
           </item>
@@ -65,31 +72,17 @@
         </item>
        </layout>
       </item>
-      <item>
-       <widget class="QLabel" name="kcfg_ProfileName">
-        <property name="text">
-         <string>TextLabel</string>
-        </property>
-       </widget>
-      </item>
      </layout>
-    </widget>
-   </item>
-   <item>
-    <widget class="QDialogButtonBox" name="buttonBox">
-     <property name="standardButtons">
-      <set>QDialogButtonBox::Cancel|QDialogButtonBox::Ok</set>
-     </property>
     </widget>
    </item>
   </layout>
  </widget>
  <tabstops>
-  <tabstop>profileList</tabstop>
-  <tabstop>btnCreate</tabstop>
-  <tabstop>btnUpdate</tabstop>
-  <tabstop>btnDelete</tabstop>
+  <tabstop>kcfg_ProfileName</tabstop>
   <tabstop>buttonBox</tabstop>
+  <tabstop>btnCreate</tabstop>
+  <tabstop>btnDelete</tabstop>
+  <tabstop>btnUpdate</tabstop>
  </tabstops>
  <resources/>
  <connections>

@@ -20,18 +20,11 @@
       <string>Profile Details</string>
      </property>
      <layout class="QGridLayout" name="gridLayout">
-      <item row="0" column="0">
-       <widget class="QLabel" name="label">
-        <property name="text">
-         <string>Profile &amp;Name</string>
-        </property>
-        <property name="buddy">
-         <cstring>leProfile</cstring>
-        </property>
-       </widget>
-      </item>
       <item row="0" column="1" colspan="3">
        <widget class="QLineEdit" name="leProfile"/>
+      </item>
+      <item row="1" column="1" colspan="3">
+       <widget class="QLineEdit" name="leServer"/>
       </item>
       <item row="1" column="0">
        <widget class="QLabel" name="label_2">
@@ -43,16 +36,13 @@
         </property>
        </widget>
       </item>
-      <item row="1" column="1" colspan="3">
-       <widget class="QLineEdit" name="leServer"/>
-      </item>
-      <item row="2" column="0">
-       <widget class="QLabel" name="label_5">
+      <item row="0" column="0">
+       <widget class="QLabel" name="label">
         <property name="text">
-         <string>&amp;Domain</string>
+         <string>Profile &amp;Name</string>
         </property>
         <property name="buddy">
-         <cstring>leDomain</cstring>
+         <cstring>leProfile</cstring>
         </property>
        </widget>
       </item>
@@ -69,9 +59,6 @@
         </property>
        </widget>
       </item>
-      <item row="2" column="3">
-       <widget class="QLineEdit" name="leUsername"/>
-      </item>
       <item row="3" column="0">
        <widget class="QLabel" name="label_4">
         <property name="text">
@@ -82,8 +69,38 @@
         </property>
        </widget>
       </item>
+      <item row="2" column="3">
+       <widget class="QLineEdit" name="leUsername"/>
+      </item>
       <item row="3" column="1" colspan="3">
        <widget class="QLineEdit" name="lePassword">
+        <property name="echoMode">
+         <enum>QLineEdit::Password</enum>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="0">
+       <widget class="QLabel" name="label_5">
+        <property name="text">
+         <string>&amp;Domain</string>
+        </property>
+        <property name="buddy">
+         <cstring>leDomain</cstring>
+        </property>
+       </widget>
+      </item>
+      <item row="4" column="0">
+       <widget class="QLabel" name="label_6">
+        <property name="text">
+         <string>&amp;Confirm Password</string>
+        </property>
+        <property name="buddy">
+         <cstring>leConfirmPassword</cstring>
+        </property>
+       </widget>
+      </item>
+      <item row="4" column="1" colspan="3">
+       <widget class="QLineEdit" name="leConfirmPassword">
         <property name="echoMode">
          <enum>QLineEdit::Password</enum>
         </property>
@@ -107,7 +124,10 @@
  <tabstops>
   <tabstop>leProfile</tabstop>
   <tabstop>leServer</tabstop>
+  <tabstop>leDomain</tabstop>
+  <tabstop>leUsername</tabstop>
   <tabstop>lePassword</tabstop>
+  <tabstop>leConfirmPassword</tabstop>
   <tabstop>buttonBox</tabstop>
  </tabstops>
  <resources/>

@@ -19,7 +19,6 @@
 
 #include "changepassworddialog.h"
 #include <QPushButton>
-#include <QTimer>
 #include <QDebug>
 
 ChangePasswordDialog::ChangePasswordDialog(QWidget* parent, Qt::WindowFlags f): QDialog(parent, f)
@@ -30,7 +29,7 @@ ChangePasswordDialog::ChangePasswordDialog(QWidget* parent, Qt::WindowFlags f): 
 	connect(lePassword, SIGNAL(textEdited(QString)), this, SLOT(slotValidateData()));
 	connect(leConfirmPassword, SIGNAL(textEdited(QString)), this, SLOT(slotValidateData()));
 
-	QTimer::singleShot(0, this, SLOT(slotValidateData()));
+	slotValidateData();
 }
 
 void ChangePasswordDialog::slotValidateData()
@@ -38,7 +37,7 @@ void ChangePasswordDialog::slotValidateData()
 	bool valid = false;
 
 	if (!leProfile->text().isEmpty() && 
-		!leOldPassword->text().isEmpty() && 
+		!leOldPassword->text().isEmpty() &&
 		!lePassword->text().isEmpty() && 
 		(lePassword->text() == leConfirmPassword->text())) {
 		valid = true;
