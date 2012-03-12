@@ -46,6 +46,51 @@
 
 using namespace Akonadi;
 
+static QBitArray ex2kcalRecurrenceDays(uint32_t exchangeDays)
+{
+	QBitArray bitArray(7, false);
+
+	if (exchangeDays & 0x00000001) // Sunday
+		bitArray.setBit(6, true);
+	if (exchangeDays & 0x00000002) // Monday
+		bitArray.setBit(0, true);
+	if (exchangeDays & 0x00000004) // Tuesday
+		bitArray.setBit(1, true);
+	if (exchangeDays & 0x00000008) // Wednesday
+		bitArray.setBit(2, true);
+	if (exchangeDays & 0x00000010) // Thursday
+		bitArray.setBit(3, true);
+	if (exchangeDays & 0x00000020) // Friday
+		bitArray.setBit(4, true);
+	if (exchangeDays & 0x00000040) // Saturday
+		bitArray.setBit(5, true);
+	return bitArray;
+}
+
+static uint32_t ex2kcalDayOfWeek(uint32_t exchangeDayOfWeek)
+{
+	uint32_t retVal = exchangeDayOfWeek;
+	if (retVal == 0) {
+		// Exchange-Sunday(0) mapped to KCal-Sunday(7)
+		retVal = 7;
+	}
+	return retVal;
+}
+
+static uint32_t ex2kcalDays(uint32_t exchangeMinutes)
+{
+	return exchangeMinutes / 60 / 24;
+}
+
+static KDateTime ex2kcalTimes(uint32_t exchangeMinutes)
+{
+	// exchange stores the recurrency times as minutes since 1.1.1601
+	QDateTime calc(QDate(1601, 1, 1));
+	int days = ex2kcalDays(exchangeMinutes);
+	int secs = exchangeMinutes - (days * 24 * 60);
+	return KDateTime(calc.addDays(days).addSecs(secs));
+}
+
 /**
  * An Appointment, with attendee recipients.
  *
@@ -79,10 +124,10 @@ public:
 	QDateTime reminderTime;
 	uint32_t reminderMinutes;
 
-	MapiRecurrencyPattern recurrency;
+	void ex2kcalRecurrency(KCal::Recurrence *rec);
 
 private:
-	bool debugRecurrencyPattern(RecurrencePattern *pattern);
+	RecurrencePattern *m_pattern;
 
 	/**
 	 * Fetch calendar properties.
@@ -184,10 +229,7 @@ bool ExCalResource::retrieveItem( const Akonadi::Item &itemOrig, const QSet<QByt
 		event->addAlarm(alarm);
 	}
 
-	if (message->recurrency.isRecurring()) {
-		// if this event is a recurring event create the recurrency
-		createKCalRecurrency(event->recurrence(), message->recurrency);
-	}
+	message->ex2kcalRecurrency(event->recurrence());
 	item.setPayload(KCal::Incidence::Ptr(event));
 
 	// TODO add further message properties.
@@ -314,12 +356,8 @@ void ExCalResource::itemChangedContinue(KJob* job)
 		message->addUniqueRecipient("event attendee", att);
 	}
 
-	if (message->recurrency.isRecurring()) {
-		// if this event is a recurring event create the recurrency
-//                createKCalRecurrency(event->recurrence(), message->recurrency);
-	}
-
 	// TODO add further data
+	message->ex2kcalRecurrency(event->recurrence());
 
 	// Update exchange with the new message->
 	kWarning() << "updating item: {" << 
@@ -344,39 +382,9 @@ void ExCalResource::itemRemoved( const Akonadi::Item &item )
   // of this template code to keep it simple
 }
 
-void ExCalResource::createKCalRecurrency(KCal::Recurrence* rec, const MapiRecurrencyPattern& pattern)
-{
-	rec->clear();
-
-	switch (pattern.mRecurrencyType) {
-		case MapiRecurrencyPattern::Daily:
-			rec->setDaily(pattern.mPeriod);
-			break;
-		case MapiRecurrencyPattern::Weekly:
-		case MapiRecurrencyPattern::Every_Weekday:
-			rec->setWeekly(pattern.mPeriod, pattern.mDays, pattern.mFirstDOW);
-			break;
-		case MapiRecurrencyPattern::Monthly:
-			rec->setMonthly(pattern.mPeriod);
-			break;
-		case MapiRecurrencyPattern::Yearly:
-			rec->setYearly(pattern.mPeriod);
-			break;
-		default:
-			kDebug() << "uncaught recurrency type:"<<pattern.mRecurrencyType;
-			return;
-		// TODO there are further recurrency types in exchange like e.g. 1st every month, ...
-	}
-
-	if (pattern.mEndType == MapiRecurrencyPattern::Count) {
-		rec->setDuration(pattern.mOccurrenceCount);
-	} else if (pattern.mEndType == MapiRecurrencyPattern::Date) {
-		rec->setEndDateTime(KDateTime(pattern.mEndDate));
-	} 
-}
-
 MapiAppointment::MapiAppointment(MapiConnector2 *connector, const char *tallocName, MapiId &id) :
-	MapiMessage(connector, tallocName, id)
+	MapiMessage(connector, tallocName, id),
+	m_pattern(0)
 {
 }
 
@@ -392,73 +400,78 @@ QDebug MapiAppointment::error() const
 	return MapiObject::error(prefix.arg(m_id.toString()));
 }
 
-bool MapiAppointment::debugRecurrencyPattern(RecurrencePattern *pattern)
+void MapiAppointment::ex2kcalRecurrency(KCal::Recurrence *rec)
 {
-	// do the actual work
+	rec->clear();
+	if (!m_pattern) {
+		// No recurrency.
+		return;
+	}
 	debug() << "-- Recurrency debug output [BEGIN] --";
-	switch (pattern->RecurFrequency) {
-	case RecurFrequency_Daily:
-		debug() << "Fequency: daily";
+	debug() << "Calendar:" << m_pattern->CalendarType;
+	if (m_pattern->RecurFrequency == RecurFrequency_Daily && m_pattern->PatternType == PatternType_Day) {
+		debug() << "Frequency: daily, pattern: day";
+		rec->setDaily(ex2kcalDays(m_pattern->Period));
+	}
+	else if (m_pattern->RecurFrequency == RecurFrequency_Daily && m_pattern->PatternType == PatternType_Week) {
+		debug() << "Frequency: daily, pattern: week";
+		// Every weekday.
+		QBitArray bitArray(7, true); // everyday ...
+		bitArray.setBit(5, false); // ... except saturday ..
+		bitArray.setBit(6, false); // ... except sunday
+
+		rec->setWeekly(
+			ex2kcalDays(m_pattern->Period) / 7,
+			bitArray,
+			ex2kcalDayOfWeek(m_pattern->FirstDOW));
+	}
+	else if (m_pattern->RecurFrequency == RecurFrequency_Weekly && m_pattern->PatternType == PatternType_Week) {
+		debug() << "Frequency: weekly, pattern: week, patternTypeSpecific:" <<
+			QString::number(m_pattern->PatternTypeSpecific.WeekRecurrencePattern, 2);
+		// Weekly.
+		rec->setWeekly(
+			m_pattern->Period,
+			ex2kcalRecurrenceDays(m_pattern->PatternTypeSpecific.WeekRecurrencePattern),
+			ex2kcalDayOfWeek(m_pattern->FirstDOW));
+	}
+	else if (m_pattern->RecurFrequency == RecurFrequency_Monthly) {
+		// Month, MonthEnd, MonthN and also HjXXX (Hijri) variants.
+		debug() << "Frequency: monthly, pattern:" << m_pattern->PatternType <<
+			"patternTypeSpecific:" << m_pattern->PatternTypeSpecific.Day;
+		rec->setMonthly(m_pattern->Period);
+	}
+	else if (m_pattern->RecurFrequency == RecurFrequency_Yearly) {
+		debug() << "Frequency: yearly";
+		rec->setYearly(m_pattern->Period / 12);
+	} else {
+		// TODO there are further recurrency types in exchange like e.g. 1st every month, ...
+		error() << "unsupported combination of frequency:" << m_pattern->RecurFrequency <<
+			"and patterntype:" << m_pattern->PatternType;
+	}
+
+	rec->setStartDateTime(ex2kcalTimes(m_pattern->StartDate));
+	debug() << "Start:" << rec->startDateTime();
+	switch (m_pattern->EndType) {
+	case END_AFTER_DATE:
+		rec->setEndDateTime(ex2kcalTimes(m_pattern->EndDate));
+		debug() << "End:" << rec->endDateTime();
 		break;
-	case RecurFrequency_Weekly:
-		debug() << "Fequency: weekly";
+	case END_AFTER_N_OCCURRENCES:
+		rec->setDuration(m_pattern->OccurrenceCount);
+		debug() << "End: after occurrence count" << rec->duration();
 		break;
-	case RecurFrequency_Monthly:
-		debug() << "Fequency: monthly";
-		break;
-	case RecurFrequency_Yearly:
-		debug() << "Fequency: yearly";
+	case END_NEVER_END:
+	case 0xFFFFFFFF:
+		debug() << "End: never";
 		break;
 	default:
-		debug() << "unsupported frequency:"<<pattern->RecurFrequency;
-		return false;
-	}
-
-	switch (pattern->PatternType) {
-	case PatternType_Day:
-		debug() << "PatternType: day";
+		error() << "unsupported endtype:" << m_pattern->EndType;
 		break;
-	case PatternType_Week:
-		debug() << "PatternType: week";
-		break;
-	case PatternType_Month:
-		debug() << "PatternType: month";
-		break;
-	default:
-		debug() << "unsupported patterntype:"<<pattern->PatternType;
-		return false;
 	}
-
-	debug() << "Calendar:" << pattern->CalendarType;
-	debug() << "FirstDateTime:" << pattern->FirstDateTime;
-	debug() << "Period:" << pattern->Period;
-	if (pattern->PatternType == PatternType_Month) {
-		debug() << "PatternTypeSpecific:" << pattern->PatternTypeSpecific.Day;
-	} else if (pattern->PatternType == PatternType_Week) {
-		debug() << "PatternTypeSpecific:" << QString::number(pattern->PatternTypeSpecific.WeekRecurrencePattern, 2);
-	}
-
-	switch (pattern->EndType) {
-		case END_AFTER_DATE:
-			debug() << "EndType: after date";
-			break;
-		case END_AFTER_N_OCCURRENCES:
-			debug() << "EndType: after occurenc count";
-			break;
-		case END_NEVER_END:
-			debug() << "EndType: never";
-			break;
-		default:
-			debug() << "unsupported endtype:"<<pattern->EndType;
-			return false;
-	}
-	debug() << "OccurencCount:" << pattern->OccurrenceCount;
-	debug() << "FirstDOW:" << pattern->FirstDOW;
-	debug() << "Start:" << pattern->StartDate;
-	debug() << "End:" << pattern->EndDate;
+	rec->dump();
 	debug() << "-- Recurrency debug output [END] --";
-
-	return true;
+	//talloc_free(m_pattern);
+	//m_pattern = 0;
 }
 
 bool MapiAppointment::propertiesPull(QVector<int> &tags, const bool tagsAppended, bool pullAll)
@@ -506,7 +519,6 @@ bool MapiAppointment::propertiesPull(QVector<int> &tags, const bool tagsAppended
 	// Walk through the properties and extract the values of interest. The
 	// properties here should be aligned with the list pulled above.
 	unsigned recurrenceType = 0;
-	RecurrencePattern *pattern = 0;
 	bool embeddedInBody = false;
 	QString header;
 
@@ -559,7 +571,7 @@ bool MapiAppointment::propertiesPull(QVector<int> &tags, const bool tagsAppended
 			recurrenceType = property.value().toInt();
 			break;
 		case PidLidAppointmentRecur:
-			pattern = get_RecurrencePattern(ctx(), &m_properties[i].value.bin);
+			m_pattern = get_RecurrencePattern(ctx(), &m_properties[i].value.bin);
 			break;
 		case PidTagTransportMessageHeaders:
 			header = property.value().toString();
@@ -642,12 +654,9 @@ DONE:
 		return true;
 	}
 
-	// Is there a recurrance type set?
+	// Is there a recurrence type set?
 	if (recurrenceType != 0) {
-		if (pattern) {
-			debugRecurrencyPattern(pattern);
-			recurrency.setData(pattern);
-		} else {
+		if (!m_pattern) {
 			// TODO This should not happen. PidLidRecurrenceType says this is a recurring event, so why is there no PidLidAppointmentRecur???
 			debug() << "missing recurrencePattern for recurrenceType:" << recurrenceType;
 			recurrenceType = 0;

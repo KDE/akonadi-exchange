@@ -290,42 +290,6 @@ protected:
 	ObjectType m_objectType;
 };
 
-class MapiRecurrencyPattern 
-{
-public:
-	enum RecurrencyType {
-		Daily, Weekly, Every_Weekday, Monthly, Yearly,
-	};
-	enum EndTyp {
-		Never, Count, Date,
-	};
-
-	MapiRecurrencyPattern() { mRecurring= false; }
-	virtual ~MapiRecurrencyPattern() {}
-
-	bool isRecurring() { return mRecurring; }
-	void setRecurring(bool r) { this->mRecurring = r; }
-
-	bool setData(RecurrencePattern* pattern);
-	
-private:
-	QBitArray getRecurrenceDays(const uint32_t exchangeDays);
-	int convertDayOfWeek(const uint32_t exchangeDayOfWeek);
-	QDateTime convertExchangeTimes(const uint32_t exchangeMinutes);
-
-	bool mRecurring;
-
-public:
-	RecurrencyType mRecurrencyType;
-	int mPeriod;
-	int mFirstDOW;
-	EndTyp mEndType;
-	int mOccurrenceCount;
-	QBitArray mDays;
-	QDateTime mStartDate;
-	QDateTime mEndDate;
-};
-
 /**
  * A class which wraps a talloc memory allocator such that objects of this type
  * automatically free the used memory on destruction.
