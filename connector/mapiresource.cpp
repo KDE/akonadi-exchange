@@ -131,9 +131,8 @@ void MapiResource::fetchCollections(MapiDefaultFolder rootFolder, Akonadi::Colle
 
 void MapiResource::fetchCollections(const QString &path, const MapiId &parentId, const Collection &parent, Akonadi::Collection::List &collections)
 {
-	kDebug() << "fetch collections in:" << path;
+	kDebug() << "fetch collections in:" << path << "under parent folder:" << parentId.toString();
 
-	kError() << "parent folder:" << parentId.toString();
 	MapiFolder parentFolder(m_connection, "MapiResource::retrieveCollection", parentId);
 	if (!parentFolder.open()) {
 		error(parentFolder, i18n("cannot open Exchange folder list"));
@@ -153,7 +152,6 @@ void MapiResource::fetchCollections(const QString &path, const MapiId &parentId,
 	contentTypes << m_itemMimeType << Akonadi::Collection::mimeType();
 	foreach (MapiFolder *data, list) {
 		Collection child;
-	kError() << "child folder:" << data->id().toString();
 
 		child.setName(data->name);
 		child.setRemoteId(data->id().toString());
@@ -199,7 +197,6 @@ void MapiResource::fetchItems(const Akonadi::Collection &collection, Item::List 
 		foreach (Item item, existingItems) {
 			// store all the items that we already know
 			MapiId id(item.remoteId());
-	kError() << "child item:" << id.toString();
 			knownRemoteIds.insert(id);
 			knownItems.insert(id, item);
 		}
