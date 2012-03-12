@@ -20,13 +20,14 @@
 
 #include "mapiconnector2.h"
 
+#include <QAbstractSocket>
 #include <QDebug>
 #include <QStringList>
 #include <QDir>
 #include <QMessageBox>
 #include <QRegExp>
 #include <QVariant>
-
+#include <QSocketNotifier>
 #include <KLocale>
 #include <kpimutils/email.h>
 
@@ -241,7 +242,8 @@ unsigned isGoodEmailAddress(QString &email)
 
 MapiConnector2::MapiConnector2() :
 	MapiProfiles(),
-	m_session(0)
+	m_session(0),
+	m_notifier(0)
 {
 	mapi_object_init(&m_store);
 	mapi_object_init(&m_nspiStore);
@@ -249,6 +251,7 @@ MapiConnector2::MapiConnector2() :
 
 MapiConnector2::~MapiConnector2()
 {
+	delete m_notifier;
 	// TODO The calls to tidy up m_nspiStore seem to break things.
 	if (m_session) {
 		//Logoff(&m_nspiStore);
@@ -396,7 +399,51 @@ bool MapiConnector2::login(QString profile)
 		error() << "cannot open public folder" << mapiError();
 		return false;
 	}
+
+	// Get rid of any existing notifier and create a new one.
+	// TODO Wait for a version of libmapi that has asingle parameter here.
+#if 0
+#if 0
+	if (MAPI_E_SUCCESS != RegisterNotification(m_session)) {
+#else
+	if (MAPI_E_SUCCESS != RegisterNotification(m_session, 0)) {
+#endif
+		error() << "cannot register for notifications" << mapiError();
+		return false;
+	}
+	delete m_notifier;
+	m_notifier = new QSocketNotifier(m_session->notify_ctx->fd, QSocketNotifier::Read);
+	if (!m_notifier) {
+		error() << "cannot create notifier";
+		return false;
+	}
+	connect(m_notifier, SIGNAL(activated(int)), this, SLOT(notified(int)));
+#endif
 	return true;
+}
+
+void MapiConnector2::notified(int fd)
+{
+	QAbstractSocket socket(QAbstractSocket::UdpSocket, this);
+	socket.setSocketDescriptor(fd);
+	struct mapi_response    *mapi_response;
+	NTSTATUS                status;
+	QByteArray data;
+	while (true) {
+		data = socket.readAll();
+		error() << "read from socket" << data.size();
+		if (!data.size()) {
+			break;
+		}
+		// Dummy transaction to keep the  pipe up.
+		status = emsmdb_transaction_null((struct emsmdb_context *)m_session->emsmdb->ctx,
+                                                                         &mapi_response);
+		if (!NT_STATUS_IS_OK(status)) {
+			error() << "bad nt status" << status;
+			break;
+		}
+		//retval = ProcessNotification(notify_ctx, mapi_response);
+	}
 }
 
 bool MapiConnector2::resolveNames(const char *names[], SPropTagArray *tags,
@@ -660,6 +707,8 @@ void MapiMessage::addUniqueRecipient(const char *source, MapiRecipient &candidat
 {
 #if DEBUG_RECIPIENTS
 	debug() << "candidate address:" << source << candidate.toString();
+#else
+	Q_UNUSED(source)
 #endif
 	if (candidate.name.isEmpty() && candidate.email.isEmpty()) {
 		// Discard garbage.
@@ -894,7 +943,8 @@ void MapiMessage::recipientPopulate(const char *phase, SRow &recipient, MapiReci
  *  - For those that are left, wing-it.
  *
  * There is also a load of cruft data elimination along the way.
- */bool MapiMessage::recipientsPull()
+ */
+bool MapiMessage::recipientsPull()
 {
 #if 0
 // TEST -START-  Try an easier approach to find all the recipients
@@ -1238,7 +1288,8 @@ MapiObject::MapiObject(MapiConnector2 *connection, const char *tallocName, const
 	m_id(id),
 	m_properties(0),
 	m_propertyCount(0),
-	m_ourTagList(0)
+	m_ourTagList(0),
+	m_listenerId(0)
 {
 	mapi_object_init(&m_object);
 }
@@ -1415,6 +1466,15 @@ bool MapiObject::propertyWrite(int tag, QDateTime &data, bool idempotent)
 	copy->dwHighDateTime = ntTime >> 32;
 	copy->dwLowDateTime = ntTime;
 	return propertyWrite(tag, copy, idempotent);
+}
+
+bool MapiObject::subscribe()
+{
+	if (MAPI_E_SUCCESS != Subscribe(&m_object, &m_listenerId, -1, false, 0, this)) {
+		error() << "cannot subscribe listener" << mapiError();
+		return false;
+	}
+	return true;
 }
 
 QString MapiObject::tagAt(unsigned i) const

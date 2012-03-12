@@ -434,14 +434,18 @@ private:
 /**
  * The main class represents a connection to the MAPI server.
  */
-class MapiConnector2 : public MapiProfiles
+class MapiConnector2 : protected QObject, public MapiProfiles
 {
+	Q_OBJECT
 public:
 	MapiConnector2();
 	virtual ~MapiConnector2();
 
 	/**
 	 * Connect to the server.
+	 * 
+	 * @param profile	Name in libmapi database.
+	 * @return True if the connection attempt succeeds.
 	 */
 	bool login(QString profile);
 
@@ -494,17 +498,23 @@ private:
 	mapi_session *m_session;
 	mapi_object_t m_store;
 	mapi_object_t m_nspiStore;
+	class QSocketNotifier *m_notifier;
 
 	virtual QDebug debug() const;
 	virtual QDebug error() const;
+
+private Q_SLOTS:
+	void notified(int fd);
+	
 };
 
 /**
  * A class which wraps a MAPI object such that objects of this type 
  * automatically free the used memory on destruction.
  */
-class MapiObject : protected TallocContext
+class MapiObject : public QObject, protected TallocContext
 {
+	Q_OBJECT
 public:
 	MapiObject(MapiConnector2 *connection, const char *tallocName, const MapiId &id);
 
@@ -577,6 +587,11 @@ public:
 	 */
 	QString tagName(int tag) const;
 
+	/**
+	 * Subscribe for notifications on the given object.
+	 */
+	bool subscribe();
+
 protected:
 	MapiConnector2 *m_connection;
 	const MapiId m_id;
@@ -605,6 +620,10 @@ private:
 
 	int *m_ourTagList;
 	SPropTagArray m_ourTags;
+
+	// Get notifications from Exchange.
+	friend class MapiConnector2;
+	unsigned m_listenerId;
 };
 
 /**

@@ -27,6 +27,7 @@
 #include <KLocalizedString>
 #include <KWindowSystem>
 
+#include <Akonadi/CachePolicy>
 #include <Akonadi/ItemFetchJob>
 #include <Akonadi/ItemFetchScope>
 
@@ -117,6 +118,15 @@ void ExCalResource::retrieveCollections()
 
 	setName(i18n("Exchange Calendar for %1", profile()));
 	fetchCollections(Calendar, collections);
+	if (collections.size()) {
+		Collection root = collections.first();
+		Akonadi::CachePolicy cachePolicy;
+		cachePolicy.setInheritFromParent(false);
+		cachePolicy.setSyncOnDemand(false);
+		cachePolicy.setCacheTimeout(-1);
+		cachePolicy.setIntervalCheckTime(5);
+		root.setCachePolicy(cachePolicy);
+	}
 
 	// Notify Akonadi about the new collections.
 	collectionsRetrieved(collections);

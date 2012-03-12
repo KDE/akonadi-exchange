@@ -164,6 +164,9 @@ void MapiResource::fetchCollections(const QString &path, const MapiId &parentId,
 		fetchCollections(currentPath, data->id(), child, collections);
 		delete data;
 	}
+#if 0
+	parentFolder.subscribe();
+#endif
 }
 
 void MapiResource::fetchItems(const Akonadi::Collection &collection, Item::List &items, Item::List &deletedItems)
