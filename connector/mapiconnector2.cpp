@@ -28,6 +28,7 @@
 #include <QRegExp>
 #include <QVariant>
 #include <QSocketNotifier>
+#include <QTextCodec>
 #include <KLocale>
 #include <kpimutils/email.h>
 
@@ -1280,6 +1281,135 @@ bool MapiMessage::recipientsPull()
 const QList<MapiRecipient> &MapiMessage::recipients()
 {
 	return m_recipients;
+}
+
+bool MapiMessage::streamRead(mapi_object_t *parent, int tag, QByteArray &bytes)
+{
+	mapi_object_t stream;
+	unsigned dataSize;
+	unsigned offset;
+	uint16_t readSize;
+
+	mapi_object_init(&stream);
+	if (MAPI_E_SUCCESS != OpenStream(parent, (MAPITAGS)tag, OpenStream_ReadOnly, &stream)) {
+		error() << "cannot open stream:" << tagName(tag) << mapiError();
+		mapi_object_release(&stream);
+		return false;
+	}
+	if (MAPI_E_SUCCESS != GetStreamSize(&stream, &dataSize)) {
+		error() << "cannot get stream size:" << tagName(tag) << mapiError();
+		mapi_object_release(&stream);
+		return false;
+	}
+	bytes.reserve(dataSize);
+	offset = 0;
+	do {
+		if (MAPI_E_SUCCESS != ReadStream(&stream, (uchar *)bytes.data() + offset, 0x1000, &readSize)) {
+			error() << "cannot read stream:" << tagName(tag) << mapiError();
+			mapi_object_release(&stream);
+			return false;
+		}
+		offset += readSize;
+	} while (readSize && (offset < dataSize));
+	bytes.resize(dataSize);
+	mapi_object_release(&stream);
+	return true;
+}
+
+/**
+ * See the codepage2codec map below.
+ */
+const unsigned MapiMessage::CODEPAGE_UTF16 = 1200;
+
+bool MapiMessage::streamRead(mapi_object_t *parent, int tag, unsigned codepage, QString &string)
+{
+	// Map QTextCodec names to Microsoft Code Pages
+	typedef struct
+	{
+		unsigned codepage;
+		const char *codec;
+	} codepage2codec;
+
+	static codepage2codec map[] =
+	{
+		{ 10000,	"Apple Roman" },
+		{ 950,		"Big5" },
+		{ 950,		"Big5-HKSCS" },
+		{ 949,		"CP949" },
+		{ 20932,	"EUC-JP" },
+		{ 51949,	"EUC-KR" },
+		{ 54936,	"GB18030-0" },
+		{ 850,		"IBM 850" },
+		{ 866,		"IBM 866" },
+		{ 874,		"IBM 874" },
+		{ 50220,	"ISO 2022-JP" },
+		{ 28591,	"ISO 8859-1" },
+		{ 28592,	"ISO 8859-2" },
+		{ 28593,	"ISO 8859-3" },
+		{ 28594,	"ISO 8859-4" },
+		{ 28595,	"ISO 8859-5" },
+		{ 28596,	"ISO 8859-6" },
+		{ 28597,	"ISO 8859-7" },
+		{ 28598,	"ISO 8859-8" },
+		{ 28599,	"ISO 8859-9" },
+		{ 28600,	"ISO 8859-10" },
+		{ 28603,	"ISO 8859-13" },
+		{ 28604,	"ISO 8859-14" },
+		{ 28605,	"ISO 8859-15" },
+		{ 28606,	"ISO 8859-16" },
+		{ 57003,	"Iscii-Bng" },
+		{ 57002,	"Iscii-Dev" },
+		{ 57010,	"Iscii-Gjr" },
+		{ 57008,	"Iscii-Knd" },
+		{ 57009,	"Iscii-Mlm" },
+		{ 57007,	"Iscii-Ori" },
+		{ 57011,	"Iscii-Pnj" },
+		{ 57005,	"Iscii-Tlg" },
+		{ 57004,	"Iscii-Tml" },
+		{ 50222,	"JIS X 0201" },
+		{ 20932,	"JIS X 0208" },
+		{ 20866,	"KOI8-R" },
+		{ 21866,	"KOI8-U" },
+		//{,		"MuleLao-1" },
+		//{,		"ROMAN8" },
+		{ 932,		"Shift-JIS" },
+		{ 874,		"TIS-620" },
+		{ 57004,	"TSCII" },
+		{ 65001,	"UTF-8" },
+		{ CODEPAGE_UTF16,"UTF-16" },
+		{ 1201,		"UTF-16BE" },
+		{ 1200,		"UTF-16LE" },
+		{ 12000,	"UTF-32" },
+		{ 12001,	"UTF-32BE" },
+		{ 12000,	"UTF-32LE" },
+		{ 1250,		"Windows-1250" },
+		{ 1251,		"Windows-1251" },
+		{ 1252,		"Windows-1252" },
+		{ 1253,		"Windows-1253" },
+		{ 1254,		"Windows-1254" },
+		{ 1255,		"Windows-1255" },
+		{ 1256,		"Windows-1256" },
+		{ 1257,		"Windows-1257" },
+		{ 1258,		"Windows-1258" },
+		//{,		"WINSAMI2" },
+		{ 0, 0 }
+	};
+	QByteArray bytes;
+	codepage2codec *entry = &map[0];
+
+	while (entry->codepage && entry->codepage != codepage) {
+		entry++;
+	}
+	if (!entry->codec) {
+		error() << "codec name not found for codepage:" << codepage;
+		return false;
+	}
+	if (!streamRead(parent, tag, bytes)) {
+		return false;
+	}
+	QTextCodec *codec = QTextCodec::codecForName(entry->codec);
+	string = codec->toUnicode(bytes);
+	return true;
 }
 
 MapiObject::MapiObject(MapiConnector2 *connection, const char *tallocName, const MapiId &id) :

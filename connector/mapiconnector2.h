@@ -714,6 +714,18 @@ protected:
 	 */
 	virtual bool propertiesPull(QVector<int> &tags, const bool tagsAppended, bool pullAll);
 
+	/**
+	 * Read a stream as a byte array.
+	 */
+	bool streamRead(mapi_object_t *parent, int tag, QByteArray &bytes);
+
+	/**
+	 * Read a stream as a string.
+	 */
+	bool streamRead(mapi_object_t *parent, int tag, unsigned codepage, QString &string);
+
+	static const unsigned CODEPAGE_UTF16;
+
 private:
 	virtual QDebug debug() const;
 	virtual QDebug error() const;
