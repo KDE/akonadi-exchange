@@ -32,6 +32,7 @@
 #include <Akonadi/ItemFetchScope>
 
 #include <KCal/Event>
+#include <kcalutils/stringify.h>
 
 #include "mapiconnector2.h"
 #include "profiledialog.h"
@@ -46,23 +47,50 @@
 
 using namespace Akonadi;
 
+static QString stringify(QBitArray &days)
+{
+	QString result;
+	if (days[0]) {
+		result.append(i18n("Mo"));
+	}
+	if (days[1]) {
+		result.append(i18n("Tu"));
+	}
+	if (days[2]) {
+		result.append(i18n("We"));
+	}
+	if (days[3]) {
+		result.append(i18n("Th"));
+	}
+	if (days[4]) {
+		result.append(i18n("Fr"));
+	}
+	if (days[5]) {
+		result.append(i18n("Sa"));
+	}
+	if (days[6]) {
+		result.append(i18n("Su"));
+	}
+	return result;
+}
+
 static QBitArray ex2kcalRecurrenceDays(uint32_t exchangeDays)
 {
 	QBitArray bitArray(7, false);
 
-	if (exchangeDays & 0x00000001) // Sunday
+	if (exchangeDays & Su) // Sunday
 		bitArray.setBit(6, true);
-	if (exchangeDays & 0x00000002) // Monday
+	if (exchangeDays & M) // Monday
 		bitArray.setBit(0, true);
-	if (exchangeDays & 0x00000004) // Tuesday
+	if (exchangeDays & Tu) // Tuesday
 		bitArray.setBit(1, true);
-	if (exchangeDays & 0x00000008) // Wednesday
+	if (exchangeDays & W) // Wednesday
 		bitArray.setBit(2, true);
-	if (exchangeDays & 0x00000010) // Thursday
+	if (exchangeDays & Th) // Thursday
 		bitArray.setBit(3, true);
-	if (exchangeDays & 0x00000020) // Friday
+	if (exchangeDays & F) // Friday
 		bitArray.setBit(4, true);
-	if (exchangeDays & 0x00000040) // Saturday
+	if (exchangeDays & Sa) // Saturday
 		bitArray.setBit(5, true);
 	return bitArray;
 }
@@ -70,7 +98,7 @@ static QBitArray ex2kcalRecurrenceDays(uint32_t exchangeDays)
 static uint32_t ex2kcalDayOfWeek(uint32_t exchangeDayOfWeek)
 {
 	uint32_t retVal = exchangeDayOfWeek;
-	if (retVal == 0) {
+	if (retVal == FirstDOW_Sunday) {
 		// Exchange-Sunday(0) mapped to KCal-Sunday(7)
 		retVal = 7;
 	}
@@ -407,110 +435,104 @@ void MapiAppointment::ex2kcalRecurrency(KCal::Recurrence *rec)
 		// No recurrency.
 		return;
 	}
-	debug() << "-- Recurrency debug output [BEGIN] --";
-	debug() << "Calendar:" << m_pattern->CalendarType;
+
+	QString description;
+	//debug() << "Calendar:" << m_pattern->CalendarType;
+	QBitArray days;
 	if (m_pattern->RecurFrequency == RecurFrequency_Daily && m_pattern->PatternType == PatternType_Day) {
-		debug() << "Every n days:" << ex2kcalDays(m_pattern->Period);
 		rec->setDaily(ex2kcalDays(m_pattern->Period));
+		description = i18n("Every %1 days,", ex2kcalDays(m_pattern->Period));
 	}
 	else if (m_pattern->RecurFrequency == RecurFrequency_Daily && m_pattern->PatternType == PatternType_Week) {
-		debug() << "Every weekday";
-		QBitArray bitArray(7, true); // everyday ...
-		bitArray.setBit(5, false); // ... except saturday ..
-		bitArray.setBit(6, false); // ... except sunday
-
-		rec->setWeekly(
-			ex2kcalDays(m_pattern->Period) / 7,
-			bitArray,
-			ex2kcalDayOfWeek(m_pattern->FirstDOW));
+		days = ex2kcalRecurrenceDays(M | Tu | W | Th | F);
+		rec->setWeekly(ex2kcalDays(m_pattern->Period) / 7, days, ex2kcalDayOfWeek(m_pattern->FirstDOW));
+		description = i18n("Every weekday,");
 	}
 	else if (m_pattern->RecurFrequency == RecurFrequency_Weekly && m_pattern->PatternType == PatternType_Week) {
-		debug() << "Every n weeks on one or more particular days of the week:" << m_pattern->Period <<
-			"MTWTFSS:" << ex2kcalRecurrenceDays(m_pattern->PatternTypeSpecific.WeekRecurrencePattern);
-		rec->setWeekly(
-			m_pattern->Period,
-			ex2kcalRecurrenceDays(m_pattern->PatternTypeSpecific.WeekRecurrencePattern),
-			ex2kcalDayOfWeek(m_pattern->FirstDOW));
+		days = ex2kcalRecurrenceDays(m_pattern->PatternTypeSpecific.WeekRecurrencePattern);
+		rec->setWeekly(m_pattern->Period, days, ex2kcalDayOfWeek(m_pattern->FirstDOW));
+		description = i18n("Every %1 weeks on %2,", m_pattern->Period, stringify(days));
 	}
 	else if (m_pattern->RecurFrequency == RecurFrequency_Monthly) {
 		rec->setMonthly(m_pattern->Period);
-		debug() << "Every n months:" << m_pattern->Period;
 		switch (m_pattern->PatternType)
 		{
 		case PatternType_Month:
 		case PatternType_HjMonth:
-			debug() << "...on the nth day:" << m_pattern->PatternTypeSpecific.Day;
 			rec->addMonthlyDate(m_pattern->PatternTypeSpecific.Day);
+			description = i18n("On the %1 day every %2 months,", m_pattern->PatternTypeSpecific.Day, 
+					   m_pattern->Period);
 			break;
 		case PatternType_MonthNth:
 		case PatternType_HjMonthNth:
-			debug() << "...on a specific day of the week on the nth week:" <<
-				m_pattern->PatternTypeSpecific.MonthRecurrencePattern.N << "MTWTFSS:" <<
-				ex2kcalRecurrenceDays(m_pattern->PatternTypeSpecific.MonthRecurrencePattern.WeekRecurrencePattern);
-			rec->addMonthlyPos(m_pattern->PatternTypeSpecific.MonthRecurrencePattern.N, ex2kcalRecurrenceDays(m_pattern->PatternTypeSpecific.MonthRecurrencePattern.WeekRecurrencePattern));
+			days = ex2kcalRecurrenceDays(m_pattern->PatternTypeSpecific.MonthRecurrencePattern.WeekRecurrencePattern);
+			rec->addMonthlyPos(m_pattern->PatternTypeSpecific.MonthRecurrencePattern.N, days);
+			description = i18n("On %1 of the %2 week every %3 months,", stringify(days),
+					   m_pattern->PatternTypeSpecific.MonthRecurrencePattern.N,
+					   m_pattern->Period);
 			break;
 		case PatternType_MonthEnd:
 		case PatternType_HjMonthEnd:
-			debug() << "...at the end of the month" << m_pattern->PatternTypeSpecific.Day;
 			rec->addMonthlyDate(m_pattern->PatternTypeSpecific.Day);
+			description = i18n("At the end (day %1) of every %2 month,", m_pattern->PatternTypeSpecific.Day,
+					   m_pattern->Period);
 			break;
 		default:
-			error() << "unsupported monthly frequency with patterntype:" << m_pattern->PatternType;
+			description = i18n("Unsupported monthly frequency with patterntype %1", m_pattern->PatternType);
 			break;
 		}
 	}
 	else if (m_pattern->RecurFrequency == RecurFrequency_Yearly) {
 		rec->setYearly(1);
-		debug() << "Every year";
 		switch (m_pattern->PatternType)
 		{
 		case PatternType_Month:
 		case PatternType_HjMonth:
-			debug() << "...on the mth day of the nth month:" << m_pattern->PatternTypeSpecific.Day << m_pattern->Period;
 			rec->addYearlyMonth(m_pattern->Period);
 			rec->addYearlyDate(m_pattern->PatternTypeSpecific.Day);
+			description = i18n("Yearly, on the %1 day of the %2 month,", m_pattern->PatternTypeSpecific.Day, 
+					   m_pattern->Period);
 			break;
 		case PatternType_MonthNth:
 		case PatternType_HjMonthNth:
-			debug() << "...on a specific day of the week on the mth day of the nth month:" <<
-				m_pattern->PatternTypeSpecific.MonthRecurrencePattern.N << m_pattern->Period <<
-				"MTWTFSS:" << ex2kcalRecurrenceDays(m_pattern->PatternTypeSpecific.MonthRecurrencePattern.WeekRecurrencePattern);
+			days = ex2kcalRecurrenceDays(m_pattern->PatternTypeSpecific.MonthRecurrencePattern.WeekRecurrencePattern);
 			rec->addYearlyMonth(m_pattern->Period);
-			rec->addYearlyPos(m_pattern->PatternTypeSpecific.MonthRecurrencePattern.N, ex2kcalRecurrenceDays(m_pattern->PatternTypeSpecific.MonthRecurrencePattern.WeekRecurrencePattern));
+			rec->addYearlyPos(m_pattern->PatternTypeSpecific.MonthRecurrencePattern.N, days);
+			description = i18n("Yearly, the %1 day of the %2 month when it falls on %3,",
+					   m_pattern->PatternTypeSpecific.MonthRecurrencePattern.N,
+					   m_pattern->Period, stringify(days));
 			break;
 		default:
-			error() << "unsupported yearly frequency with patterntype:" << m_pattern->PatternType;
+			description = i18n("Unsupported yearly frequency with patterntype %1", m_pattern->PatternType);
 			break;
 		};
 	} else {
-		// TODO there are further recurrency types in exchange like e.g. 1st every month, ...
-		error() << "unsupported combination of frequency:" << m_pattern->RecurFrequency <<
-			"and patterntype:" << m_pattern->PatternType;
+		description = i18n("Unsupported frequency %1 with patterntype %2 combination", m_pattern->RecurFrequency,
+				   m_pattern->PatternType);
 	}
 
 	rec->setStartDateTime(ex2kcalTimes(m_pattern->StartDate));
-	debug() << "Start:" << rec->startDateTime();
 	switch (m_pattern->EndType) {
 	case END_AFTER_DATE:
 		rec->setEndDateTime(ex2kcalTimes(m_pattern->EndDate));
-		debug() << "End:" << rec->endDateTime();
+		description += i18n(" from %1 to %2", KCalUtils::Stringify::formatDate(rec->startDateTime()),
+				    KCalUtils::Stringify::formatDate(rec->endDateTime()));
 		break;
 	case END_AFTER_N_OCCURRENCES:
 		rec->setDuration(m_pattern->OccurrenceCount);
-		debug() << "End: after occurrence count" << rec->duration();
+		description += i18n(" from %1 for %2 occurrences", KCalUtils::Stringify::formatDate(rec->startDateTime()),
+				    rec->duration());
 		break;
 	case END_NEVER_END:
 	case NEVER_END:
-		debug() << "End: never";
+		description += i18n(" from %1, ending indefinitely", KCalUtils::Stringify::formatDate(rec->startDateTime()));
 		break;
 	default:
-		error() << "unsupported endtype:" << m_pattern->EndType;
+		description += i18n(" from %1, unsupported endtype %2", KCalUtils::Stringify::formatDate(rec->startDateTime()),
+				    m_pattern->EndType);
 		break;
 	}
-	rec->dump();
-	debug() << "-- Recurrency debug output [END] --";
-	//talloc_free(m_pattern);
-	//m_pattern = 0;
+	debug() << description;
 }
 
 bool MapiAppointment::propertiesPull(QVector<int> &tags, const bool tagsAppended, bool pullAll)
