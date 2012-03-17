@@ -339,7 +339,7 @@ bool MapiConnector2::GALRewind()
 {
 	struct nspi_context *nspi = (struct nspi_context *)m_session->nspi->ctx;
 
-	nspi->pStat->CurrentRec = 0;
+	nspi->pStat->CurrentRec = (NSPI_MID)MID_BEGINNING_OF_TABLE;
 	nspi->pStat->Delta = 0;
 	nspi->pStat->NumPos = 0;
 	nspi->pStat->TotalRecs = 0xffffffff;

@@ -34,6 +34,7 @@
 #include <KCal/Event>
 #include <kcalutils/stringify.h>
 
+#include <libmapi/mapi_nameid.h>
 #include "mapiconnector2.h"
 #include "profiledialog.h"
 

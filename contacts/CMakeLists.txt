@@ -24,6 +24,7 @@ target_link_libraries(akonadi_exgal_resource
 			${KDEPIMLIBS_KMIME_LIBS}
 			${KDEPIMLIBS_KPIMUTILS_LIBS}
 			${LIBMAPI_LIBRARY}
+			${libmapi_LIBRARIES}
 			${LIBDCERPC_LIBRARY}
 			${QT_QTCORE_LIBRARY} 
 			${QT_QTDBUS_LIBRARY} 

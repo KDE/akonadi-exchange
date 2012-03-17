@@ -20,6 +20,7 @@ kde4_add_executable(mapibrowser RUN_UNINSTALLED ${mapibrowser_SRCS})
 
 target_link_libraries(mapibrowser 
 		${LIBMAPI_LIBRARY}
+		${libmapi_LIBRARIES}
 		${KDEPIMLIBS_KPIMUTILS_LIBS}
 		${LIBDCERPC_LIBRARY}
 		${QT_QTCORE_LIBRARY} 
