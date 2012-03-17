@@ -566,6 +566,13 @@ protected:
 	/**
 	 * Fetch a set of properties.
 	 * 
+	 * @param tags		Properties to pull.
+	 * @param tagsAppended	False if the set of tags given have not already
+	 * 			been augmented with the one we need need.
+	 * 			Used by the caller to turn the construction of 
+	 * 			the set of tags into a one-time operation.
+	 * @param pullAll	If true, all available properties will be pulled
+	 * 			rather than just the given @ref tags.
 	 * @return Whether the pull succeeds, irrespective of whether the tags
 	 * were matched.
 	 */
@@ -582,8 +589,9 @@ private:
 	 */
 	bool propertyWrite(int tag, void *data, bool idempotent = true);
 
-	int *m_ourTagList;
-	SPropTagArray m_ourTags;
+	SPropTagArray m_cachedTags;
+	mapi_nameid *m_cachedNames;
+	SPropTagArray *m_cachedNamedTags;
 
 	// Get notifications from Exchange.
 	friend class MapiConnector2;
@@ -711,6 +719,8 @@ protected:
 	 * 			the set of tags into a one-time operation.
 	 * @param pullAll	If true, all available properties will be pulled
 	 * 			rather than just the given @ref tags.
+	 * @return Whether the pull succeeds, irrespective of whether the tags
+	 * were matched.
 	 */
 	virtual bool propertiesPull(QVector<int> &tags, const bool tagsAppended, bool pullAll);
 
