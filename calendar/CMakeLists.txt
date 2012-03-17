@@ -20,7 +20,7 @@ kde4_add_executable(akonadi_excal_resource RUN_UNINSTALLED ${excalresource_SRCS}
 
 target_link_libraries(akonadi_excal_resource 
 					${KDE4_AKONADI_LIBS} 
-					${KDEPIMLIBS_KCAL_LIBS}
+					${KDEPIMLIBS_KCALCORE_LIBS}
 					kcalutils
 					${KDEPIMLIBS_KMIME_LIBS}
 					${KDEPIMLIBS_KPIMUTILS_LIBS}

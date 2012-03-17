@@ -31,7 +31,7 @@
 #include <Akonadi/ItemFetchJob>
 #include <Akonadi/ItemFetchScope>
 
-#include <KCal/Event>
+#include <KCalCore/Event>
 #include <kcalutils/stringify.h>
 
 #include <libmapi/mapi_nameid.h>
@@ -158,10 +158,10 @@ public:
 	QDateTime reminderTime;
 	uint32_t reminderMinutes;
 
-	void ex2kcalRecurrency(KCal::Recurrence *kcal);
+	void ex2kcalRecurrency(KCalCore::Recurrence *kcal);
 
 private:
-	RecurrencePattern *m_pattern;
+	AppointmentRecurrencePattern *m_pattern;
 
 	/**
 	 * Fetch calendar properties.
@@ -233,7 +233,7 @@ bool ExCalResource::retrieveItem( const Akonadi::Item &itemOrig, const QSet<QByt
 	// Create a clone of the passed in Item and fill it with the payload.
 	Akonadi::Item item(itemOrig);
 
-	KCal::Event *event = new KCal::Event;
+	KCalCore::Event *event = new KCalCore::Event;
 	event->setUid(item.remoteId());
 	event->setSummary(message->title);
 	event->setDtStart(KDateTime(message->begin));
@@ -243,28 +243,28 @@ bool ExCalResource::retrieveItem( const Akonadi::Item &itemOrig, const QSet<QByt
 	event->setDescription(message->text);
 	foreach (MapiRecipient recipient, message->recipients()) {
 		if (recipient.type() == MapiRecipient::ReplyTo) {
-			KCal::Person person(recipient.name, recipient.email);
+			KCalCore::Person::Ptr person(new KCalCore::Person(recipient.name, recipient.email));
 			event->setOrganizer(person);
 		} else {
-			KCal::Attendee *person = new KCal::Attendee(recipient.name, recipient.email);
+			KCalCore::Attendee::Ptr person(new KCalCore::Attendee(recipient.name, recipient.email));
 			event->addAttendee(person);
 		}
 	}
 
 	event->setLocation(message->location);
 	if (message->reminderActive) {
-		KCal::Alarm* alarm = new KCal::Alarm(dynamic_cast<KCal::Incidence*>(event));
+		KCalCore::Alarm::Ptr alarm(new KCalCore::Alarm(dynamic_cast<KCalCore::Incidence*>(event)));
 		// TODO Maybe we should check which one is set and then use either the time or the delte
 		// KDateTime reminder(message->reminderTime);
 		// reminder.setTimeSpec(KDateTime::Spec(KDateTime::UTC));
 		// alarm->setTime(reminder);
-		alarm->setStartOffset(KCal::Duration(message->reminderMinutes * -60));
+		alarm->setStartOffset(KCalCore::Duration(message->reminderMinutes * -60));
 		alarm->setEnabled(true);
 		event->addAlarm(alarm);
 	}
 
 	message->ex2kcalRecurrency(event->recurrence());
-	item.setPayload(KCal::Incidence::Ptr(event));
+	item.setPayload(KCalCore::Incidence::Ptr(event));
 
 	// TODO add further message properties.
 	item.setModificationTime(message->modified);
@@ -347,7 +347,7 @@ void ExCalResource::itemChangedContinue(KJob* job)
 	}
 
 	// Extract the event from the item.
-	KCal::Event::Ptr event = item.payload<KCal::Event::Ptr>();
+	KCalCore::Event::Ptr event = item.payload<KCalCore::Event::Ptr>();
 	Q_ASSERT(event->setUid == item.remoteId());
 	message->title = event->summary();
 	message->begin.setTime_t(event->dtStart().toTime_t());
@@ -367,7 +367,7 @@ void ExCalResource::itemChangedContinue(KJob* job)
 	//message->sender = event->organizer().name();
 	message->location = event->location();
 	if (event->alarms().count()) {
-		KCal::Alarm* alarm = event->alarms().first();
+		KCalCore::Alarm::Ptr alarm = event->alarms().first();
 		message->reminderActive = true;
 		// TODO Maybe we should check which one is set and then use either the time or the delte
 		// KDateTime reminder(message->reminderTime);
@@ -379,12 +379,12 @@ void ExCalResource::itemChangedContinue(KJob* job)
 	}
 
 	MapiRecipient att(MapiRecipient::Sender);
-	att.name = event->organizer().name();
-	att.email = event->organizer().email();
+	att.name = event->organizer()->name();
+	att.email = event->organizer()->email();
 	message->addUniqueRecipient("event organiser", att);
 
 	att.setType(MapiRecipient::To);
-	foreach (KCal::Attendee *person, event->attendees()) {
+	foreach (KCalCore::Attendee::Ptr person, event->attendees()) {
 		att.name = person->name();
 		att.email = person->email();
 		message->addUniqueRecipient("event attendee", att);
@@ -434,7 +434,7 @@ QDebug MapiAppointment::error() const
 	return MapiObject::error(prefix.arg(m_id.toString()));
 }
 
-void MapiAppointment::ex2kcalRecurrency(KCal::Recurrence *kcal)
+void MapiAppointment::ex2kcalRecurrency(KCalCore::Recurrence *kcal)
 {
 	kcal->clear();
 	if (!m_pattern) {
@@ -442,7 +442,7 @@ void MapiAppointment::ex2kcalRecurrency(KCal::Recurrence *kcal)
 		return;
 	}
 
-	RecurrencePattern *ex = m_pattern;
+	RecurrencePattern *ex = &m_pattern->RecurrencePattern;
 	QString description;
 	//debug() << "Calendar:" << ex->CalendarType;
 	QBitArray days;
@@ -538,6 +538,84 @@ void MapiAppointment::ex2kcalRecurrency(KCal::Recurrence *kcal)
 		description += i18n(" from %1, unsupported endtype %2", stringify(kcal->startDateTime()),
 				    ex->EndType);
 		break;
+	}
+
+	// We have dealt with the basic recurrence, now see what exceptions we have.
+	for (int i = 0; i < m_pattern->ExceptionCount; i++) {
+		ExceptionInfo *e = &m_pattern->ExceptionInfo[i];
+		KCalCore::RecurrenceRule *r = new KCalCore::RecurrenceRule();
+
+		r->setStartDt(ex2kcalTimes(e->StartDateTime));
+		r->setEndDt(ex2kcalTimes(e->EndDateTime));
+		KDateTime originalStartDate = ex2kcalTimes(e->OriginalStartDate);
+		OverrideFlags overrideFlags = e->OverrideFlags;
+		QString subject;
+		QString location;
+		uint32_t meetingType;
+		uint32_t reminderDelta;
+		bool reminderSet;
+		enum FreeBusyStatus busyStatus;
+		bool attachment;
+		uint32_t changeHighlight;
+
+		description += i18n("\nException%1 for %2 to be from %3 to %4", i, stringify(originalStartDate), stringify(r->startDt()), stringify(r->endDt()));
+		if (m_pattern->WriterVersion2 >= 0x00003009) {
+			ExtendedException *ee = &m_pattern->ExtendedExceptionData[i].ExtendedException;
+			if (overrideFlags & ARO_SUBJECT) {
+				subject.setUtf16(ee->WideCharSubject, ee->WideCharSubjectLength);
+				description += i18n("\n    Subject %1", subject);
+			}
+			if (overrideFlags & ARO_LOCATION) {
+				location.setUtf16(ee->WideCharSubject, ee->WideCharSubjectLength);
+				description += i18n("\n    Location %1", location);
+			}
+			changeHighlight = ee->ChangeHighlight.ChangeHighlightValue;
+			description += i18n("\n    ChangeHighlight %1", changeHighlight);
+		} else {
+			OldExtendedException *ee = &m_pattern->ExtendedExceptionData[i].OldExtendedException;
+			if (overrideFlags & ARO_SUBJECT) {
+				subject.setUtf16(ee->WideCharSubject, ee->WideCharSubjectLength);
+				description += i18n("\n    Subject %1", subject);
+			}
+			if (overrideFlags & ARO_LOCATION) {
+				location.setUtf16(ee->WideCharSubject, ee->WideCharSubjectLength);
+				description += i18n("\n    Location %1", location);
+			}
+			changeHighlight = 0;
+		}
+		if (overrideFlags & ARO_MEETINGTYPE) {
+			meetingType = e->MeetingType.mType;
+		} else {
+			meetingType = 0;
+		}
+		if (overrideFlags & ARO_REMINDERDELTA) {
+			reminderDelta = e->MeetingType.rDelta;
+		} else {
+			reminderDelta = 0;
+		}
+		if (overrideFlags & ARO_REMINDER) {
+			reminderSet = e->MeetingType.rSet != 0;
+		} else {
+			reminderSet = false;
+		}
+		if (overrideFlags & ARO_BUSYSTATUS) {
+			busyStatus = (enum FreeBusyStatus)e->MeetingType.bStatus;
+		} else {
+			busyStatus = (enum FreeBusyStatus)0;
+		}
+		if (overrideFlags & ARO_ATTACHMENT) {
+			attachment = e->MeetingType.attachment != 0;
+		} else {
+			attachment = false;
+		}
+		if (overrideFlags & ARO_SUBTYPE) {
+			r->setAllDay(e->MeetingType.sType != 0);
+		}
+		description += i18n("\n    MeetingType %1, reminderDelta %2, reminderSet %3, busyStatus %4, attachment %5", 
+				    meetingType, reminderDelta, reminderSet, busyStatus, attachment);
+		// TODO: check the documentation about how to handle having multiple rules
+		// to make sure we don't clash with the default rule.
+		//kcal->addExRule(r);
 	}
 	debug() << description;
 }
@@ -639,7 +717,7 @@ bool MapiAppointment::propertiesPull(QVector<int> &tags, const bool tagsAppended
 			recurrenceType = property.value().toInt();
 			break;
 		case PidLidAppointmentRecur:
-			m_pattern = get_RecurrencePattern(ctx(), &m_properties[i].value.bin);
+			m_pattern = get_AppointmentRecurrencePattern(ctx(), &m_properties[i].value.bin);
 			break;
 		case PidTagTransportMessageHeaders:
 			header = property.value().toString();
