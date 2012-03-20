@@ -77,7 +77,7 @@ static QString stringify(QBitArray &days)
 
 static QString stringify(KDateTime dateTime)
 {
-	return KCalUtils::Stringify::formatDate(dateTime);
+	return KCalUtils::Stringify::formatDateTime(dateTime);
 }
 
 static QBitArray ex2kcalRecurrenceDays(uint32_t exchangeDays)
@@ -121,7 +121,7 @@ static KDateTime ex2kcalTimes(uint32_t exchangeMinutes)
 	// exchange stores the recurrency times as minutes since 1.1.1601
 	QDateTime calc(QDate(1601, 1, 1));
 	int days = ex2kcalDaysFromMinutes(exchangeMinutes);
-	int secs = exchangeMinutes - (days * 24 * 60);
+	int secs = (exchangeMinutes - (days * 24 * 60)) * 60;
 	return KDateTime(calc.addDays(days).addSecs(secs));
 }
 
@@ -543,10 +543,9 @@ void MapiAppointment::ex2kcalRecurrency(KCalCore::Recurrence *kcal)
 	// We have dealt with the basic recurrence, now see what exceptions we have.
 	for (int i = 0; i < m_pattern->ExceptionCount; i++) {
 		ExceptionInfo *e = &m_pattern->ExceptionInfo[i];
-		KCalCore::RecurrenceRule *r = new KCalCore::RecurrenceRule();
 
-		r->setStartDt(ex2kcalTimes(e->StartDateTime));
-		r->setEndDt(ex2kcalTimes(e->EndDateTime));
+		KDateTime newStartDateTime = ex2kcalTimes(e->StartDateTime);
+		KDateTime newEndDateTime = ex2kcalTimes(e->EndDateTime);
 		KDateTime originalStartDate = ex2kcalTimes(e->OriginalStartDate);
 		OverrideFlags overrideFlags = e->OverrideFlags;
 		QString subject;
@@ -556,65 +555,78 @@ void MapiAppointment::ex2kcalRecurrency(KCalCore::Recurrence *kcal)
 		bool reminderSet;
 		enum FreeBusyStatus busyStatus;
 		bool attachment;
+		bool allDay;
 		uint32_t changeHighlight;
 
-		description += i18n("\nException%1 for %2 to be from %3 to %4", i, stringify(originalStartDate), stringify(r->startDt()), stringify(r->endDt()));
-		if (m_pattern->WriterVersion2 >= 0x00003009) {
-			ExtendedException *ee = &m_pattern->ExtendedExceptionData[i].ExtendedException;
-			if (overrideFlags & ARO_SUBJECT) {
-				subject.setUtf16(ee->WideCharSubject, ee->WideCharSubjectLength);
-				description += i18n("\n    Subject %1", subject);
-			}
-			if (overrideFlags & ARO_LOCATION) {
-				location.setUtf16(ee->WideCharSubject, ee->WideCharSubjectLength);
-				description += i18n("\n    Location %1", location);
-			}
-			changeHighlight = ee->ChangeHighlight.ChangeHighlightValue;
-			description += i18n("\n    ChangeHighlight %1", changeHighlight);
-		} else {
-			OldExtendedException *ee = &m_pattern->ExtendedExceptionData[i].OldExtendedException;
-			if (overrideFlags & ARO_SUBJECT) {
-				subject.setUtf16(ee->WideCharSubject, ee->WideCharSubjectLength);
-				description += i18n("\n    Subject %1", subject);
-			}
-			if (overrideFlags & ARO_LOCATION) {
-				location.setUtf16(ee->WideCharSubject, ee->WideCharSubjectLength);
-				description += i18n("\n    Location %1", location);
-			}
+		description += i18n("\nException%1 for %2 to be from %3 to %4", i, stringify(originalStartDate), stringify(newStartDateTime), stringify(newEndDateTime));
+#if 1
+		// ExtendedException has Unicode strings, but needs Openchange 
+		// bug #391 to be fixed.
+		ExtendedException *ee = &m_pattern->ExtendedException[i];
+		if (m_pattern->WriterVersion2 < 0x00003009) {
 			changeHighlight = 0;
+		} else {
+			changeHighlight = ee->ChangeHighlight.ChangeHighlight.ChangeHighlightValue;
+			description += i18n("\n    ChangeHighlight %1", changeHighlight);
 		}
+		if (overrideFlags & ARO_SUBJECT) {
+			subject.setUtf16(ee->Subject.Msg.Msg, ee->Subject.Msg.Length);
+			description += i18n("\n    Wide Subject %1", subject);
+		}
+		if (overrideFlags & ARO_LOCATION) {
+			location.setUtf16(ee->Location.Msg.Msg, ee->Location.Msg.Length);
+			description += i18n("\n    Wide Location %1", location);
+		}
+#else
+		// Non-unicode support only, from the ExceptionInfo.
+		if (overrideFlags & ARO_SUBJECT) {
+			subject = QString::fromLatin1((const char *)e->Subject.Msg.msg, e->Subject.Msg.msgLength2);
+			description += i18n("\n    Subject %1", subject);
+		}
+		if (overrideFlags & ARO_LOCATION) {
+			location = QString::fromLatin1((const char *)e->Location.Msg.msg, e->Location.Msg.msgLength2);
+			description += i18n("\n    Location %1", location);
+		}
+		changeHighlight = 0;
+#endif
 		if (overrideFlags & ARO_MEETINGTYPE) {
-			meetingType = e->MeetingType.mType;
+			meetingType = e->MeetingType.Value;
 		} else {
 			meetingType = 0;
 		}
 		if (overrideFlags & ARO_REMINDERDELTA) {
-			reminderDelta = e->MeetingType.rDelta;
+			reminderDelta = e->ReminderDelta.Value;
 		} else {
 			reminderDelta = 0;
 		}
 		if (overrideFlags & ARO_REMINDER) {
-			reminderSet = e->MeetingType.rSet != 0;
+			reminderSet = e->ReminderSet.Value != 0;
 		} else {
 			reminderSet = false;
 		}
 		if (overrideFlags & ARO_BUSYSTATUS) {
-			busyStatus = (enum FreeBusyStatus)e->MeetingType.bStatus;
+			busyStatus = (enum FreeBusyStatus)e->BusyStatus.Value;
 		} else {
-			busyStatus = (enum FreeBusyStatus)0;
+			busyStatus = olFree;
 		}
 		if (overrideFlags & ARO_ATTACHMENT) {
-			attachment = e->MeetingType.attachment != 0;
+			attachment = e->Attachment.Value != 0;
 		} else {
 			attachment = false;
 		}
 		if (overrideFlags & ARO_SUBTYPE) {
-			r->setAllDay(e->MeetingType.sType != 0);
+			allDay = e->SubType.Value != 0;
+		} else {
+			allDay = false;
 		}
-		description += i18n("\n    MeetingType %1, reminderDelta %2, reminderSet %3, busyStatus %4, attachment %5", 
-				    meetingType, reminderDelta, reminderSet, busyStatus, attachment);
+		description += i18n("\n    ChangeHighlight %1, meetingType %2, reminderDelta %3, reminderSet %4, busyStatus %5, attachment %6, allDay %7",
+				    changeHighlight, meetingType, reminderDelta, reminderSet, busyStatus, attachment, allDay);
 		// TODO: check the documentation about how to handle having multiple rules
 		// to make sure we don't clash with the default rule.
+		//KCalCore::RecurrenceRule *r = new KCalCore::RecurrenceRule();
+		//r->setAllDay(allDay);
+		//r->setStartDt(newStartDateTime);
+		//r->setEndDt(newEndDateTime);
 		//kcal->addExRule(r);
 	}
 	debug() << description;
