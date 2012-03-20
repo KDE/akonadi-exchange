@@ -28,17 +28,17 @@ class CreateProfileDialog : public QDialog, public Ui::CreateProfileDialogBase
 {
 Q_OBJECT
 public:
-	explicit CreateProfileDialog(QWidget* parent = 0, Qt::WindowFlags f = 0);
-	virtual ~CreateProfileDialog() {}
+    explicit CreateProfileDialog(QWidget* parent = 0, Qt::WindowFlags f = 0);
+    virtual ~CreateProfileDialog() {}
 
-	QString profileName() const;
-	QString username() const;
-	QString password() const;
-	QString server() const;
-	QString domain() const;
+    QString profileName() const;
+    QString username() const;
+    QString password() const;
+    QString server() const;
+    QString domain() const;
 
 private slots:
-	void slotValidateData();
+    void slotValidateData();
 };
 
 #endif // CREATEPROFILE_H

@@ -33,15 +33,15 @@ public:
     virtual ~mapibrowser() {}
 
 public slots:
-	void onRefreshTree();
-	void onManageProfiles();
-	void itemDoubleClicked(QTreeWidgetItem*,int);
-	void itemDoubleClicked(QTableWidgetItem*);
-	void checkForDefaultProfile();
+    void onRefreshTree();
+    void onManageProfiles();
+    void itemDoubleClicked(QTreeWidgetItem*,int);
+    void itemDoubleClicked(QTableWidgetItem*);
+    void checkForDefaultProfile();
 
 private:
-	MainWindow* main;
-	QString selectedProfile;
+    MainWindow* main;
+    QString selectedProfile;
 };
 
 #endif // mapibrowser_H

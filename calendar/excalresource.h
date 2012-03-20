@@ -30,33 +30,33 @@ class ExCalResource : public MapiResource
 Q_OBJECT
 
 public:
-	ExCalResource(const QString &id);
-	virtual ~ExCalResource();
+    ExCalResource(const QString &id);
+    virtual ~ExCalResource();
 
-	virtual const QString profile();
+    virtual const QString profile();
 
 public Q_SLOTS:
-	virtual void configure(WId windowId);
+    virtual void configure(WId windowId);
 
 protected Q_SLOTS:
-	void retrieveCollections();
-	void retrieveItems(const Akonadi::Collection &col);
-	bool retrieveItem(const Akonadi::Item &item, const QSet<QByteArray> &parts);
+    void retrieveCollections();
+    void retrieveItems(const Akonadi::Collection &col);
+    bool retrieveItem(const Akonadi::Item &item, const QSet<QByteArray> &parts);
 
 protected:
-	virtual void aboutToQuit();
-	virtual void itemAdded(const Akonadi::Item &item, const Akonadi::Collection &collection);
-	virtual void itemChanged(const Akonadi::Item &item, const QSet<QByteArray> &parts);
-	virtual void itemRemoved(const Akonadi::Item &item);
+    virtual void aboutToQuit();
+    virtual void itemAdded(const Akonadi::Item &item, const Akonadi::Collection &collection);
+    virtual void itemChanged(const Akonadi::Item &item, const QSet<QByteArray> &parts);
+    virtual void itemRemoved(const Akonadi::Item &item);
 
 private:
-	void createKCalRecurrency(KCal::Recurrence* rec, const MapiRecurrencyPattern& pattern);
+    void createKCalRecurrency(KCal::Recurrence* rec, const MapiRecurrencyPattern& pattern);
 
 private Q_SLOTS:
-	/**
-	 * Completion handler for itemChanged().
-	 */
-	void itemChangedContinue(KJob* job);
+    /**
+     * Completion handler for itemChanged().
+     */
+    void itemChangedContinue(KJob* job);
 };
 
 #endif

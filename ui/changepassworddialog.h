@@ -28,17 +28,17 @@ class ChangePasswordDialog : public QDialog, public Ui::ChangePasswordDialogBase
 {
 Q_OBJECT
 public:
-	explicit ChangePasswordDialog(QWidget* parent = 0, Qt::WindowFlags f = 0);
-	virtual ~ChangePasswordDialog() {}
+    explicit ChangePasswordDialog(QWidget* parent = 0, Qt::WindowFlags f = 0);
+    virtual ~ChangePasswordDialog() {}
 
-	void setProfileName(QString value);
+    void setProfileName(QString value);
 
-	QString oldPassword() const;
+    QString oldPassword() const;
 
-	QString newPassword() const;
+    QString newPassword() const;
 
 private slots:
-	void slotValidateData();
+    void slotValidateData();
 };
 
 #endif // CHANGEPASSWORD_H

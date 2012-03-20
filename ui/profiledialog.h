@@ -28,25 +28,25 @@ class ProfileDialog : public QDialog, public Ui::ProfileDialogBase
 {
 Q_OBJECT
 public:
-	explicit ProfileDialog(QWidget *parent = 0);
-	virtual ~ProfileDialog() {}
+    explicit ProfileDialog(QWidget *parent = 0);
+    virtual ~ProfileDialog() {}
 
-	QString profileName() const;
-	void setProfileName(QString profile);
+    QString profileName() const;
+    void setProfileName(QString profile);
 
 private slots:
-	void readMapiProfiles(QString selection = QString());
-	void newProfileSelected(QListWidgetItem* newItem, QListWidgetItem* lastItem);
-	void slotValidate();
+    void readMapiProfiles(QString selection = QString());
+    void newProfileSelected(QListWidgetItem* newItem, QListWidgetItem* lastItem);
+    void slotValidate();
 
-	void slotCreateProfile();
-	void slotUpdateProfile();
-	void slotDeleteProfile();
+    void slotCreateProfile();
+    void slotUpdateProfile();
+    void slotDeleteProfile();
 
 private:
-	void updateSelectedProfile();
+    void updateSelectedProfile();
 
-	MapiProfiles m_profiles;
+    MapiProfiles m_profiles;
 };
 
 #endif

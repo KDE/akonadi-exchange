@@ -24,7 +24,7 @@
 
 namespace Akonadi
 {
-	class Collection;
+    class Collection;
 }
 class KJob;
 class MapiConnector2;
@@ -35,45 +35,45 @@ class MapiConnector2;
  */
 class ExGalResource : public MapiResource
 {
-	Q_OBJECT
+    Q_OBJECT
 public:
-	ExGalResource(const QString &id);
-	virtual ~ExGalResource();
+    ExGalResource(const QString &id);
+    virtual ~ExGalResource();
 
-	virtual const QString profile();
+    virtual const QString profile();
 
 public Q_SLOTS:
-	virtual void configure(WId windowId);
+    virtual void configure(WId windowId);
 
 protected Q_SLOTS:
-	void retrieveCollectionAttributes(const Akonadi::Collection &collection);
-	void retrieveCollections();
-	void retrieveItems(const Akonadi::Collection &collection);
-	bool retrieveItem(const Akonadi::Item &itemOrig, const QSet<QByteArray> &parts);
+    void retrieveCollectionAttributes(const Akonadi::Collection &collection);
+    void retrieveCollections();
+    void retrieveItems(const Akonadi::Collection &collection);
+    bool retrieveItem(const Akonadi::Item &itemOrig, const QSet<QByteArray> &parts);
 
 protected:
-	virtual void aboutToQuit();
+    virtual void aboutToQuit();
 
-	virtual void itemAdded(const Akonadi::Item &item, const Akonadi::Collection &collection);
-	virtual void itemChanged(const Akonadi::Item &item, const QSet<QByteArray> &parts);
-	virtual void itemRemoved(const Akonadi::Item &item);
+    virtual void itemAdded(const Akonadi::Item &item, const Akonadi::Collection &collection);
+    virtual void itemChanged(const Akonadi::Item &item, const QSet<QByteArray> &parts);
+    virtual void itemRemoved(const Akonadi::Item &item);
 
 private:
-	/**
-	 * A copy of the collection used for the GAL.
-	 */
-	class MapiGAL *m_gal;
-	Akonadi::Item::List m_galItems;
-	qint64 m_msExchangeFetch;
-	qint64 m_msAkonadiWrite;
-	qint64 m_msAkonadiWriteStatus;
-	void updateAkonadiBatchStatus(QString lastAddressee = QString());
+    /**
+     * A copy of the collection used for the GAL.
+     */
+    class MapiGAL *m_gal;
+    Akonadi::Item::List m_galItems;
+    qint64 m_msExchangeFetch;
+    qint64 m_msAkonadiWrite;
+    qint64 m_msAkonadiWriteStatus;
+    void updateAkonadiBatchStatus(QString lastAddressee = QString());
 
 private Q_SLOTS:
-	void fetchExchangeBatch();
-	void createAkonadiItem(KJob *job);
-	void createAkonadiItemDone(KJob *job);
-	void updateAkonadiBatchStatusDone(KJob *job);
+    void fetchExchangeBatch();
+    void createAkonadiItem(KJob *job);
+    void createAkonadiItemDone(KJob *job);
+    void updateAkonadiBatchStatusDone(KJob *job);
 };
 
 #endif

@@ -35,93 +35,93 @@ class MapiMessage;
  * as much as possible.
  */
 class MapiResource :
-	public Akonadi::ResourceBase,
-	public Akonadi::AgentBase::Observer
+    public Akonadi::ResourceBase,
+    public Akonadi::AgentBase::Observer
 {
 Q_OBJECT
 
 public:
-	/**
-	 * @param folderFilter	Folder filter (i.e. an IPF_xxx value, which 
-	 * 			matches a PidTagContainerClass). Set to the 
-	 * 			empty string if no filtering is needed.
-	 */
-	MapiResource(const QString &id, const QString &desktopName, const char *folderFilter, const char *messageType, const QString &itemMimeType);
-	virtual ~MapiResource();
+    /**
+     * @param folderFilter	Folder filter (i.e. an IPF_xxx value, which 
+     * 			matches a PidTagContainerClass). Set to the 
+     * 			empty string if no filtering is needed.
+     */
+    MapiResource(const QString &id, const QString &desktopName, const char *folderFilter, const char *messageType, const QString &itemMimeType);
+    virtual ~MapiResource();
 
 protected:
 
-	/**
-	 * Establish the name of the profile to use to logon to the MAPI server.
-	 */
-	virtual const QString profile() = 0;
+    /**
+     * Establish the name of the profile to use to logon to the MAPI server.
+     */
+    virtual const QString profile() = 0;
 
-	/**
-	 * Recursively find all folders starting at the given root which match
-	 * the given filter.
-	 * 
-	 * @param rootFolder 	Identifies where to start the search.
-	 * @param collections	List to which any matches are to be appended.
-	 */
-	void fetchCollections(MapiDefaultFolder rootFolder, Akonadi::Collection::List &collections);
+    /**
+     * Recursively find all folders starting at the given root which match
+     * the given filter.
+     * 
+     * @param rootFolder 	Identifies where to start the search.
+     * @param collections	List to which any matches are to be appended.
+     */
+    void fetchCollections(MapiDefaultFolder rootFolder, Akonadi::Collection::List &collections);
 
-	/**
-	 * Find all the items in the given collection.
-	 * 
-	 * @param collection	The collection to fetch.
-	 * @param items		Fetched items.
-	 * @param deletedItems	Items which have been deleted on the backend.
-	 */
-	void fetchItems(const Akonadi::Collection &collection, Akonadi::Item::List &items, Akonadi::Item::List &deletedItems);
+    /**
+     * Find all the items in the given collection.
+     * 
+     * @param collection	The collection to fetch.
+     * @param items		Fetched items.
+     * @param deletedItems	Items which have been deleted on the backend.
+     */
+    void fetchItems(const Akonadi::Collection &collection, Akonadi::Item::List &items, Akonadi::Item::List &deletedItems);
 
-	/**
-	 * Get the message corresponding to the item.
-	 */
-	template <class Message>
-	Message *fetchItem(const Akonadi::Item &item);
+    /**
+     * Get the message corresponding to the item.
+     */
+    template <class Message>
+    Message *fetchItem(const Akonadi::Item &item);
 
 protected:
-	/*
-	virtual void aboutToQuit();
-	virtual void itemAdded(const Akonadi::Item &item, const Akonadi::Collection &collection);
-	virtual void itemChanged(const Akonadi::Item &item, const QSet<QByteArray> &parts);
-	virtual void itemRemoved(const Akonadi::Item &item);
+    /*
+    virtual void aboutToQuit();
+    virtual void itemAdded(const Akonadi::Item &item, const Akonadi::Collection &collection);
+    virtual void itemChanged(const Akonadi::Item &item, const QSet<QByteArray> &parts);
+    virtual void itemRemoved(const Akonadi::Item &item);
 */
-	virtual void doSetOnline(bool online);
+    virtual void doSetOnline(bool online);
 
-	/**
-	 * Recurse through a hierarchy of Exchange folders which match the
-	 * given filter.
-	 */
-	void fetchCollections(const QString &path, const MapiId &parentId, const Akonadi::Collection &parent, Akonadi::Collection::List &collections);
+    /**
+     * Recurse through a hierarchy of Exchange folders which match the
+     * given filter.
+     */
+    void fetchCollections(const QString &path, const MapiId &parentId, const Akonadi::Collection &parent, Akonadi::Collection::List &collections);
 
-	/**
-	 * Consistent error handling for task-based routines.
-	 */
-	void error(const QString &message);
-	void error(const MapiFolder &folder, const QString &body);
-	void error(const Akonadi::Collection &collection, const QString &body);
-	void error(const MapiMessage &msg, const QString &body);
+    /**
+     * Consistent error handling for task-based routines.
+     */
+    void error(const QString &message);
+    void error(const MapiFolder &folder, const QString &body);
+    void error(const Akonadi::Collection &collection, const QString &body);
+    void error(const MapiMessage &msg, const QString &body);
 
-	QString m_mapiFolderFilter;
-	QString m_mapiMessageType;
-	QString m_itemMimeType;
-	MapiConnector2 *m_connection;
-	bool m_connected;
+    QString m_mapiFolderFilter;
+    QString m_mapiMessageType;
+    QString m_itemMimeType;
+    MapiConnector2 *m_connection;
+    bool m_connected;
 
 protected:
-	/**
-	 * Logon to Exchange. A successful login is cached and subsequent calls
-	 * short-circuited.
-	 *
-	 * @return True if the login attempt succeeded.
-	 */
-	bool logon(void);
+    /**
+     * Logon to Exchange. A successful login is cached and subsequent calls
+     * short-circuited.
+     *
+     * @return True if the login attempt succeeded.
+     */
+    bool logon(void);
 
-	/**
-	 * Logout from Exchange.
-	 */
-	void logoff(void);
+    /**
+     * Logout from Exchange.
+     */
+    void logoff(void);
 };
 
 /**
@@ -130,29 +130,29 @@ protected:
 template <class Message>
 Message *MapiResource::fetchItem(const Akonadi::Item &itemOrig)
 {
-	kError() << "fetch item:" << currentCollection().name() << itemOrig.id() <<
-			", " << itemOrig.remoteId();
+    kError() << "fetch item:" << currentCollection().name() << itemOrig.id() <<
+            ", " << itemOrig.remoteId();
 
-	if (!logon()) {
-		return 0;
-	}
+    if (!logon()) {
+        return 0;
+    }
 
-	MapiId remoteId(itemOrig.remoteId());
-	Message *message = new Message(m_connection, "MapiResource::retrieveItem", remoteId);
-	if (!message->open()) {
-		kError() << "open failed!";
-		emit status(Broken, i18n("Unable to open item: %1/%2", currentCollection().name(), itemOrig.id()));
-		return 0;
-	}
+    MapiId remoteId(itemOrig.remoteId());
+    Message *message = new Message(m_connection, "MapiResource::retrieveItem", remoteId);
+    if (!message->open()) {
+        kError() << "open failed!";
+        emit status(Broken, i18n("Unable to open item: %1/%2", currentCollection().name(), itemOrig.id()));
+        return 0;
+    }
 
-	// find the remoteId of the item and the collection and try to fetch the needed data from the server
-	emit status(Running, i18n("Fetching item: %1/%2", currentCollection().name(), itemOrig.id()));
-	if (!message->propertiesPull()) {
-		delete message;
-		return 0;
-	}
-	kDebug() << "fetched item:" << itemOrig.remoteId();
-	return message;
+    // find the remoteId of the item and the collection and try to fetch the needed data from the server
+    emit status(Running, i18n("Fetching item: %1/%2", currentCollection().name(), itemOrig.id()));
+    if (!message->propertiesPull()) {
+        delete message;
+        return 0;
+    }
+    kDebug() << "fetched item:" << itemOrig.remoteId();
+    return message;
 }
 
 #endif
