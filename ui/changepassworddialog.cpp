@@ -23,42 +23,42 @@
 
 ChangePasswordDialog::ChangePasswordDialog(QWidget* parent, Qt::WindowFlags f): QDialog(parent, f)
 {
-	setupUi(this);
+    setupUi(this);
 
-	connect(leOldPassword, SIGNAL(textEdited(QString)), this, SLOT(slotValidateData()));
-	connect(lePassword, SIGNAL(textEdited(QString)), this, SLOT(slotValidateData()));
-	connect(leConfirmPassword, SIGNAL(textEdited(QString)), this, SLOT(slotValidateData()));
+    connect(leOldPassword, SIGNAL(textEdited(QString)), this, SLOT(slotValidateData()));
+    connect(lePassword, SIGNAL(textEdited(QString)), this, SLOT(slotValidateData()));
+    connect(leConfirmPassword, SIGNAL(textEdited(QString)), this, SLOT(slotValidateData()));
 
-	slotValidateData();
+    slotValidateData();
 }
 
 void ChangePasswordDialog::slotValidateData()
 {
-	bool valid = false;
+    bool valid = false;
 
-	if (!leProfile->text().isEmpty() && 
-		!leOldPassword->text().isEmpty() &&
-		!lePassword->text().isEmpty() && 
-		(lePassword->text() == leConfirmPassword->text())) {
-		valid = true;
-	}
+    if (!leProfile->text().isEmpty() && 
+        !leOldPassword->text().isEmpty() &&
+        !lePassword->text().isEmpty() && 
+        (lePassword->text() == leConfirmPassword->text())) {
+        valid = true;
+    }
 
-	buttonBox->button(QDialogButtonBox::Ok)->setEnabled(valid);
+    buttonBox->button(QDialogButtonBox::Ok)->setEnabled(valid);
 }
 
 QString ChangePasswordDialog::oldPassword() const
 {
-	return leOldPassword->text();
+    return leOldPassword->text();
 }
 
 QString ChangePasswordDialog::newPassword() const
 {
-	return lePassword->text();
+    return lePassword->text();
 }
 
 void ChangePasswordDialog::setProfileName(QString value)
 {
-	leProfile->setText(value);
+    leProfile->setText(value);
 }
 
 #include "changepassworddialog.moc"

@@ -23,53 +23,53 @@
 
 CreateProfileDialog::CreateProfileDialog(QWidget* parent, Qt::WindowFlags f): QDialog(parent, f)
 {
-	setupUi(this);
+    setupUi(this);
 
-	connect(leProfile, SIGNAL(textEdited(QString)), this, SLOT(slotValidateData()));
-	connect(leUsername, SIGNAL(textEdited(QString)), this, SLOT(slotValidateData()));
-	connect(leDomain, SIGNAL(textEdited(QString)), this, SLOT(slotValidateData()));
-	connect(leServer, SIGNAL(textEdited(QString)), this, SLOT(slotValidateData()));
-	connect(lePassword, SIGNAL(textEdited(QString)), this, SLOT(slotValidateData()));
-	connect(leConfirmPassword, SIGNAL(textEdited(QString)), this, SLOT(slotValidateData()));
+    connect(leProfile, SIGNAL(textEdited(QString)), this, SLOT(slotValidateData()));
+    connect(leUsername, SIGNAL(textEdited(QString)), this, SLOT(slotValidateData()));
+    connect(leDomain, SIGNAL(textEdited(QString)), this, SLOT(slotValidateData()));
+    connect(leServer, SIGNAL(textEdited(QString)), this, SLOT(slotValidateData()));
+    connect(lePassword, SIGNAL(textEdited(QString)), this, SLOT(slotValidateData()));
+    connect(leConfirmPassword, SIGNAL(textEdited(QString)), this, SLOT(slotValidateData()));
 
-	slotValidateData();
+    slotValidateData();
 }
 
 void CreateProfileDialog::slotValidateData()
 {
-	bool valid = false;
+    bool valid = false;
 
-	if (!leProfile->text().isEmpty() && 
-		!leUsername->text().isEmpty() && 
-		!leDomain->text().isEmpty() && 
-		!leServer->text().isEmpty() &&
-		!lePassword->text().isEmpty() && 
-		(lePassword->text() == leConfirmPassword->text())) {
-		valid = true;
-	}
+    if (!leProfile->text().isEmpty() && 
+        !leUsername->text().isEmpty() && 
+        !leDomain->text().isEmpty() && 
+        !leServer->text().isEmpty() &&
+        !lePassword->text().isEmpty() && 
+        (lePassword->text() == leConfirmPassword->text())) {
+        valid = true;
+    }
 
-	buttonBox->button(QDialogButtonBox::Ok)->setEnabled(valid);
+    buttonBox->button(QDialogButtonBox::Ok)->setEnabled(valid);
 }
 
 QString CreateProfileDialog::profileName() const
 {
-	return leProfile->text();
+    return leProfile->text();
 }
 QString CreateProfileDialog::username() const
 {
-	return leUsername->text();
+    return leUsername->text();
 }
 QString CreateProfileDialog::password() const
 {
-	return lePassword->text();
+    return lePassword->text();
 }
 QString CreateProfileDialog::server() const
 {
-	return leServer->text();
+    return leServer->text();
 }
 QString CreateProfileDialog::domain() const
 {
-	return leDomain->text();
+    return leDomain->text();
 }
 
 #include "createprofiledialog.moc"
