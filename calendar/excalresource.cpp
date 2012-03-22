@@ -147,21 +147,46 @@ public:
      */
     virtual bool propertiesPush();
 
-    QString title;
-    QString text;
+    void ex2kcalRecurrency(KCalCore::Recurrence *kcal);
+
+    // PidLidAppointmentStateFlags
+    typedef enum {
+        Meeting = 0x1,
+        Received = 0x2,
+        Canceled = 0x4,
+    } AppointmentState;
+    Q_DECLARE_FLAGS(AppointmentStates, AppointmentState);
+
+    // PidLidResponseStatus
+    typedef enum {
+        None,
+        Organized,
+        Tentative,
+        Accepted,
+        Declined,
+        NotResponded
+    } ResponseStatus;
+
+    uint32_t sequence;
+    enum FreeBusyStatus busyStatus;
     QString location;
-    QDateTime created;
     QDateTime begin;
     QDateTime end;
-    QDateTime modified;
+    bool allDay;
+    AppointmentStates meetingType;
+    ResponseStatus responseStatus;
+    QString text;
+    struct TimeZoneStruct *timezone;
+    AppointmentRecurrencePattern *m_pattern;
+    enum RecurFrequency recurrenceType;
     bool reminderActive;
     QDateTime reminderTime;
     uint32_t reminderMinutes;
-
-    void ex2kcalRecurrency(KCalCore::Recurrence *kcal);
+    QString title;
+    QDateTime modified;
+    QDateTime created;
 
 private:
-    AppointmentRecurrencePattern *m_pattern;
 
     /**
      * Fetch calendar properties.
@@ -171,6 +196,8 @@ private:
     virtual QDebug debug() const;
     virtual QDebug error() const;
 };
+
+Q_DECLARE_OPERATORS_FOR_FLAGS(MapiAppointment::AppointmentStates);
 
 ExCalResource::ExCalResource(const QString &id) :
     MapiResource(id, i18n("Exchange Calendar"), IPF_APPOINTMENT, "IPM.Appointment", QString::fromAscii("text/calendar"))
@@ -301,14 +328,14 @@ void ExCalResource::configure(WId windowId)
 
 void ExCalResource::itemAdded( const Akonadi::Item &item, const Akonadi::Collection &collection )
 {
-  Q_UNUSED( item );
-  Q_UNUSED( collection );
+    Q_UNUSED( item );
+    Q_UNUSED( collection );
 
-  // TODO: this method is called when somebody else, e.g. a client application,
-  // has created an item in a collection managed by your resource.
+    // TODO: this method is called when somebody else, e.g. a client application,
+    // has created an item in a collection managed by your resource.
 
-  // NOTE: There is an equivalent method for collections, but it isn't part
-  // of this template code to keep it simple
+    // NOTE: There is an equivalent method for collections, but it isn't part
+    // of this template code to keep it simple
 }
 
 /**
@@ -317,16 +344,16 @@ void ExCalResource::itemAdded( const Akonadi::Item &item, const Akonadi::Collect
  */
 void ExCalResource::itemChanged(const Akonadi::Item &item, const QSet<QByteArray> &parts)
 {
-        Q_UNUSED(parts);
+    Q_UNUSED(parts);
     return;
 
         // Get the payload for the item.
     kWarning() << "fetch cached item: {" <<
-        currentCollection().name() << "," << item.id() << "} = {" <<
-        currentCollection().remoteId() << "," << item.remoteId() << "}";
-        Akonadi::ItemFetchJob *job = new Akonadi::ItemFetchJob(item);
-        connect(job, SIGNAL(result(KJob*)), SLOT(itemChangedContinue(KJob*)));
-        job->fetchScope().fetchFullPayload();
+    currentCollection().name() << "," << item.id() << "} = {" <<
+    currentCollection().remoteId() << "," << item.remoteId() << "}";
+    Akonadi::ItemFetchJob *job = new Akonadi::ItemFetchJob(item);
+    connect(job, SIGNAL(result(KJob*)), SLOT(itemChangedContinue(KJob*)));
+    job->fetchScope().fetchFullPayload();
 }
 
 /**
@@ -334,12 +361,12 @@ void ExCalResource::itemChanged(const Akonadi::Item &item, const QSet<QByteArray
  */
 void ExCalResource::itemChangedContinue(KJob* job)
 {
-        if (job->error()) {
-            emit status(Broken, i18n("Failed to get cached data"));
-            return;
-        }
-        Akonadi::ItemFetchJob *fetchJob = qobject_cast<Akonadi::ItemFetchJob*>(job);
-        const Akonadi::Item item = fetchJob->items().first();
+    if (job->error()) {
+        emit status(Broken, i18n("Failed to get cached data"));
+        return;
+    }
+    Akonadi::ItemFetchJob *fetchJob = qobject_cast<Akonadi::ItemFetchJob*>(job);
+    const Akonadi::Item item = fetchJob->items().first();
 
     MapiAppointment *message = fetchItem<MapiAppointment>(item);
     if (!message) {
@@ -550,7 +577,7 @@ void MapiAppointment::ex2kcalRecurrency(KCalCore::Recurrence *kcal)
         OverrideFlags overrideFlags = e->OverrideFlags;
         QString subject;
         QString location;
-        uint32_t meetingType;
+        AppointmentStates meetingType;
         uint32_t reminderDelta;
         bool reminderSet;
         enum FreeBusyStatus busyStatus;
@@ -571,11 +598,11 @@ void MapiAppointment::ex2kcalRecurrency(KCalCore::Recurrence *kcal)
         }
         if (overrideFlags & ARO_SUBJECT) {
             subject.setUtf16(ee->Subject.Msg.Msg, ee->Subject.Msg.Length);
-            description += i18n("\n    Wide Subject %1", subject);
+            description += i18n("\n    Subject %1", subject);
         }
         if (overrideFlags & ARO_LOCATION) {
             location.setUtf16(ee->Location.Msg.Msg, ee->Location.Msg.Length);
-            description += i18n("\n    Wide Location %1", location);
+            description += i18n("\n    Location %1", location);
         }
 #else
         // Non-unicode support only, from the ExceptionInfo.
@@ -590,9 +617,9 @@ void MapiAppointment::ex2kcalRecurrency(KCalCore::Recurrence *kcal)
         changeHighlight = 0;
 #endif
         if (overrideFlags & ARO_MEETINGTYPE) {
-            meetingType = e->MeetingType.Value;
+            meetingType = AppointmentStates(e->MeetingType.Value);
         } else {
-            meetingType = 0;
+            meetingType = AppointmentStates();
         }
         if (overrideFlags & ARO_REMINDERDELTA) {
             reminderDelta = e->ReminderDelta.Value;
@@ -635,23 +662,124 @@ void MapiAppointment::ex2kcalRecurrency(KCalCore::Recurrence *kcal)
 bool MapiAppointment::propertiesPull(QVector<int> &tags, const bool tagsAppended, bool pullAll)
 {
     /**
-     * The list of tags used to fetch an Appointment.
+     * The list of tags used to fetch an Appointment, based on [MS-OXOCAL].
      */
     static int ourTagList[] = {
-        PidTagMessageClass,
-        PidTagDisplayTo,
-        PidTagConversationTopic,
+        // 2.2.1.1
+        PidLidAppointmentSequence,
+        // 2.2.1.2
+        PidLidBusyStatus,
+        // 2.2.1.3
+        //PidLidAppointmentAuxiliaryFlags,
+        // 2.2.1.4
+        PidLidLocation,
+        // 2.2.1.5
+        PidLidAppointmentStartWhole,
+        // 2.2.1.6
+        PidLidAppointmentEndWhole,
+        // 2.2.1.7
+        //PidLidAppointmentDuration,
+        // 2.2.1.8
+        //PidNameKeywords,
+        // 2.2.1.9
+        PidLidAppointmentSubType,
+        // 2.2.1.10
+        PidLidAppointmentStateFlags,
+        // 2.2.1.11
+        PidLidResponseStatus,
+        // 2.2.1.12
+        //PidLidRecurring,
+        // 2.2.1.13
+        //PidLidIsRecurring,
+        // 2.2.1.14
+        //PidLidClipStart,
+        // 2.2.1.15
+        //PidLidClipEnd,
+        // 2.2.1.16
+        //PidLidAllAttendeesString,
+        // 2.2.1.17
+        //PidLidToAttendeesString,
+        // 2.2.1.18
+        //PidLidCcAttendeesString,
+        // 2.2.1.19
+        //PidLidNonSendableTo,
+        // 2.2.1.20
+        //PidLidNonSendableCc,
+        // 2.2.1.21
+        //PidLidNonSendableBcc,
+        // 2.2.1.22
+        //PidLidNonSendToTrackStatus,
+        // 2.2.1.23
+        //PidLidNonSendCcTrackStatus,
+        // 2.2.1.24
+        //PidLidNonSendBccTrackStatus,
+        // 2.2.1.25
+        //PidLidAppointmentUnsendableRecipients,
+        // 2.2.1.26
+        //PidLidAppointmentNotAllowPropose,
+        // 2.2.1.27
+        //PidLidGlobalObjectId,
+        // 2.2.1.28
+        //PidLidCleanGlobalObjectId,
+        // 2.2.1.29
+        //PidTagOwnerAppointmentId,
+        // 2.2.1.30
+        //PidTagStartDate,
+        // 2.2.1.31
+        //PidTagEndDate,
+        // 2.2.1.32
+        //PidLidCommonStart,
+        // 2.2.1.33
+        //PidLidCommonEnd,
+        // 2.2.1.34
+        //PidLidOwnerCriticalChange,
+        // 2.2.1.35
+        //PidLidIsException,
+        // 2.2.1.36
+        //PidTagResponseRequested,
+        // 2.2.1.37
+        //PidTagReplyRequested,
+        // 2.2.1.38 Best Body Properties
         PidTagBody,
+        // 2.2.1.39
+        PidLidTimeZoneStruct,
+        // 2.2.1.40
+        //PidLidTimeZoneDescription,
+        // 2.2.1.41
+        //PidLidAppointmentTimeZoneDefinitionRecur,
+        // 2.2.1.42
+        //PidLidAppointmentTimeZoneDefinitionStartDisplay,
+        // 2.2.1.43
+        //PidLidAppointmentTimeZoneDefinitionEndDisplay,
+        // 2.2.1.44
+        PidLidAppointmentRecur,
+        // 2.2.1.45
+        PidLidRecurrenceType,
+        // 2.2.1.46
+        //PidLidRecurrencePattern,
+        // 2.2.1.47
+        //PidLidLinkedTaskItems,
+        // 2.2.1.48
+        //PidLidMeetingWorkspaceUrl,
+        // 2.2.1.49
+        //PidTagIconIndex Property        
+        // 2.2.2.1
+        PidTagMessageClass,
+        // TODO 2.2.3
+        // TODO 2.2.4 through 2.2.9
+        // TODO 2.2.10
+        // TODO 2.2.11
+        // TODO 2.2.12
+        // [MS-OXORMDR] section 2.2.1.1
+        PidLidReminderSet,
+        // [MS-OXORMDR] section 2.2.1.2
+        PidLidReminderSignalTime,
+        // [MS-OXORMDR] section 2.2.1.3
+        PidLidReminderDelta,
+        // Other
+        PidTagConversationTopic,
         PidTagLastModificationTime,
         PidTagCreationTime,
-        PidTagStartDate,
-        PidTagEndDate,
-        PidLidLocation,
-        PidLidReminderSet,
-        PidLidReminderSignalTime,
-        PidLidReminderDelta,
-        PidLidRecurrenceType,
-        PidLidAppointmentRecur,
         PidTagTransportMessageHeaders,
         0 };
     static SPropTagArray ourTags = {
@@ -672,11 +800,27 @@ bool MapiAppointment::propertiesPull(QVector<int> &tags, const bool tagsAppended
     }
 
     // Start with a clean slate.
+    sequence = 0;
+    busyStatus = olFree;
+    location = QString();
+    begin = QDateTime();
+    end = QDateTime();
+    allDay = false;
+    meetingType = AppointmentStates();
+    responseStatus = None;
+    text = QString();
+    timezone = 0;
+    m_pattern = 0;
+    recurrenceType = (enum RecurFrequency)0;
     reminderActive = false;
+    reminderTime = QDateTime();
+    uint32_t reminderMinutes = 0;
+    title = QString();
+    modified = QDateTime();
+    created = QDateTime();
 
     // Walk through the properties and extract the values of interest. The
     // properties here should be aligned with the list pulled above.
-    unsigned recurrenceType = 0;
     bool embeddedInBody = false;
     QString header;
 
@@ -684,9 +828,45 @@ bool MapiAppointment::propertiesPull(QVector<int> &tags, const bool tagsAppended
         MapiProperty property(m_properties[i]);
 
         switch (property.tag()) {
+        case PidLidAppointmentSequence:
+            sequence = property.value().toUInt();
+            break;
+        case PidLidBusyStatus:
+            busyStatus = (enum FreeBusyStatus)property.value().toUInt();
+            break;
+        case PidLidLocation:
+            location = property.value().toString();
+            break;
+        case PidLidAppointmentStartWhole:
+            begin = property.value().toDateTime();
+            break;
+        case PidLidAppointmentEndWhole:
+            end = property.value().toDateTime();
+            break;
+        case PidLidAppointmentSubType:
+            allDay = property.value().toUInt() != 0;
+            break;
+        case PidLidAppointmentStateFlags:
+            meetingType = AppointmentStates(property.value().toUInt());
+            break;
+        case PidLidResponseStatus:
+            responseStatus = (ResponseStatus)property.value().toUInt();
+            break;
+        case PidTagBody:
+            text = property.value().toString();
+            break;
+        case PidLidTimeZoneStruct:
+            timezone = get_TimeZoneStruct(ctx(), &m_properties[i].value.bin);
+            break;
+        case PidLidAppointmentRecur:
+            m_pattern = get_AppointmentRecurrencePattern(ctx(), &m_properties[i].value.bin);
+            break;
+        case PidLidRecurrenceType:
+            recurrenceType = (enum RecurFrequency)property.value().toInt();
+            break;
         case PidTagMessageClass:
             // Sanity check the message class.
-            if (QLatin1String("IPM.Appointment") != property.value().toString()) {
+            if (!property.value().toString().startsWith(QLatin1String("IPM.Appointment"))) {
                 if (QLatin1String("IPM.Note") != property.value().toString()) {
                     error() << "retrieved item is not an appointment:" << property.value().toString();
                     return false;
@@ -694,27 +874,6 @@ bool MapiAppointment::propertiesPull(QVector<int> &tags, const bool tagsAppended
                     embeddedInBody = true;
                 }
             }
-            break;
-        case PidTagConversationTopic:
-            title = property.value().toString();
-            break;
-        case PidTagBody:
-            text = property.value().toString();
-            break;
-        case PidTagLastModificationTime:
-            modified = property.value().toDateTime();
-            break;
-        case PidTagCreationTime:
-            created = property.value().toDateTime();
-            break;
-        case PidTagStartDate:
-            begin = property.value().toDateTime();
-            break;
-        case PidTagEndDate:
-            end = property.value().toDateTime();
-            break;
-        case PidLidLocation:
-            location = property.value().toString();
             break;
         case PidLidReminderSet:
             reminderActive = property.value().toInt();
@@ -725,11 +884,14 @@ bool MapiAppointment::propertiesPull(QVector<int> &tags, const bool tagsAppended
         case PidLidReminderDelta:
             reminderMinutes = property.value().toInt();
             break;
-        case PidLidRecurrenceType:
-            recurrenceType = property.value().toInt();
+        case PidTagConversationTopic:
+            title = property.value().toString();
             break;
-        case PidLidAppointmentRecur:
-            m_pattern = get_AppointmentRecurrencePattern(ctx(), &m_properties[i].value.bin);
+        case PidTagLastModificationTime:
+            modified = property.value().toDateTime();
+            break;
+        case PidTagCreationTime:
+            created = property.value().toDateTime();
             break;
         case PidTagTransportMessageHeaders:
             header = property.value().toString();
@@ -822,7 +984,7 @@ DONE:
         if (!m_pattern) {
             // TODO This should not happen. PidLidRecurrenceType says this is a recurring event, so why is there no PidLidAppointmentRecur???
             debug() << "missing recurrencePattern for recurrenceType:" << recurrenceType;
-            recurrenceType = 0;
+            recurrenceType = (enum RecurFrequency)0;
         }
     }
     return true;

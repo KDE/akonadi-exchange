@@ -39,14 +39,14 @@ extern "C" {
  */
 typedef enum
 {
-    MailboxRoot             = olFolderMailboxRoot,		// To navigate the whole tree.
-    TopInformationStore     = olFolderTopInformationStore,	// All email note items.
+    MailboxRoot             = olFolderMailboxRoot,          // To navigate the whole tree.
+    TopInformationStore     = olFolderTopInformationStore,  // All email note items.
     DeletedItems            = olFolderDeletedItems,
     Outbox                  = olFolderOutbox,
     SentMail                = olFolderSentMail,
     Inbox                   = olFolderInbox,
     CommonView              = olFolderCommonView,
-    Calendar                = olFolderCalendar,		// All calendar items.
+    Calendar                = olFolderCalendar,             // All calendar items.
     Contacts                = olFolderContacts,
     Journal                 = olFolderJournal,
     Notes                   = olFolderNotes,
@@ -182,16 +182,16 @@ public:
      * but will be stringified by @ref displayTypeString.
      */
     typedef enum {
-        DtMailuser =		DT_MAILUSER,
-        DtDistlist =		DT_DISTLIST,
-        DtForum =		DT_FORUM,
-        DtAgent =		DT_AGENT,
-        DtOrganization =	DT_ORGANIZATION,
-        DtPrivateDistlist =	DT_PRIVATE_DISTLIST,
-        DtRemoteMailuser =	DT_REMOTE_MAILUSER,
-        DtRoom =		0x7,
-        DtEquipment =		0x8,
-        DtSecurityGroup =	0x9,
+        DtMailuser =        DT_MAILUSER,
+        DtDistlist =        DT_DISTLIST,
+        DtForum =           DT_FORUM,
+        DtAgent =           DT_AGENT,
+        DtOrganization =    DT_ORGANIZATION,
+        DtPrivateDistlist = DT_PRIVATE_DISTLIST,
+        DtRemoteMailuser =  DT_REMOTE_MAILUSER,
+        DtRoom =            0x7,
+        DtEquipment =       0x8,
+        DtSecurityGroup =   0x9,
     } DisplayType;
 
     /**
@@ -204,18 +204,18 @@ public:
      * but will be stringified by @ref objectTypeString.
      */
     typedef enum {
-        OtStore =		MAPI_STORE,
-        OtAddrbook =		MAPI_ADDRBOOK,
-        OtFolder =		MAPI_FOLDER,
-        OtABcont =		MAPI_ABCONT,
-        OtMessage =		MAPI_MESSAGE,
-        OtMailuser =		MAPI_MAILUSER,
-        OtAttach =		MAPI_ATTACH,
-        OtDistlist =		MAPI_DISTLIST,
-        OtProfsect =		MAPI_PROFSECT,
-        OtStatus =		MAPI_STATUS,
-        OtSession =		MAPI_SESSION,
-        OtForminfo =		MAPI_FORMINFO,
+        OtStore =           MAPI_STORE,
+        OtAddrbook =        MAPI_ADDRBOOK,
+        OtFolder =          MAPI_FOLDER,
+        OtABcont =          MAPI_ABCONT,
+        OtMessage =         MAPI_MESSAGE,
+        OtMailuser =        MAPI_MAILUSER,
+        OtAttach =          MAPI_ATTACH,
+        OtDistlist =        MAPI_DISTLIST,
+        OtProfsect =        MAPI_PROFSECT,
+        OtStatus =          MAPI_STATUS,
+        OtSession =         MAPI_SESSION,
+        OtForminfo =        MAPI_FORMINFO,
     } ObjectType;
 
     MapiRecipient(Type type) :
