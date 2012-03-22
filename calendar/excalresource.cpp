@@ -165,10 +165,11 @@ public:
         NotResponded
     } ResponseStatus;
 
-private:
+protected:
     virtual QDebug debug() const;
     virtual QDebug error() const;
 
+private:
     /**
      * Populate the object with property contents.
      */
@@ -179,10 +180,30 @@ private:
      */
     virtual bool propertiesPull(QVector<int> &tags, const bool tagsAppended, bool pullAll);
 
-    void ex2kcalRecurrency(AppointmentRecurrencePattern *recurrencePattern, KCalCore::Recurrence *kcal);
+    void ex2kcalRecurrency(AppointmentRecurrencePattern *pattern, KCalCore::Recurrence *kcal);
 };
 
 Q_DECLARE_OPERATORS_FOR_FLAGS(MapiAppointment::AppointmentStates);
+
+class MapiAppointmentException : public MapiAppointment
+{
+public:
+    MapiAppointmentException(MapiConnector2 *connection, const char *tallocName, MapiId &id, MapiAppointment &parent, AppointmentRecurrencePattern *pattern);
+
+    /**
+     * Fetch all properties.
+     */
+    virtual bool propertiesPull();
+
+private:
+    /**
+     * Populate the object with property contents.
+     */
+    bool preparePayload();
+
+    MapiAppointment &m_parent;
+    AppointmentRecurrencePattern *m_pattern;
+};
 
 ExCalResource::ExCalResource(const QString &id) :
     MapiResource(id, i18n("Exchange Calendar"), IPF_APPOINTMENT, "IPM.Appointment", QString::fromAscii("text/calendar"))
@@ -350,14 +371,14 @@ void ExCalResource::itemChangedContinue(KJob* job)
     message->location = event->location();
     if (event->alarms().count()) {
         KCalCore::Alarm::Ptr alarm = event->alarms().first();
-        message->reminderActive = true;
+        message->reminderSet = true;
         // TODO Maybe we should check which one is set and then use either the time or the delte
         // KDateTime reminder(message->reminderTime);
         // reminder.setTimeSpec( KDateTime::Spec(KDateTime::UTC) );
         // alarm->setTime( reminder );
-        message->reminderMinutes = alarm->startOffset() / -60;
+        message->reminderDelta = alarm->startOffset() / -60;
     } else {
-        message->reminderActive = false;
+        message->reminderSet = false;
     }
 
     MapiRecipient att(MapiRecipient::Sender);
@@ -417,15 +438,15 @@ QDebug MapiAppointment::error() const
     return MapiObject::error(prefix.arg(m_id.toString()));
 }
 
-void MapiAppointment::ex2kcalRecurrency(AppointmentRecurrencePattern *recurrencePattern, KCalCore::Recurrence *kcal)
+void MapiAppointment::ex2kcalRecurrency(AppointmentRecurrencePattern *pattern, KCalCore::Recurrence *kcal)
 {
     kcal->clear();
-    if (!recurrencePattern) {
+    if (!pattern) {
         // No recurrency.
         return;
     }
 
-    RecurrencePattern *ex = &recurrencePattern->RecurrencePattern;
+    RecurrencePattern *ex = &pattern->RecurrencePattern;
     QString description;
     //debug() << "Calendar:" << ex->CalendarType;
     QBitArray days;
@@ -522,97 +543,27 @@ void MapiAppointment::ex2kcalRecurrency(AppointmentRecurrencePattern *recurrence
                     ex->EndType);
         break;
     }
+    debug() << description;
 
     // We have dealt with the basic recurrence, now see what exceptions we have.
-    for (int i = 0; i < recurrencePattern->ExceptionCount; i++) {
-        ExceptionInfo *e = &recurrencePattern->ExceptionInfo[i];
+    for (int i = 0; i < pattern->ExceptionCount; i++) {
+        MapiId exceptionId(m_id, (mapi_id_t)i);
+        MapiAppointmentException exception(m_connection, "MapiAppointmentException", exceptionId, *this, pattern);
 
-        KDateTime newStartDateTime = ex2kcalTimes(e->StartDateTime);
-        KDateTime newEndDateTime = ex2kcalTimes(e->EndDateTime);
-        KDateTime originalStartDate = ex2kcalTimes(e->OriginalStartDate);
-        OverrideFlags overrideFlags = e->OverrideFlags;
-        QString subject;
-        QString location;
-        AppointmentStates meetingType;
-        uint32_t reminderDelta;
-        bool reminderSet;
-        enum FreeBusyStatus busyStatus;
-        bool attachment;
-        bool allDay;
-        uint32_t changeHighlight;
-
-        description += i18n("\nException%1 for %2 to be from %3 to %4", i, stringify(originalStartDate), stringify(newStartDateTime), stringify(newEndDateTime));
-#if 1
-        // ExtendedException has Unicode strings, but needs Openchange 
-        // bug #391 to be fixed.
-        ExtendedException *ee = &recurrencePattern->ExtendedException[i];
-        if (recurrencePattern->WriterVersion2 < 0x00003009) {
-            changeHighlight = 0;
-        } else {
-            changeHighlight = ee->ChangeHighlight.ChangeHighlight.ChangeHighlightValue;
-            description += i18n("\n    ChangeHighlight %1", changeHighlight);
+        if (!exception.propertiesPull()) {
+            error() << "Error in exception:" << i;
+            // Carry on regardless.
+            continue;
         }
-        if (overrideFlags & ARO_SUBJECT) {
-            subject.setUtf16(ee->Subject.Msg.Msg, ee->Subject.Msg.Length);
-            description += i18n("\n    Subject %1", subject);
-        }
-        if (overrideFlags & ARO_LOCATION) {
-            location.setUtf16(ee->Location.Msg.Msg, ee->Location.Msg.Length);
-            description += i18n("\n    Location %1", location);
-        }
-#else
-        // Non-unicode support only, from the ExceptionInfo.
-        if (overrideFlags & ARO_SUBJECT) {
-            subject = QString::fromLatin1((const char *)e->Subject.Msg.msg, e->Subject.Msg.msgLength2);
-            description += i18n("\n    Subject %1", subject);
-        }
-        if (overrideFlags & ARO_LOCATION) {
-            location = QString::fromLatin1((const char *)e->Location.Msg.msg, e->Location.Msg.msgLength2);
-            description += i18n("\n    Location %1", location);
-        }
-        changeHighlight = 0;
-#endif
-        if (overrideFlags & ARO_MEETINGTYPE) {
-            meetingType = AppointmentStates(e->MeetingType.Value);
-        } else {
-            meetingType = AppointmentStates();
-        }
-        if (overrideFlags & ARO_REMINDERDELTA) {
-            reminderDelta = e->ReminderDelta.Value;
-        } else {
-            reminderDelta = 0;
-        }
-        if (overrideFlags & ARO_REMINDER) {
-            reminderSet = e->ReminderSet.Value != 0;
-        } else {
-            reminderSet = false;
-        }
-        if (overrideFlags & ARO_BUSYSTATUS) {
-            busyStatus = (enum FreeBusyStatus)e->BusyStatus.Value;
-        } else {
-            busyStatus = olFree;
-        }
-        if (overrideFlags & ARO_ATTACHMENT) {
-            attachment = e->Attachment.Value != 0;
-        } else {
-            attachment = false;
-        }
-        if (overrideFlags & ARO_SUBTYPE) {
-            allDay = e->SubType.Value != 0;
-        } else {
-            allDay = false;
-        }
-        description += i18n("\n    ChangeHighlight %1, meetingType %2, reminderDelta %3, reminderSet %4, busyStatus %5, attachment %6, allDay %7",
-                    changeHighlight, meetingType, reminderDelta, reminderSet, busyStatus, attachment, allDay);
+        
         // TODO: check the documentation about how to handle having multiple rules
         // to make sure we don't clash with the default rule.
         //KCalCore::RecurrenceRule *r = new KCalCore::RecurrenceRule();
         //r->setAllDay(allDay);
-        //r->setStartDt(newStartDateTime);
-        //r->setEndDt(newEndDateTime);
+        //r->setStartDt(begin);
+        //r->setEndDt(end);
         //kcal->addExRule(r);
     }
-    debug() << description;
 }
 
 bool MapiAppointment::preparePayload()
@@ -628,11 +579,11 @@ bool MapiAppointment::preparePayload()
     ResponseStatus responseStatus = None;
     QString text;
     struct TimeZoneStruct *timezone = 0;
-    AppointmentRecurrencePattern *recurrencePattern = 0;
+    AppointmentRecurrencePattern *pattern = 0;
     enum RecurFrequency recurrenceType = (enum RecurFrequency)0;
-    bool reminderActive = false;
+    bool reminderSet = false;
     QDateTime reminderTime;
-    uint32_t reminderMinutes = 0;
+    uint32_t reminderDelta = 0;
     QString title;
     QDateTime modified;
     QDateTime created;
@@ -677,7 +628,7 @@ bool MapiAppointment::preparePayload()
             timezone = get_TimeZoneStruct(ctx(), &m_properties[i].value.bin);
             break;
         case PidLidAppointmentRecur:
-            recurrencePattern = get_AppointmentRecurrencePattern(ctx(), &m_properties[i].value.bin);
+            pattern = get_AppointmentRecurrencePattern(ctx(), &m_properties[i].value.bin);
             break;
         case PidLidRecurrenceType:
             recurrenceType = (enum RecurFrequency)property.value().toInt();
@@ -694,13 +645,13 @@ bool MapiAppointment::preparePayload()
             }
             break;
         case PidLidReminderSet:
-            reminderActive = property.value().toInt();
+            reminderSet = property.value().toInt();
             break;
         case PidLidReminderSignalTime:
             reminderTime = property.value().toDateTime();
             break;
         case PidLidReminderDelta:
-            reminderMinutes = property.value().toInt();
+            reminderDelta = property.value().toInt();
             break;
         case PidTagConversationTopic:
             title = property.value().toString();
@@ -815,21 +766,21 @@ DONE:
     setDescription(text);
     // TODO timezone
     if (recurrenceType != 0) {
-        if (!recurrencePattern) {
+        if (!pattern) {
             // This should not happen. PidLidRecurrenceType says this is a
             // recurring event, so why is there no PidLidAppointmentRecur???
-            error() << "missing recurrencePattern for recurrenceType:" << recurrenceType;
+            error() << "missing pattern for recurrenceType:" << recurrenceType;
             recurrenceType = (enum RecurFrequency)0;
         }
     }
-    ex2kcalRecurrency(recurrencePattern, recurrence());
-    if (reminderActive) {
+    ex2kcalRecurrency(pattern, recurrence());
+    if (reminderSet) {
         KCalCore::Alarm::Ptr alarm(new KCalCore::Alarm(dynamic_cast<KCalCore::Incidence*>(this)));
         // TODO Maybe we should check which one is set and then use either the time or the delte
         // KDateTime reminder(reminderTime);
         // reminder.setTimeSpec(KDateTime::Spec(KDateTime::UTC));
         // alarm->setTime(reminder);
-        alarm->setStartOffset(KCalCore::Duration(reminderMinutes * -60));
+        alarm->setStartOffset(KCalCore::Duration(reminderDelta * -60));
         alarm->setEnabled(true);
         addAlarm(alarm);
     }
@@ -1034,14 +985,14 @@ bool MapiAppointment::propertiesPush()
     if (!propertyWrite(PidLidLocation, location)) {
         return false;
     }
-    if (!propertyWrite(PidLidReminderSet, reminderActive)) {
+    if (!propertyWrite(PidLidReminderSet, reminderSet)) {
         return false;
     }
-    if (reminderActive) {
+    if (reminderSet) {
         if (!propertyWrite(PidLidReminderSignalTime, reminderTime)) {
             return false;
         }
-        if (!propertyWrite(PidLidReminderDelta, reminderMinutes)) {
+        if (!propertyWrite(PidLidReminderDelta, reminderDelta)) {
             return false;
         }
     }
@@ -1058,7 +1009,7 @@ bool MapiAppointment::propertiesPush()
             data.recurrency.setData(pattern);
         } else {
             // TODO This should not happen. PidLidRecurrenceType says this is a recurring event, so why is there no PidLidAppointmentRecur???
-            debug() << "missing recurrencePattern in message"<<messageID<<"in folder"<<folderID;
+            debug() << "missing pattern in message"<<messageID<<"in folder"<<folderID;
             }
     }
 
@@ -1094,6 +1045,116 @@ bool MapiAppointment::propertiesPush()
     }
 #endif
     return true;
+}
+
+MapiAppointmentException::MapiAppointmentException(MapiConnector2 *connection, const char *tallocName, MapiId &id, MapiAppointment &parent, AppointmentRecurrencePattern *pattern) :
+    MapiAppointment(connection, tallocName, id),
+    m_parent(parent),
+    m_pattern(pattern)
+{
+}
+
+bool MapiAppointmentException::preparePayload()
+{
+    ExceptionInfo *e = &m_pattern->ExceptionInfo[m_id.second];
+    ExtendedException *ee = &m_pattern->ExtendedException[m_id.second];
+
+    enum FreeBusyStatus busyStatus = (m_parent.transparency() == Event::Transparent) ? olFree : olBusy;
+    QString location = m_parent.location();
+    KDateTime begin = ex2kcalTimes(e->StartDateTime);
+    KDateTime end = ex2kcalTimes(e->EndDateTime);
+    bool allDay = m_parent.allDay();
+    AppointmentStates meetingType;
+    bool reminderSet = m_parent.alarms().size() > 0;
+    uint32_t reminderDelta = reminderSet ? (m_parent.alarms().first()->startOffset().asSeconds() / -60) : 0;
+    QString title = m_parent.summary();
+    uint32_t changeHighlight = 0;
+    bool attachment = false;
+    KDateTime originalStartDate = ex2kcalTimes(e->OriginalStartDate);
+    OverrideFlags overrideFlags = e->OverrideFlags;
+
+    QString description;
+    description += i18n("\nException%1 for %2 to be from %3 to %4", m_id.second, stringify(originalStartDate), stringify(begin), stringify(end));
+#if 1
+    // ExtendedException has Unicode strings, but needs Openchange 
+    // bug #391 to be fixed.
+    if (ee->WriterVersion2 >= 0x00003009) {
+        changeHighlight = ee->ChangeHighlight.ChangeHighlight.ChangeHighlightValue;
+        description += i18n("\n    ChangeHighlight %1", changeHighlight);
+    }
+    if (overrideFlags & ARO_SUBJECT) {
+        title.setUtf16(ee->Subject.Msg.Msg, ee->Subject.Msg.Length);
+        description += i18n("\n    Subject %1", title);
+    }
+    if (overrideFlags & ARO_LOCATION) {
+        location.setUtf16(ee->Location.Msg.Msg, ee->Location.Msg.Length);
+        description += i18n("\n    Location %1", location);
+    }
+#else
+    // Non-unicode support only, from the ExceptionInfo.
+    if (overrideFlags & ARO_SUBJECT) {
+        title = QString::fromLatin1((const char *)e->Subject.Msg.msg, e->Subject.Msg.msgLength2);
+        description += i18n("\n    Subject %1", title);
+    }
+    if (overrideFlags & ARO_LOCATION) {
+        location = QString::fromLatin1((const char *)e->Location.Msg.msg, e->Location.Msg.msgLength2);
+        description += i18n("\n    Location %1", location);
+    }
+#endif
+    if (overrideFlags & ARO_MEETINGTYPE) {
+        meetingType = AppointmentStates(e->MeetingType.Value);
+    }
+    if (overrideFlags & ARO_REMINDERDELTA) {
+        reminderDelta = e->ReminderDelta.Value;
+    }
+    if (overrideFlags & ARO_REMINDER) {
+        reminderSet = e->ReminderSet.Value != 0;
+    }
+    if (overrideFlags & ARO_BUSYSTATUS) {
+        busyStatus = (enum FreeBusyStatus)e->BusyStatus.Value;
+    }
+    if (overrideFlags & ARO_ATTACHMENT) {
+        attachment = e->Attachment.Value != 0;
+    }
+    if (overrideFlags & ARO_SUBTYPE) {
+        allDay = e->SubType.Value != 0;
+    }
+    description += i18n("\n    ChangeHighlight %1, meetingType %2, reminderDelta %3, reminderSet %4, busyStatus %5, attachment %6, allDay %7",
+                changeHighlight, meetingType, reminderDelta, reminderSet, busyStatus, attachment, allDay);
+    debug() << description;
+
+    // Now set all the properties onto the item.
+    switch (busyStatus) {
+    case olFree:
+        setTransparency(Event::Transparent);
+        break;
+    default:
+        setTransparency(Event::Opaque);
+        break;
+    }
+    setLocation(location);
+    setDtStart(KDateTime(begin));
+    setDtEnd(KDateTime(end));
+    setAllDay(allDay);
+    // TODO meetingType
+    // TODO timezone
+    if (reminderSet) {
+        KCalCore::Alarm::Ptr alarm(new KCalCore::Alarm(dynamic_cast<KCalCore::Incidence*>(this)));
+        // TODO Maybe we should check which one is set and then use either the time or the delte
+        // KDateTime reminder(reminderTime);
+        // reminder.setTimeSpec(KDateTime::Spec(KDateTime::UTC));
+        // alarm->setTime(reminder);
+        alarm->setStartOffset(KCalCore::Duration(reminderDelta * -60));
+        alarm->setEnabled(true);
+        addAlarm(alarm);
+    }
+    setSummary(title);
+    return true;
+}
+
+bool MapiAppointmentException::propertiesPull()
+{
+    return preparePayload();
 }
 
 AKONADI_RESOURCE_MAIN( ExCalResource )
