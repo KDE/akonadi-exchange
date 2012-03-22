@@ -82,6 +82,9 @@ protected:
     virtual QDebug debug() const;
     virtual QDebug error() const;
 
+    /**
+     * Populate the object with property contents.
+     */
     bool preparePayload();
 
     /**
@@ -178,7 +181,6 @@ bool ExMailResource::retrieveItem(const Akonadi::Item &itemOrig, const QSet<QByt
     if (!message) {
         return false;
     }
-
     KMime::Message::Ptr ptr(message);
 
     // Create a clone of the passed in const Item and fill it with the payload.
@@ -201,12 +203,9 @@ bool ExMailResource::retrieveItem(const Akonadi::Item &itemOrig, const QSet<QByt
         item.setFlag(Akonadi::MessageFlags::HasAttachment);
     }
     // TODO add further message properties.
-//	item.setModificationTime(message->modified);
+    //item.setModificationTime(message->modified);
 */
     item.setPayload<KMime::Message::Ptr>(ptr);
-
-    // Not needed!
-    //delete message;
 
     // Notify Akonadi about the new data.
     itemRetrieved(item);
@@ -239,14 +238,14 @@ void ExMailResource::configure(WId windowId)
 
 void ExMailResource::itemAdded( const Akonadi::Item &item, const Akonadi::Collection &collection )
 {
-  Q_UNUSED( item );
-  Q_UNUSED( collection );
+    Q_UNUSED( item );
+    Q_UNUSED( collection );
 
-  // TODO: this method is called when somebody else, e.g. a client application,
-  // has created an item in a collection managed by your resource.
+    // TODO: this method is called when somebody else, e.g. a client application,
+    // has created an item in a collection managed by your resource.
 
-  // NOTE: There is an equivalent method for collections, but it isn't part
-  // of this template code to keep it simple
+    // NOTE: There is an equivalent method for collections, but it isn't part
+    // of this template code to keep it simple
 }
 
 /**
@@ -255,15 +254,15 @@ void ExMailResource::itemAdded( const Akonadi::Item &item, const Akonadi::Collec
  */
 void ExMailResource::itemChanged(const Akonadi::Item &item, const QSet<QByteArray> &parts)
 {
-        Q_UNUSED(parts);
+    Q_UNUSED(parts);
 
-        // Get the payload for the item.
+    // Get the payload for the item.
     kWarning() << "fetch cached item: {" <<
-        currentCollection().name() << "," << item.id() << "} = {" <<
-        currentCollection().remoteId() << "," << item.remoteId() << "}";
-        Akonadi::ItemFetchJob *job = new Akonadi::ItemFetchJob(item);
-        connect(job, SIGNAL(result(KJob*)), SLOT(itemChangedContinue(KJob*)));
-        job->fetchScope().fetchFullPayload();
+    currentCollection().name() << "," << item.id() << "} = {" <<
+    currentCollection().remoteId() << "," << item.remoteId() << "}";
+    Akonadi::ItemFetchJob *job = new Akonadi::ItemFetchJob(item);
+    connect(job, SIGNAL(result(KJob*)), SLOT(itemChangedContinue(KJob*)));
+    job->fetchScope().fetchFullPayload();
 }
 
 /**
@@ -271,12 +270,12 @@ void ExMailResource::itemChanged(const Akonadi::Item &item, const QSet<QByteArra
  */
 void ExMailResource::itemChangedContinue(KJob* job)
 {
-        if (job->error()) {
-            emit status(Broken, i18n("Failed to get cached data"));
-            return;
-        }
-        Akonadi::ItemFetchJob *fetchJob = qobject_cast<Akonadi::ItemFetchJob*>(job);
-        const Akonadi::Item item = fetchJob->items().first();
+    if (job->error()) {
+        emit status(Broken, i18n("Failed to get cached data"));
+        return;
+    }
+    Akonadi::ItemFetchJob *fetchJob = qobject_cast<Akonadi::ItemFetchJob*>(job);
+    const Akonadi::Item item = fetchJob->items().first();
 
     MapiNote *message = fetchItem<MapiNote>(item);
     if (!message) {
