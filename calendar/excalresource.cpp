@@ -201,6 +201,15 @@ private:
      */
     bool preparePayload();
 
+    virtual bool propertiesPull(QVector<int> &tags, const bool tagsAppended, bool pullAll)
+    {
+        Q_UNUSED(tags);
+        Q_UNUSED(tagsAppended);
+        Q_UNUSED(pullAll);
+
+        return false;
+    }
+
     MapiAppointment &m_parent;
     AppointmentRecurrencePattern *m_pattern;
 };
@@ -366,7 +375,7 @@ void ExCalResource::itemChangedContinue(KJob* job)
         return;
     }
     message->modified = item.modificationTime();
-    message->text = event->description();
+    message->bodyText = event->description();
     //message->sender = event->organizer().name();
     message->location = event->location();
     if (event->alarms().count()) {
@@ -555,14 +564,7 @@ void MapiAppointment::ex2kcalRecurrency(AppointmentRecurrencePattern *pattern, K
             // Carry on regardless.
             continue;
         }
-        
-        // TODO: check the documentation about how to handle having multiple rules
-        // to make sure we don't clash with the default rule.
-        //KCalCore::RecurrenceRule *r = new KCalCore::RecurrenceRule();
-        //r->setAllDay(allDay);
-        //r->setStartDt(begin);
-        //r->setEndDt(end);
-        //kcal->addExRule(r);
+        debug() << "added exception" << i;
     }
 }
 
@@ -575,9 +577,10 @@ bool MapiAppointment::preparePayload()
     QDateTime begin;
     QDateTime end;
     bool allDay = false;
-    AppointmentStates meetingType;
+    AppointmentStates state;
     ResponseStatus responseStatus = None;
-    QString text;
+    QString bodyText;
+    QString bodyHtml;
     struct TimeZoneStruct *timezone = 0;
     AppointmentRecurrencePattern *pattern = 0;
     enum RecurFrequency recurrenceType = (enum RecurFrequency)0;
@@ -616,13 +619,16 @@ bool MapiAppointment::preparePayload()
             allDay = property.value().toUInt() != 0;
             break;
         case PidLidAppointmentStateFlags:
-            meetingType = AppointmentStates(property.value().toUInt());
+            state = AppointmentStates(property.value().toUInt());
             break;
         case PidLidResponseStatus:
             responseStatus = (ResponseStatus)property.value().toUInt();
             break;
         case PidTagBody:
-            text = property.value().toString();
+            bodyText = property.value().toString();
+            break;
+        case PidTagHtml:
+            bodyHtml = property.value().toString();
             break;
         case PidLidTimeZoneStruct:
             timezone = get_TimeZoneStruct(ctx(), &m_properties[i].value.bin);
@@ -670,7 +676,12 @@ bool MapiAppointment::preparePayload()
             if (MAPI_E_NOT_ENOUGH_MEMORY == property.value().toInt()) {
                 switch (property.tag()) {
                 case PidTagBody_Error:
-                    if (!streamRead(&m_object, PidTagBody, CODEPAGE_UTF16, text)) {
+                    if (!streamRead(&m_object, PidTagBody, CODEPAGE_UTF16, bodyText)) {
+                        return false;
+                    }
+                    break;
+                case PidTagHtml_Error:
+                    if (!streamRead(&m_object, PidTagHtml, CODEPAGE_UTF16, bodyHtml)) {
                         return false;
                     }
                     break;
@@ -740,8 +751,8 @@ bool MapiAppointment::preparePayload()
         }
 DONE:
         header.resize(j);
-        text = header + text;
-        if (text.isEmpty()) {
+        bodyText = header + bodyText;
+        if (bodyText.isEmpty()) {
             error() << "retrieved content is not an appointment";
             return false;
         }
@@ -761,9 +772,40 @@ DONE:
     setDtStart(KDateTime(begin));
     setDtEnd(KDateTime(end));
     setAllDay(allDay);
-    // TODO meetingType
-    // TODO responseStatus
-    setDescription(text);
+    if (state.testFlag(Canceled)) {
+        // Just mark this entry as cancelled.
+        setStatus(StatusCanceled);
+    } else {
+        // If this came from somebody else, the user may have to do something.
+        if (state.testFlag(Received)) {
+            switch (responseStatus) {
+            case None:
+                setStatus(StatusNone);
+                break;
+            case Organized:
+                // TODO I'm not sure what this means exactly?
+                setStatus(StatusNeedsAction);
+                break;
+            case Tentative:
+                setStatus(StatusTentative);
+                break;
+            case Accepted:
+                setStatus(StatusConfirmed);
+                break;
+            case Declined:
+                setStatus(StatusCanceled);
+                break;
+            case NotResponded:
+                setStatus(StatusNeedsAction);
+                break;
+            }
+        } else {
+            // This did not come from anybody else.
+            setStatus(StatusConfirmed);
+        }
+    }
+    setDescription(bodyText);
+    setAltDescription(bodyHtml);
     // TODO timezone
     if (recurrenceType != 0) {
         if (!pattern) {
@@ -881,6 +923,7 @@ bool MapiAppointment::propertiesPull(QVector<int> &tags, const bool tagsAppended
         //PidTagReplyRequested,
         // 2.2.1.38 Best Body Properties
         PidTagBody,
+        PidTagHtml,
         // 2.2.1.39
         PidLidTimeZoneStruct,
         // 2.2.1.40
@@ -964,7 +1007,7 @@ bool MapiAppointment::propertiesPush()
     if (!propertyWrite(PidTagConversationTopic, title)) {
         return false;
     }
-    if (!propertyWrite(PidTagBody, text)) {
+    if (!propertyWrite(PidTagBody, bodyText)) {
         return false;
     }
     if (!propertyWrite(PidTagLastModificationTime, modified)) {
@@ -1047,7 +1090,10 @@ bool MapiAppointment::propertiesPush()
     return true;
 }
 
-MapiAppointmentException::MapiAppointmentException(MapiConnector2 *connection, const char *tallocName, MapiId &id, MapiAppointment &parent, AppointmentRecurrencePattern *pattern) :
+MapiAppointmentException::MapiAppointmentException(MapiConnector2 *connection, 
+                                                   const char *tallocName, 
+                                                   MapiId &id, MapiAppointment &parent, 
+                                                   AppointmentRecurrencePattern *pattern) :
     MapiAppointment(connection, tallocName, id),
     m_parent(parent),
     m_pattern(pattern)
@@ -1064,17 +1110,17 @@ bool MapiAppointmentException::preparePayload()
     KDateTime begin = ex2kcalTimes(e->StartDateTime);
     KDateTime end = ex2kcalTimes(e->EndDateTime);
     bool allDay = m_parent.allDay();
-    AppointmentStates meetingType;
+    AppointmentStates state;
     bool reminderSet = m_parent.alarms().size() > 0;
     uint32_t reminderDelta = reminderSet ? (m_parent.alarms().first()->startOffset().asSeconds() / -60) : 0;
     QString title = m_parent.summary();
     uint32_t changeHighlight = 0;
     bool attachment = false;
-    KDateTime originalStartDate = ex2kcalTimes(e->OriginalStartDate);
+    KDateTime originalBegin = ex2kcalTimes(e->OriginalStartDate);
     OverrideFlags overrideFlags = e->OverrideFlags;
 
     QString description;
-    description += i18n("\nException%1 for %2 to be from %3 to %4", m_id.second, stringify(originalStartDate), stringify(begin), stringify(end));
+    description += i18n("\nException%1 for %2 to be from %3 to %4", m_id.second, stringify(originalBegin), stringify(begin), stringify(end));
 #if 1
     // ExtendedException has Unicode strings, but needs Openchange 
     // bug #391 to be fixed.
@@ -1102,7 +1148,7 @@ bool MapiAppointmentException::preparePayload()
     }
 #endif
     if (overrideFlags & ARO_MEETINGTYPE) {
-        meetingType = AppointmentStates(e->MeetingType.Value);
+        state = AppointmentStates(e->MeetingType.Value);
     }
     if (overrideFlags & ARO_REMINDERDELTA) {
         reminderDelta = e->ReminderDelta.Value;
@@ -1119,8 +1165,8 @@ bool MapiAppointmentException::preparePayload()
     if (overrideFlags & ARO_SUBTYPE) {
         allDay = e->SubType.Value != 0;
     }
-    description += i18n("\n    ChangeHighlight %1, meetingType %2, reminderDelta %3, reminderSet %4, busyStatus %5, attachment %6, allDay %7",
-                changeHighlight, meetingType, reminderDelta, reminderSet, busyStatus, attachment, allDay);
+    description += i18n("\n    ChangeHighlight %1, state %2, reminderDelta %3, reminderSet %4, busyStatus %5, attachment %6, allDay %7",
+                changeHighlight, state, reminderDelta, reminderSet, busyStatus, attachment, allDay);
     debug() << description;
 
     // Now set all the properties onto the item.
@@ -1136,8 +1182,6 @@ bool MapiAppointmentException::preparePayload()
     setDtStart(KDateTime(begin));
     setDtEnd(KDateTime(end));
     setAllDay(allDay);
-    // TODO meetingType
-    // TODO timezone
     if (reminderSet) {
         KCalCore::Alarm::Ptr alarm(new KCalCore::Alarm(dynamic_cast<KCalCore::Incidence*>(this)));
         // TODO Maybe we should check which one is set and then use either the time or the delte
@@ -1149,6 +1193,22 @@ bool MapiAppointmentException::preparePayload()
         addAlarm(alarm);
     }
     setSummary(title);
+
+    // Create relationship with the parent recurrence: the exception has the same
+    // UID as the original event, and a recurrenceId of the original item instance
+    // to be overridden.
+    debug() << "exception uid"<<m_parent.id().toString();
+    setUid(m_parent.id().toString());
+    setRecurrenceId(originalBegin);
+    KCalCore::RecurrenceRule *r = new KCalCore::RecurrenceRule();
+    r->setAllDay(allDay);
+    r->setStartDt(begin);
+    r->setEndDt(end);
+    m_parent.recurrence()->addExDate(originalBegin.date());
+    m_parent.recurrence()->addExDateTime(originalBegin);
+    m_parent.recurrence()->addExRule(r);
+    debug() <<"whole thing with exception...";
+    m_parent.recurrence()->dump();
     return true;
 }
 
