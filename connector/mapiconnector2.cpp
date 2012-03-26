@@ -1455,6 +1455,8 @@ bool MapiObject::propertiesPush()
 
 bool MapiObject::propertiesPull(QVector<int> &tags, const bool tagsAppended, bool pullAll)
 {
+    bool usingNamedProperties = false;
+
     // If the user tells us the tags he has given us have not previously been
     // seen, or the cache is empty, fill it.
     if (!tagsAppended || !m_cachedTags.aulPropTag) {
@@ -1464,26 +1466,39 @@ bool MapiObject::propertiesPull(QVector<int> &tags, const bool tagsAppended, boo
             error() << "cannot allocate tags:" << tags.size() << mapiError();
             return false;
         }
+
+        // Now create the array that MAPI will use.
         m_cachedTags.cValues = tags.size();
         unsigned i = 0;
         foreach (int tag, tags) {
             m_cachedTags.aulPropTag[i++] = (MAPITAGS)tag;
+            usingNamedProperties |= ((tag & 0x80000000) != 0);
         }
         m_cachedTags.aulPropTag[i] = (MAPITAGS)0;
 
-        // Now create the array that MAPI will use.
-
-        // Now create the named property translation.
-        m_cachedNames = mapi_nameid_new(ctx());
-        m_cachedNamedTags = talloc_zero(ctx(), struct SPropTagArray);
-        MAPISTATUS status = mapi_nameid_lookup_SPropTagArray(m_cachedNames, &m_cachedTags);
-        if ((MAPI_E_NOT_FOUND != status) && (MAPI_E_SUCCESS != status)) {
-            error() << "Cannot find named properties" << mapiError();
-            return false;
-        }
-                if (MAPI_E_SUCCESS != mapi_nameid_GetIDsFromNames(m_cachedNames, &m_object, m_cachedNamedTags)) {
-            error() << "Cannot find named property ids" << mapiError();
-            return false;
+        // Now create the named property translation, if needed.
+        if (usingNamedProperties) {
+            m_cachedNames = mapi_nameid_new(ctx());
+            if (!m_cachedNames) {
+                error() << "Cannot create named property context" << mapiError();
+                return false;
+            }
+            m_cachedNamedTags = talloc_zero(ctx(), struct SPropTagArray);
+            if (!m_cachedNamedTags) {
+                error() << "Cannot create named property array" << mapiError();
+                return false;
+            }
+            MAPISTATUS status = mapi_nameid_lookup_SPropTagArray(m_cachedNames, &m_cachedTags);
+            if ((MAPI_E_NOT_FOUND != status) && (MAPI_E_SUCCESS != status)) {
+                error() << "Cannot find named properties" << mapiError();
+                return false;
+            }
+            if (MAPI_E_SUCCESS != mapi_nameid_GetIDsFromNames(m_cachedNames, &m_object, m_cachedNamedTags)) {
+                error() << "Cannot find named property ids" << mapiError();
+                return false;
+            }
+        } else {
+            m_cachedNames = 0;
         }
     }
 
@@ -1494,23 +1509,41 @@ bool MapiObject::propertiesPull(QVector<int> &tags, const bool tagsAppended, boo
     }
 
     // Map the tags before the call, and unmap them afterwards.
-    mapi_nameid_map_SPropTagArray(m_cachedNames, &m_cachedTags, m_cachedNamedTags);
+    if (usingNamedProperties) {
+        if (MAPI_E_SUCCESS != mapi_nameid_map_SPropTagArray(m_cachedNames, &m_cachedTags, m_cachedNamedTags)) {
+            error() << "Cannot map named properties" << mapiError();
+            return false;
+        }
+    }
     if (MAPI_E_SUCCESS != GetProps(&m_object, MAPI_UNICODE | MAPI_PROPS_SKIP_NAMEDID_CHECK, &m_cachedTags, &m_properties, &m_propertyCount)) {
         error() << "cannot pull properties:" << mapiError();
-        mapi_nameid_unmap_SPropTagArray(m_cachedNames, &m_cachedTags);
+        if (usingNamedProperties) {
+            if (MAPI_E_SUCCESS != mapi_nameid_unmap_SPropTagArray(m_cachedNames, &m_cachedTags)) {
+                error() << "Cannot unmap named properties" << mapiError();
+                return false;
+            }
+        }
         return false;
     }
-    mapi_nameid_unmap_SPropTagArray(m_cachedNames, &m_cachedTags);
+    if (usingNamedProperties) {
+        if (MAPI_E_SUCCESS != mapi_nameid_unmap_SPropTagArray(m_cachedNames, &m_cachedTags)) {
+            error() << "Cannot unmap named properties" << mapiError();
+            return false;
+        }
 
-    // When we unmap the property tags in the value array, preserve the type
-    // portion since that's how we get to know about errors.
-    QVector<int> types(m_propertyCount);
-    for (unsigned i = 0; i < m_propertyCount; i++) {
-        types[i] = m_properties[i].ulPropTag & 0xFFFF;
-    }
-    mapi_nameid_unmap_SPropValue(m_cachedNames, m_properties, m_propertyCount);
-    for (unsigned i = 0; i < m_propertyCount; i++) {
-        m_properties[i].ulPropTag = (MAPITAGS)(m_properties[i].ulPropTag & (0xFFFF0000 | types[i]));
+        // When we unmap the property tags in the value array, preserve the type
+        // portion since that's how we get to know about errors.
+        QVector<int> types(m_propertyCount);
+        for (unsigned i = 0; i < m_propertyCount; i++) {
+            types[i] = m_properties[i].ulPropTag & 0xFFFF;
+        }
+        if (MAPI_E_SUCCESS != mapi_nameid_unmap_SPropValue(m_cachedNames, m_properties, m_propertyCount)) {
+            error() << "Cannot unmap named values" << mapiError();
+            return false;
+        }
+        for (unsigned i = 0; i < m_propertyCount; i++) {
+            m_properties[i].ulPropTag = (MAPITAGS)(m_properties[i].ulPropTag & (0xFFFF0000 | types[i]));
+        }
     }
     return true;
 }
