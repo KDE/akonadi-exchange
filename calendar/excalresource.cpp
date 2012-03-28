@@ -1239,7 +1239,8 @@ bool MapiAppointmentException::preparePayload()
                 changeHighlight, state, reminderDelta, reminderSet, busyStatus, attachment, allDay);
     debug() << description;
 
-    // Now set all the properties onto the item.
+    // Now set all the properties onto the item. Any items not specified by the
+    // exception are just copied from the parent.
     switch (busyStatus) {
     case olFree:
         setTransparency(Event::Transparent);
@@ -1249,9 +1250,12 @@ bool MapiAppointmentException::preparePayload()
         break;
     }
     setLocation(location);
-    setDtStart(KDateTime(begin));
-    setDtEnd(KDateTime(end));
+    setDtStart(begin);
+    setDtEnd(end);
     setAllDay(allDay);
+    setStatus(m_parent.status());
+    setDescription(m_parent.description());
+    setAltDescription(m_parent.altDescription());
     if (reminderSet) {
         KCalCore::Alarm::Ptr alarm(new KCalCore::Alarm(dynamic_cast<KCalCore::Incidence*>(this)));
         // TODO Maybe we should check which one is set and then use either the time or the delte
@@ -1261,8 +1265,19 @@ bool MapiAppointmentException::preparePayload()
         alarm->setStartOffset(KCalCore::Duration(reminderDelta * -60));
         alarm->setEnabled(true);
         addAlarm(alarm);
+    } else {
+        // The parent will have at most one alarm.
+        if (m_parent.alarms().size()) {
+            addAlarm(m_parent.alarms().first());
+        }
     }
     setSummary(title);
+    setLastModified(m_parent.lastModified());
+    setCreated(m_parent.created());
+    setOrganizer(m_parent.organizer());
+    foreach (const KCalCore::Attendee::Ptr person, m_parent.attendees()) {
+        addAttendee(person);
+    }
 
     // Create relationship with the parent recurrence: the exception has the same
     // UID as the original event, and a recurrenceId of the original item instance
