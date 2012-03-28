@@ -28,6 +28,8 @@
 #include <KWindowSystem>
 
 #include <Akonadi/CachePolicy>
+#include <Akonadi/ItemCreateJob>
+#include <Akonadi/ItemDeleteJob>
 #include <Akonadi/ItemFetchJob>
 #include <Akonadi/ItemFetchScope>
 
@@ -165,6 +167,8 @@ public:
         NotResponded
     } ResponseStatus;
 
+    QList<class MapiAppointmentException *> m_exceptions;
+
 protected:
     virtual QDebug debug() const;
     virtual QDebug error() const;
@@ -263,7 +267,7 @@ void ExCalResource::retrieveItems(const Akonadi::Collection &collection)
     itemsRetrievedIncremental(items, deletedItems);
 }
 
-bool ExCalResource::retrieveItem( const Akonadi::Item &itemOrig, const QSet<QByteArray> &parts )
+bool ExCalResource::retrieveItem(const Akonadi::Item &itemOrig, const QSet<QByteArray> &parts)
 {
     Q_UNUSED(parts);
 
@@ -271,19 +275,82 @@ bool ExCalResource::retrieveItem( const Akonadi::Item &itemOrig, const QSet<QByt
     if (!message) {
         return false;
     }
-    KCalCore::Event::Ptr ptr(message);
 
     // Create a clone of the passed in Item and fill it with the payload.
+    message->setUid(itemOrig.remoteId());
     Akonadi::Item item(itemOrig);
-    message->setUid(item.remoteId());
-
     // TODO add further message properties.
     //item.setModificationTime(message->modified);
-    item.setPayload<KCalCore::Incidence::Ptr>(ptr);
+    item.setPayload<KCalCore::Event::Ptr>(KCalCore::Event::Ptr(message));
 
     // Notify Akonadi about the new data.
     itemRetrieved(item);
+    
+    // Start an asynchronous effort to create the exception items.
+    foreach (MapiAppointmentException *exception, message->m_exceptions) {
+        exception->setUid(item.remoteId());
+        Akonadi::Item exceptionItem(m_itemMimeType);
+        exceptionItem.setParentCollection(currentCollection());
+        exceptionItem.setRemoteId(exception->id().toString());
+        exceptionItem.setRemoteRevision(QString::number(1));       
+        exceptionItem.setPayload<KCalCore::Event::Ptr>(KCalCore::Event::Ptr(exception));
+        m_exceptionItems.append(exceptionItem);
+    }
+    if (m_exceptionItems.size()) {
+        scheduleCustomTask(this, "deleteExceptionItems", QVariant(), ResourceBase::Prepend);
+    }
     return true;
+}
+
+/**
+ * Delete the list of items we are about to create.
+ * 
+ * Next state: @ref createExceptionItem().
+ */
+void ExCalResource::deleteExceptionItems(const QVariant &)
+{
+    Akonadi::ItemDeleteJob *job = new Akonadi::ItemDeleteJob(m_exceptionItems);
+    connect(job, SIGNAL(result(KJob *)), SLOT(createExceptionItem(KJob *)));
+}
+
+/**
+ * Start the creation of a single exception item.
+ * 
+ * Next state: @ref createExceptionItemDone().
+ */
+void ExCalResource::createExceptionItem(KJob *job)
+{
+    if (job->error()) {
+        // Modify normal error reporting, since a delete can give us the
+        // error "Unknown error. (No items found)".
+        static QString noItems = QString::fromAscii("Unknown error. (No items found)");
+        if (job->errorString() != noItems) {
+            kError() << __FUNCTION__ << job->errorString();
+        }
+    }
+    Akonadi::Item item = m_exceptionItems.first();
+    m_exceptionItems.removeFirst();
+
+    // Save the new item in Akonadi.
+    Akonadi::ItemCreateJob *createJob = new Akonadi::ItemCreateJob(item, item.parentCollection());
+    connect(createJob, SIGNAL(result(KJob *)), SLOT(createExceptionItemDone(KJob *)));
+}
+
+/**
+ * Complete the creation of a single exception item.
+ * 
+ * Next state: If there are more exception items, create the next item
+ * @ref createExceptionItem(), otherwise we are done.
+ */
+void ExCalResource::createExceptionItemDone(KJob *job)
+{
+    if (job->error()) {
+        kError() << __FUNCTION__ << job->errorString();
+    }
+    if (m_exceptionItems.size()) {
+        // Go back and create the next item.
+        createExceptionItem(job);
+    }
 }
 
 void ExCalResource::aboutToQuit()
@@ -557,14 +624,15 @@ void MapiAppointment::ex2kcalRecurrency(AppointmentRecurrencePattern *pattern, K
     // We have dealt with the basic recurrence, now see what exceptions we have.
     for (int i = 0; i < pattern->ExceptionCount; i++) {
         MapiId exceptionId(m_id, (mapi_id_t)i);
-        MapiAppointmentException exception(m_connection, "MapiAppointmentException", exceptionId, *this, pattern);
+        MapiAppointmentException *exception = new MapiAppointmentException(m_connection, "MapiAppointmentException", exceptionId, *this, pattern);
 
-        if (!exception.propertiesPull()) {
-            error() << "Error in exception:" << i;
+        if (!exception->propertiesPull()) {
+            error() << "Error creating exception:" << exceptionId.toString();
             // Carry on regardless.
+            delete exception;
             continue;
         }
-        debug() << "added exception" << i;
+        m_exceptions.append(exception);
     }
 }
 
@@ -1105,6 +1173,8 @@ bool MapiAppointmentException::preparePayload()
     ExceptionInfo *e = &m_pattern->ExceptionInfo[m_id.second];
     ExtendedException *ee = &m_pattern->ExtendedException[m_id.second];
 
+    // Set the main properties from the parent or the always-present parts of
+    // the exception information.
     enum FreeBusyStatus busyStatus = (m_parent.transparency() == Event::Transparent) ? olFree : olBusy;
     QString location = m_parent.location();
     KDateTime begin = ex2kcalTimes(e->StartDateTime);
@@ -1197,8 +1267,6 @@ bool MapiAppointmentException::preparePayload()
     // Create relationship with the parent recurrence: the exception has the same
     // UID as the original event, and a recurrenceId of the original item instance
     // to be overridden.
-    debug() << "exception uid"<<m_parent.id().toString();
-    setUid(m_parent.id().toString());
     setRecurrenceId(originalBegin);
     KCalCore::RecurrenceRule *r = new KCalCore::RecurrenceRule();
     r->setAllDay(allDay);
@@ -1207,8 +1275,6 @@ bool MapiAppointmentException::preparePayload()
     m_parent.recurrence()->addExDate(originalBegin.date());
     m_parent.recurrence()->addExDateTime(originalBegin);
     m_parent.recurrence()->addExRule(r);
-    debug() <<"whole thing with exception...";
-    m_parent.recurrence()->dump();
     return true;
 }
 

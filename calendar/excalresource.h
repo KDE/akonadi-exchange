@@ -52,11 +52,20 @@ protected:
 private:
     void createKCalRecurrency(KCal::Recurrence* rec, const MapiRecurrencyPattern& pattern);
 
+    Akonadi::Item::List m_exceptionItems;
+
 private Q_SLOTS:
     /**
      * Completion handler for itemChanged().
      */
     void itemChangedContinue(KJob* job);
+
+    /*
+     * Handle the creation of exception items.
+     */
+    void deleteExceptionItems(const QVariant &);
+    void createExceptionItem(KJob *job);
+    void createExceptionItemDone(KJob *job);
 };
 
 #endif
