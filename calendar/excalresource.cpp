@@ -270,6 +270,13 @@ void ExCalResource::retrieveItems(const Akonadi::Collection &collection)
 bool ExCalResource::retrieveItem(const Akonadi::Item &itemOrig, const QSet<QByteArray> &parts)
 {
     Q_UNUSED(parts);
+    
+    // Eeeek. This is a bit racy, but hopefully good enough until we find out
+    // what the rules really are.
+    if (m_exceptionItems.size()) {
+        deferTask();
+        return true;
+    }
 
     MapiAppointment *message = fetchItem<MapiAppointment>(itemOrig);
     if (!message) {
@@ -297,7 +304,7 @@ bool ExCalResource::retrieveItem(const Akonadi::Item &itemOrig, const QSet<QByte
         m_exceptionItems.append(exceptionItem);
     }
     if (m_exceptionItems.size()) {
-        scheduleCustomTask(this, "deleteExceptionItems", QVariant(), ResourceBase::Prepend);
+        QMetaObject::invokeMethod(this, "deleteExceptionItems", Qt::QueuedConnection);
     }
     return true;
 }
@@ -307,7 +314,7 @@ bool ExCalResource::retrieveItem(const Akonadi::Item &itemOrig, const QSet<QByte
  * 
  * Next state: @ref createExceptionItem().
  */
-void ExCalResource::deleteExceptionItems(const QVariant &)
+void ExCalResource::deleteExceptionItems()
 {
     Akonadi::ItemDeleteJob *job = new Akonadi::ItemDeleteJob(m_exceptionItems);
     connect(job, SIGNAL(result(KJob *)), SLOT(createExceptionItem(KJob *)));

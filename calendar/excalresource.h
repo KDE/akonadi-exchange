@@ -63,7 +63,7 @@ private Q_SLOTS:
     /*
      * Handle the creation of exception items.
      */
-    void deleteExceptionItems(const QVariant &);
+    void deleteExceptionItems();
     void createExceptionItem(KJob *job);
     void createExceptionItemDone(KJob *job);
 };
