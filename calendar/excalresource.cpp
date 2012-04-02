@@ -339,6 +339,7 @@ void ExCalResource::createExceptionItem(KJob *job)
     m_exceptionItems.removeFirst();
 
     // Save the new item in Akonadi.
+    kError() << __FUNCTION__ << "create" << item.remoteId() << "in" << item.parentCollection();
     Akonadi::ItemCreateJob *createJob = new Akonadi::ItemCreateJob(item, item.parentCollection());
     connect(createJob, SIGNAL(result(KJob *)), SLOT(createExceptionItemDone(KJob *)));
 }
@@ -888,9 +889,11 @@ DONE:
             // recurring event, so why is there no PidLidAppointmentRecur???
             error() << "missing pattern for recurrenceType:" << recurrenceType;
             recurrenceType = (enum RecurFrequency)0;
+        } else {
+            error() << " got recurrence**********";
+            ex2kcalRecurrency(pattern, recurrence());
         }
     }
-    ex2kcalRecurrency(pattern, recurrence());
     if (reminderSet) {
         KCalCore::Alarm::Ptr alarm(new KCalCore::Alarm(dynamic_cast<KCalCore::Incidence*>(this)));
         // TODO Maybe we should check which one is set and then use either the time or the delte
