@@ -121,14 +121,14 @@ extern QString mapiError();
 /**
  * Try to extract an email address from a string.
  * 
- * @param source	The source to extract from.
- * @param type		The type of source. Conceptually, this is based on the 
- * 			documented values of PidTagAddressType (3COM, ATT,
- * 			CCMAIL, COMPUSERVE, EX, FAX, MSFAX, MCI, MHS, MS, MSA, 
- * 			MSN, PROFS, SMTP, SNADS, TELEX, X400, X500) though we
- * 			only actually support some of these.
- * @param emptyDefault	If no email address can be extracted, set the result to
- * 			an empty string is true, or the original source.
+ * @param source        The source to extract from.
+ * @param type          The type of source. Conceptually, this is based on the 
+ *                      documented values of PidTagAddressType (3COM, ATT,
+ *                      CCMAIL, COMPUSERVE, EX, FAX, MSFAX, MCI, MHS, MS, MSA, 
+ *                      MSN, PROFS, SMTP, SNADS, TELEX, X400, X500) though we
+ *                      only actually support some of these.
+ * @param emptyDefault  If no email address can be extracted, set the result to
+ *                      an empty string is true, or the original source.
  * @return An email address if we can, or a default as per @ref emptyDefault.
  */
 extern QString mapiExtractEmail(const QString &source, const QByteArray &type, bool emptyDefault = false);
@@ -408,8 +408,8 @@ public:
     /**
      * Connect to the server.
      * 
-     * @param profile	Name in libmapi database.
-     * @return True if the connection attempt succeeds.
+     * @param profile   Name in libmapi database.
+     * @return          True if the connection attempt succeeds.
      */
     bool login(QString profile);
 
@@ -566,13 +566,13 @@ protected:
     /**
      * Fetch a set of properties.
      * 
-     * @param tags		Properties to pull.
-     * @param tagsAppended	False if the set of tags given have not already
-     * 			been augmented with the one we need need.
-     * 			Used by the caller to turn the construction of 
-     * 			the set of tags into a one-time operation.
-     * @param pullAll	If true, all available properties will be pulled
-     * 			rather than just the given @ref tags.
+     * @param tags          Properties to pull.
+     * @param tagsAppended  False if the set of tags given have not already
+     *                      been augmented with the one we need need.
+     *                      Used by the caller to turn the construction of 
+     *                      the set of tags into a one-time operation.
+     * @param pullAll       If true, all available properties will be pulled
+     *                      rather than just the given @ref tags.
      * @return Whether the pull succeeds, irrespective of whether the tags
      * were matched.
      */
@@ -648,21 +648,21 @@ public:
     /**
      * Fetch children which are folders.
      * 
-     * @param children	The children will be added to this list. The 
-     * 			caller is responsible for freeing entries on 
-     * 			the list.
-     * @param filter	Only return items whose PR_CONTAINER_CLASS 
-     * 			starts with this value, or the empty string to
-     * 			get all of them.
+     * @param children  The children will be added to this list. The 
+     *                  caller is responsible for freeing entries on 
+     *                  the list.
+     * @param filter    Only return items whose PR_CONTAINER_CLASS 
+     *                  starts with this value, or the empty string to
+     *                  get all of them.
      */
     bool childrenPull(QList<MapiFolder *> &children, const QString &filter = QString());
 
     /**
      * Fetch children which are not folders.
      * 
-     * @param children	The children will be added to this list. The 
-     * 			caller is responsible for freeing entries on 
-     * 			the list.
+     * @param children  The children will be added to this list. The 
+     *                  caller is responsible for freeing entries on 
+     *                  the list.
      */
     bool childrenPull(QList<MapiItem *> &children);
 
@@ -698,11 +698,11 @@ public:
     /**
      * Add another recipient to our list.
      * 
-     * @param source 	A descriptive string identifying the source, for
-     * 			debug purposes.
-     * @param candidate	A recipient. If unique, it will be added. If not,
-     * 			the current entry will be updated where appropriate
-     * 			with information from the candidate.
+     * @param source    A descriptive string identifying the source, for
+     *                  debug purposes.
+     * @param candidate A recipient. If unique, it will be added. If not,
+     *                  the current entry will be updated where appropriate
+     *                  with information from the candidate.
      */
     void addUniqueRecipient(const char *source, MapiRecipient &candidate);
 
@@ -712,13 +712,13 @@ protected:
     /**
      * Pull a given set of properties, plus any we need internally.
      * 
-     * @param tags		Properties to pull.
-     * @param tagsAppended	False if the set of tags given have not already
-     * 			been augmented with the one we need need.
-     * 			Used by the caller to turn the construction of 
-     * 			the set of tags into a one-time operation.
-     * @param pullAll	If true, all available properties will be pulled
-     * 			rather than just the given @ref tags.
+     * @param tags          Properties to pull.
+     * @param tagsAppended  False if the set of tags given have not already
+     *                      been augmented with the one we need need.
+     *                      Used by the caller to turn the construction of 
+     *                      the set of tags into a one-time operation.
+     * @param pullAll       If true, all available properties will be pulled
+     *                      rather than just the given @ref tags.
      * @return Whether the pull succeeds, irrespective of whether the tags
      * were matched.
      */
