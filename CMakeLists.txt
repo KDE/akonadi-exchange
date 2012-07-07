@@ -16,6 +16,7 @@ find_package (KdepimLibs REQUIRED)
 # search for the OpenChange MAPI libraries
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules/ )
 find_package(OpenChange)
+find_package(Samba REQUIRED)
 
 
 find_program(XSLTPROC_EXECUTABLE xsltproc)
@@ -51,6 +52,7 @@ include_directories(
     connector
     ui
     ${LIBMAPI_INCLUDE_DIRS}
+    ${SAMBA_INCLUDE_DIR}/samba-4.0
     ${KDE4_INCLUDES}
     ${KDEPIMLIBS_INCLUDE_DIRS}
 )
