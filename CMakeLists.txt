@@ -15,9 +15,22 @@ find_package (KdepimLibs REQUIRED)
 
 # search for the OpenChange MAPI libraries
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules/ )
-find_package(OpenChange)
-find_package(Samba REQUIRED)
 
+macro_optional_find_package(OpenChange)
+macro_log_feature(libmapi_FOUND "libmapi" "OpenChange MAPI Client Library" "http://www.openchange.org" FALSE "" "Needed to support OpenChange / Exchange servers")
+
+macro_optional_find_package(Samba)
+macro_log_feature(SAMBA_FOUND "Samba" "Samba smbclient" "")
+
+if (NOT libmapi_FOUND)
+    message(WARNING "Exchange needs OpenChange MAPI Client Library.")
+    return()
+endif (NOT libmapi_FOUND)
+
+if (NOT SAMBA_FOUND)
+    message(WARNING "Exchange needs Samba smbclient.")
+    return()
+endif (NOT SAMBA_FOUND)
 
 find_program(XSLTPROC_EXECUTABLE xsltproc)
 macro_log_feature(XSLTPROC_EXECUTABLE "xsltproc" "The command line XSLT processor from libxslt" "http://xmlsoft.org/XSLT/" FALSE "" "Needed for building Akonadi resources. Recommended.")
