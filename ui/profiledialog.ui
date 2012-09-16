@@ -13,66 +13,60 @@
   <property name="windowTitle">
    <string>Select Profile</string>
   </property>
-  <layout class="QGridLayout" name="gridLayout_2">
-   <item row="1" column="1">
+  <layout class="QGridLayout" name="gridLayout">
+   <item row="0" column="0">
+    <widget class="QListWidget" name="kcfg_ProfileName"/>
+   </item>
+   <item row="0" column="1">
+    <layout class="QVBoxLayout" name="verticalLayout">
+     <item>
+      <widget class="QPushButton" name="btnCreate">
+       <property name="text">
+        <string>&amp;Add Profile</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="btnDelete">
+       <property name="text">
+        <string>&amp;Delete Profile</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="btnModify">
+       <property name="text">
+        <string>&amp;Modify Profile</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="btnUpdatePassword">
+       <property name="text">
+        <string>&amp;Change Profile Password</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <spacer name="verticalSpacer">
+       <property name="orientation">
+        <enum>Qt::Vertical</enum>
+       </property>
+       <property name="sizeHint" stdset="0">
+        <size>
+         <width>20</width>
+         <height>40</height>
+        </size>
+       </property>
+      </spacer>
+     </item>
+    </layout>
+   </item>
+   <item row="1" column="0" colspan="2">
     <widget class="QDialogButtonBox" name="buttonBox">
      <property name="standardButtons">
       <set>QDialogButtonBox::Cancel|QDialogButtonBox::Ok</set>
      </property>
-    </widget>
-   </item>
-   <item row="0" column="0" colspan="2">
-    <widget class="QGroupBox" name="groupBox">
-     <property name="title">
-      <string>Profiles</string>
-     </property>
-     <layout class="QVBoxLayout" name="verticalLayout_3">
-      <item>
-       <layout class="QHBoxLayout" name="horizontalLayout">
-        <item>
-         <widget class="QListWidget" name="kcfg_ProfileName"/>
-        </item>
-        <item>
-         <layout class="QVBoxLayout" name="verticalLayout">
-          <item>
-           <widget class="QPushButton" name="btnCreate">
-            <property name="text">
-             <string>&amp;Add Profile</string>
-            </property>
-           </widget>
-          </item>
-          <item>
-           <widget class="QPushButton" name="btnDelete">
-            <property name="text">
-             <string>&amp;Delete Profile</string>
-            </property>
-           </widget>
-          </item>
-          <item>
-           <widget class="QPushButton" name="btnUpdate">
-            <property name="text">
-             <string>&amp;Change Profile Password</string>
-            </property>
-           </widget>
-          </item>
-          <item>
-           <spacer name="verticalSpacer">
-            <property name="orientation">
-             <enum>Qt::Vertical</enum>
-            </property>
-            <property name="sizeHint" stdset="0">
-             <size>
-              <width>20</width>
-              <height>40</height>
-             </size>
-            </property>
-           </spacer>
-          </item>
-         </layout>
-        </item>
-       </layout>
-      </item>
-     </layout>
     </widget>
    </item>
   </layout>
@@ -82,7 +76,8 @@
   <tabstop>buttonBox</tabstop>
   <tabstop>btnCreate</tabstop>
   <tabstop>btnDelete</tabstop>
-  <tabstop>btnUpdate</tabstop>
+  <tabstop>btnModify</tabstop>
+  <tabstop>btnUpdatePassword</tabstop>
  </tabstops>
  <resources/>
  <connections>

@@ -1,30 +1,30 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <ui version="4.0">
- <class>CreateProfileDialogBase</class>
- <widget class="QDialog" name="CreateProfileDialogBase">
+ <class>ModifyProfileDialogBase</class>
+ <widget class="QDialog" name="ModifyProfileDialogBase">
   <property name="geometry">
    <rect>
     <x>0</x>
     <y>0</y>
     <width>467</width>
-    <height>167</height>
+    <height>144</height>
    </rect>
   </property>
   <property name="windowTitle">
-   <string>Create Profile</string>
+   <string>Modify Profile</string>
   </property>
   <layout class="QGridLayout" name="gridLayout">
    <item row="0" column="0">
     <widget class="QLabel" name="label">
      <property name="text">
-      <string>Profile &amp;Name</string>
+      <string>Profile Name</string>
      </property>
      <property name="buddy">
       <cstring>leProfile</cstring>
      </property>
     </widget>
    </item>
-   <item row="1" column="0">
+   <item row="2" column="0">
     <widget class="QLabel" name="label_2">
      <property name="text">
       <string>&amp;Exchange Server</string>
@@ -34,7 +34,7 @@
      </property>
     </widget>
    </item>
-   <item row="2" column="0">
+   <item row="3" column="0">
     <widget class="QLabel" name="label_5">
      <property name="text">
       <string>&amp;Domain</string>
@@ -44,14 +44,17 @@
      </property>
     </widget>
    </item>
-   <item row="2" column="1">
+   <item row="3" column="1">
     <widget class="QLineEdit" name="leDomain">
+     <property name="enabled">
+      <bool>false</bool>
+     </property>
      <property name="whatsThis">
       <string>Active Directory domain</string>
      </property>
     </widget>
    </item>
-   <item row="2" column="2">
+   <item row="3" column="2">
     <widget class="QLabel" name="label_3">
      <property name="text">
       <string>&amp;Username</string>
@@ -61,14 +64,17 @@
      </property>
     </widget>
    </item>
-   <item row="2" column="3">
+   <item row="3" column="3">
     <widget class="QLineEdit" name="leUsername">
+     <property name="enabled">
+      <bool>false</bool>
+     </property>
      <property name="whatsThis">
       <string>Active Directory username</string>
      </property>
     </widget>
    </item>
-   <item row="3" column="0">
+   <item row="1" column="0">
     <widget class="QLabel" name="label_4">
      <property name="text">
       <string>&amp;Password</string>
@@ -78,41 +84,30 @@
      </property>
     </widget>
    </item>
-   <item row="4" column="0">
-    <widget class="QLabel" name="label_6">
-     <property name="text">
-      <string>&amp;Confirm Password</string>
-     </property>
-     <property name="buddy">
-      <cstring>leConfirmPassword</cstring>
-     </property>
-    </widget>
-   </item>
    <item row="0" column="1" colspan="3">
-    <widget class="QLineEdit" name="leProfile"/>
+    <widget class="QLabel" name="leProfile"/>
    </item>
-   <item row="1" column="1" colspan="3">
+   <item row="2" column="1" colspan="3">
     <widget class="QLineEdit" name="leServer">
+     <property name="enabled">
+      <bool>false</bool>
+     </property>
      <property name="whatsThis">
       <string>Hostname of Exchange server, e.g. mail.biz.com</string>
      </property>
     </widget>
    </item>
-   <item row="4" column="1" colspan="3">
-    <widget class="QLineEdit" name="leConfirmPassword">
-     <property name="echoMode">
-      <enum>QLineEdit::Password</enum>
-     </property>
-    </widget>
-   </item>
-   <item row="3" column="1" colspan="3">
+   <item row="1" column="1" colspan="3">
     <widget class="QLineEdit" name="lePassword">
+     <property name="whatsThis">
+      <string>Enter password to fetch details</string>
+     </property>
      <property name="echoMode">
       <enum>QLineEdit::Password</enum>
      </property>
     </widget>
    </item>
-   <item row="5" column="0" colspan="4">
+   <item row="4" column="0" colspan="4">
     <widget class="QDialogButtonBox" name="buttonBox">
      <property name="orientation">
       <enum>Qt::Horizontal</enum>
@@ -125,12 +120,10 @@
   </layout>
  </widget>
  <tabstops>
-  <tabstop>leProfile</tabstop>
+  <tabstop>lePassword</tabstop>
   <tabstop>leServer</tabstop>
   <tabstop>leDomain</tabstop>
   <tabstop>leUsername</tabstop>
-  <tabstop>lePassword</tabstop>
-  <tabstop>leConfirmPassword</tabstop>
   <tabstop>buttonBox</tabstop>
  </tabstops>
  <resources/>
@@ -138,7 +131,7 @@
   <connection>
    <sender>buttonBox</sender>
    <signal>accepted()</signal>
-   <receiver>CreateProfileDialogBase</receiver>
+   <receiver>ModifyProfileDialogBase</receiver>
    <slot>accept()</slot>
    <hints>
     <hint type="sourcelabel">
@@ -154,7 +147,7 @@
   <connection>
    <sender>buttonBox</sender>
    <signal>rejected()</signal>
-   <receiver>CreateProfileDialogBase</receiver>
+   <receiver>ModifyProfileDialogBase</receiver>
    <slot>reject()</slot>
    <hints>
     <hint type="sourcelabel">

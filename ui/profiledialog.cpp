@@ -23,6 +23,7 @@
 
 #include "changepassworddialog.h"
 #include "createprofiledialog.h"
+#include "modifyprofiledialog.h"
 
 ProfileDialog::ProfileDialog(QWidget *parent) : 
     QDialog(parent)
@@ -30,7 +31,8 @@ ProfileDialog::ProfileDialog(QWidget *parent) :
     setupUi(this);
 
     connect(btnCreate, SIGNAL(clicked()), this, SLOT(slotCreateProfile()));
-    connect(btnUpdate, SIGNAL(clicked()), this, SLOT(slotUpdateProfile()));
+    connect(btnUpdatePassword, SIGNAL(clicked()), this, SLOT(slotUpdatePassword()));
+    connect(btnModify, SIGNAL(clicked()), this, SLOT(slotModifyProfile()));
     connect(btnDelete, SIGNAL(clicked()), this, SLOT(slotDeleteProfile()));
 
     connect(kcfg_ProfileName, SIGNAL(currentItemChanged(QListWidgetItem *, QListWidgetItem *)), 
@@ -69,7 +71,8 @@ void ProfileDialog::slotValidate()
     }
     valid = true;
 DONE:
-    btnUpdate->setEnabled(valid);
+    btnModify->setEnabled(valid);
+    btnUpdatePassword->setEnabled(valid);
     btnDelete->setEnabled(valid);
     buttonBox->button(QDialogButtonBox::Ok)->setEnabled(valid);
 }
@@ -86,14 +89,43 @@ void ProfileDialog::slotCreateProfile()
     }
 }
 
-void ProfileDialog::slotUpdateProfile()
+void ProfileDialog::slotUpdatePassword()
 {
     ChangePasswordDialog dlg(this);
     dlg.setProfileName(profileName());
     if (dlg.exec() == QDialog::Accepted) {
         bool ok = m_profiles.updatePassword(profileName(), dlg.oldPassword(), dlg.newPassword());
         if (!ok) {
-            KMessageBox::error(this, i18n("An error occurred changing password for %1: %2", mapiError()));
+            KMessageBox::error(this, i18n("An error occurred changing password for %1: %2", profileName(), mapiError()));
+        }
+    }
+}
+
+void ProfileDialog::slotModifyProfile()
+{
+    ModifyProfileDialog dlg(this);
+    QString username;
+    QString domain;
+    QString server;
+
+    // Initially, the dialog will accept a password. Use it to fetch the
+    // attributes of the profile.
+    dlg.setProfileName(profileName());
+    if (dlg.exec() == QDialog::Accepted) {
+        bool ok = m_profiles.read(profileName(), username, dlg.password(), domain, server);
+        if (!ok) {
+            KMessageBox::error(this, i18n("Error reading profile %1: %2", profileName(), mapiError()));
+            return;
+        }
+    }
+
+    // Disable the password, and set the attributes of the profile, which can
+    // then be edited.
+    dlg.setAttributes(server, domain, username);
+    if (dlg.exec() == QDialog::Accepted) {
+        bool ok = m_profiles.update(dlg.profileName(), dlg.username(), dlg.password(), dlg.domain(), dlg.server());
+        if (!ok) {
+            KMessageBox::error(this, i18n("Error modifying profile %1: %2", profileName(), mapiError()));
         }
     }
 }

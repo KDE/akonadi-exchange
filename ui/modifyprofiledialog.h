@@ -1,6 +1,6 @@
 /*
  * This file is part of the Akonadi Exchange Resource.
- * Copyright 2011 Robert Gruber <rgruber@users.sourceforge.net>
+ * Copyright 2012 S.R.Haque <srhaque@theiet.org>
  *
  * Akonadi Exchange Resource is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -17,37 +17,32 @@
  * If not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef __PROFILEDIALOG_H__
-#define __PROFILEDIALOG_H__
+#ifndef MODIFYPROFILE_H
+#define MODIFYPROFILE_H
 
 #include <QDialog>
-#include "ui_profiledialog.h"
-#include "mapiconnector2.h"
 
-class ProfileDialog : public QDialog, public Ui::ProfileDialogBase
+#include "ui_modifyprofiledialog.h"
+
+class ModifyProfileDialog : public QDialog, public Ui::ModifyProfileDialogBase
 {
-Q_OBJECT
+    Q_OBJECT
 public:
-    explicit ProfileDialog(QWidget *parent = 0);
-    virtual ~ProfileDialog() {}
+    explicit ModifyProfileDialog(QWidget* parent = 0, Qt::WindowFlags f = 0);
+    virtual ~ModifyProfileDialog() {}
 
+    void setProfileName(QString value);
     QString profileName() const;
-    void setProfileName(QString profile);
+
+    QString password() const;
+
+    void setAttributes(QString &server, QString &domain, QString &username);
+    QString server() const;
+    QString domain() const;
+    QString username() const;
 
 private slots:
-    void readMapiProfiles(QString selection = QString());
-    void newProfileSelected(QListWidgetItem* newItem, QListWidgetItem* lastItem);
-    void slotValidate();
-
-    void slotCreateProfile();
-    void slotUpdatePassword();
-    void slotModifyProfile();
-    void slotDeleteProfile();
-
-private:
-    void updateSelectedProfile();
-
-    MapiProfiles m_profiles;
+    void slotValidateData();
 };
 
-#endif
+#endif // MODIFYPROFILE_H
