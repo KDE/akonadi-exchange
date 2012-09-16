@@ -27,7 +27,6 @@ ChangePasswordDialog::ChangePasswordDialog(QWidget* parent, Qt::WindowFlags f): 
 
     connect(leOldPassword, SIGNAL(textEdited(QString)), this, SLOT(slotValidateData()));
     connect(lePassword, SIGNAL(textEdited(QString)), this, SLOT(slotValidateData()));
-    connect(leConfirmPassword, SIGNAL(textEdited(QString)), this, SLOT(slotValidateData()));
 
     slotValidateData();
 }
@@ -38,8 +37,7 @@ void ChangePasswordDialog::slotValidateData()
 
     if (!leProfile->text().isEmpty() && 
         !leOldPassword->text().isEmpty() &&
-        !lePassword->text().isEmpty() && 
-        (lePassword->text() == leConfirmPassword->text())) {
+        !lePassword->text().isEmpty()) {
         valid = true;
     }
 

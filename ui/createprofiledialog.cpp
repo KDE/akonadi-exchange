@@ -30,7 +30,6 @@ CreateProfileDialog::CreateProfileDialog(QWidget* parent, Qt::WindowFlags f): QD
     connect(leDomain, SIGNAL(textEdited(QString)), this, SLOT(slotValidateData()));
     connect(leServer, SIGNAL(textEdited(QString)), this, SLOT(slotValidateData()));
     connect(lePassword, SIGNAL(textEdited(QString)), this, SLOT(slotValidateData()));
-    connect(leConfirmPassword, SIGNAL(textEdited(QString)), this, SLOT(slotValidateData()));
 
     slotValidateData();
 }
@@ -43,8 +42,7 @@ void CreateProfileDialog::slotValidateData()
         !leUsername->text().isEmpty() && 
         !leDomain->text().isEmpty() && 
         !leServer->text().isEmpty() &&
-        !lePassword->text().isEmpty() && 
-        (lePassword->text() == leConfirmPassword->text())) {
+        !lePassword->text().isEmpty()) {
         valid = true;
     }
 
@@ -55,18 +53,22 @@ QString CreateProfileDialog::profileName() const
 {
     return leProfile->text();
 }
+
 QString CreateProfileDialog::username() const
 {
     return leUsername->text();
 }
+
 QString CreateProfileDialog::password() const
 {
     return lePassword->text();
 }
+
 QString CreateProfileDialog::server() const
 {
     return leServer->text();
 }
+
 QString CreateProfileDialog::domain() const
 {
     return leDomain->text();

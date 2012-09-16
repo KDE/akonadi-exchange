@@ -99,8 +99,8 @@
    </item>
    <item row="1" column="1" colspan="3">
     <widget class="QLineEdit" name="lePassword">
-     <property name="whatsThis">
-      <string>Enter password to fetch details</string>
+     <property name="toolTip">
+      <string>Enter password to fetch profile details</string>
      </property>
      <property name="echoMode">
       <enum>QLineEdit::Password</enum>
