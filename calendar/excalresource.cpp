@@ -131,7 +131,7 @@ static KDateTime ex2kcalTimes(uint32_t exchangeMinutes)
  * An Appointment, with attendee recipients.
  *
  * The attendees include not just the To/CC/BCC recipients (@ref propertiesPull)
- * but also whoever the meeting was sent-on-behalf-of. That might or might 
+ * but also whoever the meeting was sent-on-behalf-of. That might or might
  * not be the sender of the invitation.
  */
 class MapiAppointment : public MapiMessage, public KCalCore::Event
@@ -261,7 +261,7 @@ void ExCalResource::retrieveItems(const Akonadi::Collection &collection)
 {
     Item::List items;
     Item::List deletedItems;
-    
+
     fetchItems(collection, items, deletedItems);
     kError() << "new/changed items:" << items.size() << "deleted items:" << deletedItems.size();
     itemsRetrievedIncremental(items, deletedItems);
@@ -270,7 +270,7 @@ void ExCalResource::retrieveItems(const Akonadi::Collection &collection)
 bool ExCalResource::retrieveItem(const Akonadi::Item &itemOrig, const QSet<QByteArray> &parts)
 {
     Q_UNUSED(parts);
-    
+
     // Eeeek. This is a bit racy, but hopefully good enough until we find out
     // what the rules really are.
     if (m_exceptionItems.size()) {
@@ -292,14 +292,15 @@ bool ExCalResource::retrieveItem(const Akonadi::Item &itemOrig, const QSet<QByte
 
     // Notify Akonadi about the new data.
     itemRetrieved(item);
-    
+
     // Start an asynchronous effort to create the exception items.
     foreach (MapiAppointmentException *exception, message->m_exceptions) {
+        // An exception has the same UID as the original item.
         exception->setUid(item.remoteId());
         Akonadi::Item exceptionItem(m_itemMimeType);
         exceptionItem.setParentCollection(currentCollection());
         exceptionItem.setRemoteId(exception->id().toString());
-        exceptionItem.setRemoteRevision(QString::number(1));       
+        exceptionItem.setRemoteRevision(QString::number(1));
         exceptionItem.setPayload<KCalCore::Event::Ptr>(KCalCore::Event::Ptr(exception));
         m_exceptionItems.append(exceptionItem);
     }
@@ -311,7 +312,7 @@ bool ExCalResource::retrieveItem(const Akonadi::Item &itemOrig, const QSet<QByte
 
 /**
  * Delete the list of items we are about to create.
- * 
+ *
  * Next state: @ref createExceptionItem().
  */
 void ExCalResource::deleteExceptionItems()
@@ -322,7 +323,7 @@ void ExCalResource::deleteExceptionItems()
 
 /**
  * Start the creation of a single exception item.
- * 
+ *
  * Next state: @ref createExceptionItemDone().
  */
 void ExCalResource::createExceptionItem(KJob *job)
@@ -346,7 +347,7 @@ void ExCalResource::createExceptionItem(KJob *job)
 
 /**
  * Complete the creation of a single exception item.
- * 
+ *
  * Next state: If there are more exception items, create the next item
  * @ref createExceptionItem(), otherwise we are done.
  */
@@ -398,7 +399,7 @@ void ExCalResource::itemAdded( const Akonadi::Item &item, const Akonadi::Collect
 }
 
 /**
- * Called when somebody else, e.g. a client application, has changed an item 
+ * Called when somebody else, e.g. a client application, has changed an item
  * managed this resource.
  */
 void ExCalResource::itemChanged(const Akonadi::Item &item, const QSet<QByteArray> &parts)
@@ -481,8 +482,8 @@ void ExCalResource::itemChangedContinue(KJob* job)
     message->ex2kcalRecurrency(event->recurrence());
 
     // Update exchange with the new message->
-    kWarning() << "updating item: {" << 
-        currentCollection().name() << "," << item.id() << "} = {" << 
+    kWarning() << "updating item: {" <<
+        currentCollection().name() << "," << item.id() << "} = {" <<
         currentCollection().remoteId() << "," << item.remoteId() << "}";
     emit status(Running, i18n("Updating item: { %1, %2 }", currentCollection().name(), item.id()));
     if (!message->propertiesPush()) {
@@ -555,7 +556,7 @@ void MapiAppointment::ex2kcalRecurrency(AppointmentRecurrencePattern *pattern, K
         case PatternType_Month:
         case PatternType_HjMonth:
             kcal->addMonthlyDate(ex->PatternTypeSpecific.Day);
-            description = i18n("On the %1 day every %2 months,", ex->PatternTypeSpecific.Day, 
+            description = i18n("On the %1 day every %2 months,", ex->PatternTypeSpecific.Day,
                        ex->Period);
             break;
         case PatternType_MonthNth:
@@ -585,7 +586,7 @@ void MapiAppointment::ex2kcalRecurrency(AppointmentRecurrencePattern *pattern, K
         case PatternType_HjMonth:
             kcal->addYearlyMonth(ex->Period);
             kcal->addYearlyDate(ex->PatternTypeSpecific.Day);
-            description = i18n("Yearly, on the %1 day of the %2 month,", ex->PatternTypeSpecific.Day, 
+            description = i18n("Yearly, on the %1 day of the %2 month,", ex->PatternTypeSpecific.Day,
                        ex->Period);
             break;
         case PatternType_MonthNth:
@@ -793,7 +794,7 @@ bool MapiAppointment::preparePayload()
         //  ATTENDEE;CN="aaa bbb (ccc)";RSVP=TRUE;PARTSTAT=NEEDS-ACTION;
         //  ...
         //
-        // Unbelievable, but true! Anyway, start by fixing up the 
+        // Unbelievable, but true! Anyway, start by fixing up the
         // header.
         bool lastChWasNl = false;
         int j = 0;
@@ -803,7 +804,7 @@ bool MapiAppointment::preparePayload()
 
             switch (ch.toAscii()) {
             case '\r':
-                // Omit CRs. Propagate the NL state of the 
+                // Omit CRs. Propagate the NL state of the
                 // previous character.
                 chIsNl = lastChWasNl;
                 break;
@@ -1023,7 +1024,7 @@ bool MapiAppointment::propertiesPull(QVector<int> &tags, const bool tagsAppended
         // 2.2.1.48
         //PidLidMeetingWorkspaceUrl,
         // 2.2.1.49
-        //PidTagIconIndex Property        
+        //PidTagIconIndex Property
         // 2.2.2.1
         PidTagMessageClass,
         // 2.2.3 Appointment-specific, nothing needed.
@@ -1050,7 +1051,7 @@ bool MapiAppointment::propertiesPull(QVector<int> &tags, const bool tagsAppended
     if (!tagsAppended) {
         for (unsigned i = 0; i < ourTags.cValues; i++) {
             int newTag = ourTags.aulPropTag[i];
-            
+
             if (!tags.contains(newTag)) {
                 tags.append(newTag);
             }
@@ -1168,9 +1169,9 @@ bool MapiAppointment::propertiesPush()
     return true;
 }
 
-MapiAppointmentException::MapiAppointmentException(MapiConnector2 *connection, 
-                                                   const char *tallocName, 
-                                                   MapiId &id, MapiAppointment &parent, 
+MapiAppointmentException::MapiAppointmentException(MapiConnector2 *connection,
+                                                   const char *tallocName,
+                                                   MapiId &id, MapiAppointment &parent,
                                                    AppointmentRecurrencePattern *pattern) :
     MapiAppointment(connection, tallocName, id),
     m_parent(parent),
@@ -1202,7 +1203,7 @@ bool MapiAppointmentException::preparePayload()
     QString description;
     description += i18n("\nException%1 for %2 to be from %3 to %4", m_id.second, stringify(originalBegin), stringify(begin), stringify(end));
 #if 1
-    // ExtendedException has Unicode strings, but needs Openchange 
+    // ExtendedException has Unicode strings, but needs Openchange
     // bug #391 to be fixed.
     if (ee->WriterVersion2 >= 0x00003009) {
         changeHighlight = ee->ChangeHighlight.ChangeHighlight.ChangeHighlightValue;

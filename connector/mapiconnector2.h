@@ -366,12 +366,16 @@ public:
     /**
      * Add a new profile.
      */
-    bool add(QString profile, QString username, QString password, QString domain, QString server);
+    bool add(const QString &profile, const QString &username, const QString &password, const QString &domain, const QString &server);
+
+    bool read(const QString &profile, QString &username, const QString &password, QString &domain, QString &server);
+
+    bool update(const QString &profile, const QString &username, const QString &password, const QString &domain, const QString &server);
 
     /**
      * Modify an existing profile's password.
      */
-    bool updatePassword(QString profile, QString oldPassword, QString newPassword);
+    bool updatePassword(const QString &profile, const QString &oldPassword, const QString &newPassword);
 
     /**
      * Remove a profile.
@@ -389,7 +393,10 @@ protected:
 private:
     bool m_initialised;
 
-    bool addAttribute(const char *profile, const char *attribute, QString value);
+    bool attributeAdd(const char *profile, const char *attribute, QString value) const;
+    bool attributeModify(const char *profile, const char *attribute, QString value) const;
+    bool attributeRead(struct mapi_profile *profile, const char *attribute, QString &value) const;
+    bool updateInterim(const char *profile, const QString &username, const QString &password, const QString &domain, const QString &server);
 
     virtual QDebug debug() const;
     virtual QDebug error() const;

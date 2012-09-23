@@ -1749,7 +1749,7 @@ MapiProfiles::~MapiProfiles()
     }
 }
 
-bool MapiProfiles::add(QString profile, QString username, QString password, QString domain, QString server)
+bool MapiProfiles::add(const QString &profile, const QString &username, const QString &password, const QString &domain, const QString &server)
 {
     if (!init()) {
         return false;
@@ -1778,16 +1778,13 @@ bool MapiProfiles::add(QString profile, QString username, QString password, QStr
     hostname[sizeof(hostname) - 1] = 0;
     QString workstation = QString::fromLatin1(hostname);
 
-    if (!addAttribute(profile8, "binding", server)) {
-        error() << "cannot add binding:" << server << mapiError();
+    if (!attributeAdd(profile8, "binding", server)) {
         return false;
     }
-    if (!addAttribute(profile8, "workstation", workstation)) {
-        error() << "cannot add workstation:" << workstation << mapiError();
+    if (!attributeAdd(profile8, "workstation", workstation)) {
         return false;
     }
-    if (!addAttribute(profile8, "domain", domain)) {
-        error() << "cannot add domain:" << domain << mapiError();
+    if (!attributeAdd(profile8, "domain", domain)) {
         return false;
     }
 // What is seal for? Seams to have something to do with Exchange 2010
@@ -1811,16 +1808,13 @@ bool MapiProfiles::add(QString profile, QString username, QString password, QStr
         return false;
     }
 
-    if (!addAttribute(profile8, "codepage", QString::number(cpid))) {
-        error() << "cannot add codepage:" << cpid << mapiError();
+    if (!attributeAdd(profile8, "codepage", QString::number(cpid))) {
         return false;
     }
-    if (!addAttribute(profile8, "language", QString::number(lcid))) {
-        error() << "cannot language:" << lcid << mapiError();
+    if (!attributeAdd(profile8, "language", QString::number(lcid))) {
         return false;
     }
-    if (!addAttribute(profile8, "method", QString::number(lcid))) {
-        error() << "cannot method:" << lcid << mapiError();
+    if (!attributeAdd(profile8, "method", QString::number(lcid))) {
         return false;
     }
 
@@ -1844,12 +1838,48 @@ bool MapiProfiles::add(QString profile, QString username, QString password, QStr
     return true;
 }
 
-bool MapiProfiles::addAttribute(const char *profile, const char *attribute, QString value) 
+bool MapiProfiles::attributeAdd(const char *profile, const char *attribute, QString value) const
 {
     if (MAPI_E_SUCCESS != mapi_profile_add_string_attr(m_context, profile, attribute, value.toUtf8())) {
+        error() << "profile" << profile << "cannot add attribute" << attribute << value << mapiError();
         return false;
     }
     return true;
+}
+
+bool MapiProfiles::attributeModify(const char *profile, const char *attribute, QString value) const
+{
+    if (MAPI_E_SUCCESS != mapi_profile_modify_string_attr(m_context, profile, attribute, value.toUtf8())) {
+        error() << "profile" << profile << "cannot modify attribute" << attribute << value << mapiError();
+        return false;
+    }
+    return true;
+}
+
+bool MapiProfiles::attributeRead(struct mapi_profile *profile, const char *attribute, QString &value) const
+{
+    char **tmp = NULL;
+    uint32_t count;
+
+    if (MAPI_E_SUCCESS != GetProfileAttr(profile, attribute, &count, &tmp)) {
+        error() << "cannot get attribute" << attribute << mapiError();
+        return false;
+    }
+    if (1 == count) {
+        value = QString::fromUtf8(tmp[0]);
+    }
+    for (uint32_t i = 0; i < count; i++) {
+        talloc_free(tmp[i]);
+    }
+    if (tmp) {
+        talloc_free(tmp);
+    }
+    if (1 == count) {
+        return true;
+    } else {
+        error() << "unexpected attribute count" << attribute << count << mapiError();
+        return false;
+    }
 }
 
 QDebug MapiProfiles::debug() const
@@ -1951,6 +1981,32 @@ QStringList MapiProfiles::list()
     return profiles;
 }
 
+bool MapiProfiles::read(const QString &profile, QString &username, const QString &password, QString &domain, QString &server)
+{
+    if (!init()) {
+        return false;
+    }
+    
+    struct mapi_profile p;
+    if (MAPI_E_SUCCESS != OpenProfile(m_context, &p, profile.toUtf8(), password.toUtf8())) {
+        error() << "cannot open profile:" << profile << mapiError();
+        return false;
+    }
+
+    if (!attributeRead(&p, "username", username)) {
+        return false;
+    }
+
+    if (!attributeRead(&p, "domain", domain)) {
+        return false;
+    }
+
+    if (!attributeRead(&p, "binding", server)) {
+        return false;
+    }
+    return true;
+}
+
 bool MapiProfiles::remove(QString profile)
 {
     if (!init()) {
@@ -1964,7 +2020,7 @@ bool MapiProfiles::remove(QString profile)
     return true;
 }
 
-bool MapiProfiles::updatePassword(QString profile, QString oldPassword, QString newPassword)
+bool MapiProfiles::updatePassword(const QString &profile, const QString &oldPassword, const QString &newPassword)
 {
     if (!init()) {
         return false;
@@ -1972,6 +2028,67 @@ bool MapiProfiles::updatePassword(QString profile, QString oldPassword, QString 
 
     if (MAPI_E_SUCCESS != ChangeProfilePassword(m_context, profile.toUtf8(), oldPassword.toUtf8(), newPassword.toUtf8())) {
         error() << "cannot change password profile:" << profile << mapiError();
+        return false;
+    }
+    return true;
+}
+
+bool MapiProfiles::update(const QString &profile, const QString &username, const QString &password, const QString &domain, const QString &server)
+{
+    if (!init()) {
+        return false;
+    }
+    qDebug() << "Updating profile:"<<profile;
+    QString tmpProfile = QLatin1String("_t_m_p_");
+
+    // Save the profile to a temporary name.
+    if (MAPI_E_SUCCESS != DuplicateProfile(m_context, profile.toUtf8(), tmpProfile.toUtf8(), username.toUtf8())) {
+        error() << "cannot duplicate tmp profile:" << profile << mapiError();
+        return false;
+    }
+    if (!updateInterim(tmpProfile.toUtf8(), username, password, domain, server)) {
+        if (!remove(tmpProfile)) {
+            return false;
+        }
+        return false;
+    }
+
+    // Rename the temporary modified profile to the original name.
+    if (MAPI_E_SUCCESS != DeleteProfile(m_context, profile.toUtf8())) {
+        error() << "cannot delete original profile:" << profile << mapiError();
+        if (!remove(tmpProfile)) {
+            return false;
+        }
+        return false;
+    }
+    if (MAPI_E_SUCCESS != RenameProfile(m_context, tmpProfile.toUtf8(), profile.toUtf8())) {
+        error() << "cannot rename tmp profile:" << profile << mapiError();
+        return false;
+    }
+    return true;
+}
+
+bool MapiProfiles::updateInterim(const char *profile, const QString &username, const QString &password, const QString &domain, const QString &server)
+{
+    if (!attributeModify(profile, "username", username)) {
+        return false;
+    }
+    if (!attributeModify(profile, "binding", server)) {
+        return false;
+    }
+    if (!attributeModify(profile, "domain", domain)) {
+        return false;
+    }
+
+    struct mapi_session *session = NULL;
+    if (MAPI_E_SUCCESS != MapiLogonProvider(m_context, &session, profile, password.toUtf8(), PROVIDER_ID_NSPI)) {
+        error() << "cannot get logon provider" << mapiError();
+        return false;
+    }
+
+    int retval = ProcessNetworkProfile(session, username.toUtf8().constData(), profileSelectCallback, NULL);
+    if (retval != MAPI_E_SUCCESS && retval != 0x1) {
+        error() << "cannot process network profile, deleting profile..." << mapiError();
         return false;
     }
     return true;

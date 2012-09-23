@@ -79,12 +79,14 @@ set( RESOURCE_EXCHANGE_CONNECTOR_SOURCES
 set( RESOURCE_EXCHANGE_UI_SOURCES
      ${CMAKE_CURRENT_SOURCE_DIR}/ui/profiledialog.cpp
      ${CMAKE_CURRENT_SOURCE_DIR}/ui/createprofiledialog.cpp
+     ${CMAKE_CURRENT_SOURCE_DIR}/ui/modifyprofiledialog.cpp
      ${CMAKE_CURRENT_SOURCE_DIR}/ui/changepassworddialog.cpp
 )
 # define global path to the UI files for every resource to use
 set( RESOURCE_EXCHANGE_UI_FILES
      ${CMAKE_CURRENT_SOURCE_DIR}/ui/profiledialog.ui
      ${CMAKE_CURRENT_SOURCE_DIR}/ui/createprofiledialog.ui
+     ${CMAKE_CURRENT_SOURCE_DIR}/ui/modifyprofiledialog.ui
      ${CMAKE_CURRENT_SOURCE_DIR}/ui/changepassworddialog.ui
 )
 
