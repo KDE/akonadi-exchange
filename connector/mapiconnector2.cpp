@@ -398,7 +398,9 @@ bool MapiConnector2::login(QString profile)
     }
     if (MAPI_E_SUCCESS != OpenPublicFolder(m_session, &m_nspiStore)) {
         error() << "cannot open public folder" << mapiError();
-        return false;
+        // TODO: This does not work, and returning false at this point just breaks
+        // everything...
+        //return false;
     }
 
     // Get rid of any existing notifier and create a new one.
