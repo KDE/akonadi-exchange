@@ -24,6 +24,7 @@ target_link_libraries(mapibrowser
     ${KDEPIMLIBS_KPIMUTILS_LIBS}
     ${LIBDCERPC_LIBRARY}
     ${QT_QTCORE_LIBRARY} 
+    ${QT_QTNETWORK_LIBRARY} 
     ${KDE4_KDEUI_LIBS}
     ${KDE4_KDECORE_LIBS})
 

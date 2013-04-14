@@ -28,6 +28,7 @@ target_link_libraries(akonadi_exgal_resource
     ${LIBDCERPC_LIBRARY}
     ${QT_QTCORE_LIBRARY} 
     ${QT_QTDBUS_LIBRARY} 
+    ${QT_QTNETWORK_LIBRARY} 
     ${KDE4_KDECORE_LIBS})
 
 install(TARGETS akonadi_exgal_resource ${INSTALL_TARGETS_DEFAULT_ARGS})
