@@ -762,15 +762,17 @@ void ExGalResource::retrieveCollections()
     // Get the Contacts folders, and place them under m_root.
     Collection::List tmp;
     fetchCollections(Contacts, tmp);
-    Collection collection = tmp.first();
-    tmp.removeFirst();
-    collection.setName(QString::fromAscii("Contacts"));
-    collection.setParentCollection(root);
-    collections.append(collection);
-    while (tmp.size()) {
+    if (tmp.size()) {
         Collection collection = tmp.first();
         tmp.removeFirst();
+        collection.setName(QString::fromAscii("Contacts"));
+        collection.setParentCollection(root);
         collections.append(collection);
+        while (tmp.size()) {
+            Collection collection = tmp.first();
+            tmp.removeFirst();
+            collections.append(collection);
+        }
     }
 
     // Notify Akonadi about the new collections.
