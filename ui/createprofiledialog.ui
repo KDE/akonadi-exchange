@@ -64,7 +64,9 @@
    <item row="2" column="3">
     <widget class="QLineEdit" name="leUsername">
      <property name="whatsThis">
-      <string>Active Directory username</string>
+      <string>Active Directory username.
+
+You can get the username from Outlook -&gt; File tab -&gt; Account Settings, E-mail tab -&gt; Change. If the value looks like &quot;user@domain&quot;, just use the &quot;user&quot; part.</string>
      </property>
     </widget>
    </item>
@@ -84,7 +86,9 @@
    <item row="1" column="1" colspan="3">
     <widget class="QLineEdit" name="leServer">
      <property name="whatsThis">
-      <string>Hostname of Exchange server, e.g. mail.biz.com</string>
+      <string>Hostname of Exchange server, e.g. mail.biz.com.
+
+You can get the hostname from Outlook -&gt; File tab -&gt; Account Settings, E-mail tab -&gt; Change.</string>
      </property>
     </widget>
    </item>
