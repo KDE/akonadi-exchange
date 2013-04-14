@@ -1981,14 +1981,14 @@ QStringList MapiProfiles::list()
     return profiles;
 }
 
-bool MapiProfiles::read(const QString &profile, QString &username, const QString &password, QString &domain, QString &server)
+bool MapiProfiles::read(const QString &profile, QString &username, QString &domain, QString &server)
 {
     if (!init()) {
         return false;
     }
-    
+
     struct mapi_profile p;
-    if (MAPI_E_SUCCESS != OpenProfile(m_context, &p, profile.toUtf8(), password.toUtf8())) {
+    if (MAPI_E_SUCCESS != OpenProfile(m_context, &p, profile.toUtf8(), NULL)) {
         error() << "cannot open profile:" << profile << mapiError();
         return false;
     }

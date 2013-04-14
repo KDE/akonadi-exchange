@@ -112,7 +112,6 @@ void ProfileDialog::slotUpdatePassword()
 void ProfileDialog::slotModifyProfile()
 {
     ModifyProfileDialog dlg(this);
-    bool profileRead;
     QString username;
     QString domain;
     QString server;
@@ -120,23 +119,13 @@ void ProfileDialog::slotModifyProfile()
     // Initially, the dialog will accept a password. Use it to fetch the
     // attributes of the profile.
     dlg.setProfileName(profileName());
-
-    // Loop until the user gives up, or succeeds!
-    while (profileRead = false, dlg.exec() == QDialog::Accepted) {
-        bool ok = m_profiles.read(profileName(), username, dlg.password(), domain, server);
-        if (!ok) {
-            KMessageBox::error(this, i18n("Error reading profile %1: %2", profileName(), mapiError()));
-        } else {
-            profileRead = true;
-            break;
-        }
-    }
-    if (!profileRead) {
+    bool ok = m_profiles.read(profileName(), username, domain, server);
+    if (!ok) {
+        KMessageBox::error(this, i18n("Error reading profile %1: %2", profileName(), mapiError()));
         return;
     }
 
-    // Disable the password, and set the attributes of the profile, which can
-    // then be edited.
+    // Set the attributes of the profile, which can then be edited.
     dlg.setAttributes(server, domain, username);
 
     // Loop until the user gives up, or succeeds!

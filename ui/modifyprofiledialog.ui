@@ -46,9 +46,6 @@
    </item>
    <item row="3" column="1">
     <widget class="QLineEdit" name="leDomain">
-     <property name="enabled">
-      <bool>false</bool>
-     </property>
      <property name="whatsThis">
       <string>Active Directory domain</string>
      </property>
@@ -66,21 +63,8 @@
    </item>
    <item row="3" column="3">
     <widget class="QLineEdit" name="leUsername">
-     <property name="enabled">
-      <bool>false</bool>
-     </property>
      <property name="whatsThis">
-      <string>Active Directory username</string>
-     </property>
-    </widget>
-   </item>
-   <item row="1" column="0">
-    <widget class="QLabel" name="label_4">
-     <property name="text">
-      <string>&amp;Password</string>
-     </property>
-     <property name="buddy">
-      <cstring>lePassword</cstring>
+      <string>Active Directory username.\n\nYou can get the username from Outlook -&gt; File tab -&gt; Account Settings, E-mail tab -&gt; Change. If the value looks like &quot;user@domain&quot;, just use the &quot;user&quot; part.</string>
      </property>
     </widget>
    </item>
@@ -89,25 +73,14 @@
    </item>
    <item row="2" column="1" colspan="3">
     <widget class="QLineEdit" name="leServer">
-     <property name="enabled">
-      <bool>false</bool>
-     </property>
      <property name="whatsThis">
-      <string>Hostname of Exchange server, e.g. mail.biz.com</string>
+      <string>Hostname of Exchange server, e.g. mail.biz.com.
+
+You can get the hostname from Outlook -&gt; File tab -&gt; Account Settings, E-mail tab -&gt; Change.</string>
      </property>
     </widget>
    </item>
-   <item row="1" column="1" colspan="3">
-    <widget class="QLineEdit" name="lePassword">
-     <property name="toolTip">
-      <string>Enter password to fetch profile details</string>
-     </property>
-     <property name="echoMode">
-      <enum>QLineEdit::Password</enum>
-     </property>
-    </widget>
-   </item>
-   <item row="4" column="0" colspan="4">
+   <item row="5" column="0" colspan="4">
     <widget class="QDialogButtonBox" name="buttonBox">
      <property name="orientation">
       <enum>Qt::Horizontal</enum>
@@ -117,10 +90,26 @@
      </property>
     </widget>
    </item>
+   <item row="4" column="0">
+    <widget class="QLabel" name="label_4">
+     <property name="text">
+      <string>&amp;Password</string>
+     </property>
+     <property name="buddy">
+      <cstring>lePassword</cstring>
+     </property>
+    </widget>
+   </item>
+   <item row="4" column="1" colspan="3">
+    <widget class="QLineEdit" name="lePassword">
+     <property name="echoMode">
+      <enum>QLineEdit::Password</enum>
+     </property>
+    </widget>
+   </item>
   </layout>
  </widget>
  <tabstops>
-  <tabstop>lePassword</tabstop>
   <tabstop>leServer</tabstop>
   <tabstop>leDomain</tabstop>
   <tabstop>leUsername</tabstop>

@@ -1,6 +1,6 @@
 /*
  * This file is part of the Akonadi Exchange Resource.
- * Copyright 2012 S.R.Haque <srhaque@theiet.org>
+ * Copyright 2012-2013 S.R.Haque <srhaque@theiet.org>
  *
  * Akonadi Exchange Resource is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -37,10 +37,9 @@ void ModifyProfileDialog::slotValidateData()
 {
     bool valid = false;
 
-    if (lePassword->isEnabled()) {
-        valid = true;
-    } else if (!leProfile->text().isEmpty() &&
+    if (!leProfile->text().isEmpty() &&
         !leUsername->text().isEmpty() && 
+        !lePassword->text().isEmpty() &&
         !leDomain->text().isEmpty() && 
         !leServer->text().isEmpty()) {
         valid = true;
@@ -64,10 +63,6 @@ void ModifyProfileDialog::setAttributes(QString &server, QString &domain, QStrin
     leServer->setText(server);
     leDomain->setText(domain);
     leUsername->setText(username);
-    leServer->setEnabled(true);
-    leDomain->setEnabled(true);
-    leUsername->setEnabled(true);
-    lePassword->setEnabled(false);
 }
 
 QString ModifyProfileDialog::username() const

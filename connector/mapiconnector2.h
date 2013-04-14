@@ -368,7 +368,7 @@ public:
      */
     bool add(const QString &profile, const QString &username, const QString &password, const QString &domain, const QString &server);
 
-    bool read(const QString &profile, QString &username, const QString &password, QString &domain, QString &server);
+    bool read(const QString &profile, QString &username, QString &domain, QString &server);
 
     bool update(const QString &profile, const QString &username, const QString &password, const QString &domain, const QString &server);
 
