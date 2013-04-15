@@ -517,7 +517,7 @@ bool MapiFolder::childrenPull(QList<MapiFolder *> &children, const QString &filt
     while ((QueryRows(&m_contents, cursor, TBL_ADVANCE, &rowset) == MAPI_E_SUCCESS) && rowset.cRows) {
         for (unsigned i = 0; i < rowset.cRows; i++) {
             SRow &row = rowset.aRow[i];
-            mapi_id_t fid;
+            mapi_id_t fid = 0;
             QString name;
             QString folderClass;
 
@@ -589,7 +589,7 @@ bool MapiFolder::childrenPull(QList<MapiItem *> &children)
     while ((QueryRows(&m_contents, cursor, TBL_ADVANCE, &rowset) == MAPI_E_SUCCESS) && rowset.cRows) {
         for (unsigned i = 0; i < rowset.cRows; i++) {
             SRow &row = rowset.aRow[i];
-            mapi_id_t id;
+            mapi_id_t id = 0;
             QString name;
             QDateTime modified;
 
