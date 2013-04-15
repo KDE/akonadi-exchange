@@ -925,7 +925,7 @@ bool MapiAppointment::propertiesPull(QVector<int> &tags, const bool tagsAppended
     /**
      * The list of tags used to fetch an Appointment, based on [MS-OXOCAL].
      */
-    static int ourTagList[] = {
+    static unsigned ourTagList[] = {
         // 2.2.1.1
         PidLidAppointmentSequence,
         // 2.2.1.2

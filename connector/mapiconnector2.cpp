@@ -800,7 +800,7 @@ bool MapiMessage::open()
  */
 bool MapiMessage::propertiesPull(QVector<int> &tags, const bool tagsAppended, bool pullAll)
 {
-    static int ourTagList[] = {
+    static unsigned ourTagList[] = {
         PidTagDisplayTo,
         PidTagDisplayCc,
         PidTagDisplayBcc,

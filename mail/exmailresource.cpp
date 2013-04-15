@@ -381,7 +381,7 @@ bool MapiEmbeddedNote::propertiesPull(QVector<int> &tags, const bool tagsAppende
     /**
      * The list of tags used to fetch an embedded Note, based on [MS-OXCMSG].
      */
-    static int ourTagList[] = {
+    static unsigned ourTagList[] = {
         PidTagSubject,
         PidTagCreationTime,
         0 };
@@ -919,7 +919,7 @@ bool MapiNote::propertiesPull(QVector<int> &tags, const bool tagsAppended, bool 
     /**
      * The list of tags used to fetch a Note, based on [MS-OXCMSG].
      */
-    static int ourTagList[] = {
+    static unsigned ourTagList[] = {
         // 2.2.1.2
         //PidTagHasAttachments,
         // 2.2.1.3
