@@ -446,9 +446,9 @@ public:
         switch (id.m_provider)
         {
         case MapiId::EMSDB:
-            return &m_store;
+            return m_store;
         case MapiId::NSPI:
-            return &m_nspiStore;
+            return m_nspiStore;
         default:
             return 0;
         }
@@ -467,8 +467,8 @@ private:
     mapi_object_t openFolder(mapi_id_t folderID);
 
     mapi_session *m_session;
-    mapi_object_t m_store;
-    mapi_object_t m_nspiStore;
+    mapi_object_t *m_store;
+    mapi_object_t *m_nspiStore;
     class QSocketNotifier *m_notifier;
 
     virtual QDebug debug() const;

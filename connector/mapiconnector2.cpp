@@ -55,6 +55,18 @@ case a: \
 #define DEBUG_RECIPIENTS 0
 #endif
 
+#ifndef DEBUG_PUBLIC_FOLDERS
+#define DEBUG_PUBLIC_FOLDERS 0
+#endif
+
+#ifndef DEBUG_NOTIFICATIONS
+#define DEBUG_NOTIFICATIONS 0
+#endif
+
+#ifndef DEBUG_MAPI
+#define DEBUG_MAPI 1
+#endif
+
 #define STR(def) \
 case def: return QString::fromLatin1(#def)
 
@@ -246,8 +258,10 @@ MapiConnector2::MapiConnector2() :
     m_session(0),
     m_notifier(0)
 {
-    mapi_object_init(&m_store);
-    mapi_object_init(&m_nspiStore);
+    m_store = allocate<mapi_object_t>();
+    m_nspiStore = allocate<mapi_object_t>();
+    mapi_object_init(m_store);
+    mapi_object_init(m_nspiStore);
 }
 
 MapiConnector2::~MapiConnector2()
@@ -255,11 +269,11 @@ MapiConnector2::~MapiConnector2()
     delete m_notifier;
     // TODO The calls to tidy up m_nspiStore seem to break things.
     if (m_session) {
-        //Logoff(&m_nspiStore);
-        Logoff(&m_store);
+        //Logoff(m_nspiStore);
+        Logoff(m_store);
     }
-    //mapi_object_release(&m_nspiStore);
-    mapi_object_release(&m_store);
+    //mapi_object_release(m_nspiStore);
+    mapi_object_release(m_store);
 }
 
 QDebug MapiConnector2::debug() const
@@ -275,27 +289,17 @@ bool MapiConnector2::defaultFolder(MapiDefaultFolder folderType, MapiId *id)
 
     // NSPI-based assets.
     if ((PublicRoot <= folderType) && (folderType <= PublicNNTPArticle)) {
-        if (MAPI_E_SUCCESS != GetDefaultPublicFolder(&m_nspiStore, &id->second, folderType)) {
+        if (MAPI_E_SUCCESS != GetDefaultPublicFolder(m_nspiStore, &id->second, folderType)) {
             error() << "cannot get default public folder: %1" << folderType << mapiError();
             return false;
         }
         id->first = 0;
         id->m_provider = MapiId::NSPI;
-#if 0
-        if (MAPI_E_SUCCESS != SetMAPIDebugLevel(m_context, 9)) {
-            error() << "cannot set debug level" << mapiError();
-            return false;
-        }
-        if (MAPI_E_SUCCESS != SetMAPIDumpData(m_context, true)) {
-            error() << "cannot set dump data" << mapiError();
-            return false;
-        }
-#endif
         return true;
     }
 
     // EMSDB-based assets.
-    if (MAPI_E_SUCCESS != GetDefaultFolder(&m_store, &id->second, folderType)) {
+    if (MAPI_E_SUCCESS != GetDefaultFolder(m_store, &id->second, folderType)) {
         error() << "cannot get default folder: %1" << folderType << mapiError();
         return false;
     }
@@ -392,20 +396,30 @@ bool MapiConnector2::login(QString profile)
         error() << "cannot logon using profile" << profile << mapiError();
         return false;
     }
-    if (MAPI_E_SUCCESS != OpenMsgStore(m_session, &m_store)) {
+    if (MAPI_E_SUCCESS != OpenMsgStore(m_session, m_store)) {
         error() << "cannot open message store" << mapiError();
         return false;
     }
-    if (MAPI_E_SUCCESS != OpenPublicFolder(m_session, &m_nspiStore)) {
+#if (DEBUG_PUBLIC_FOLDERS)
+    if (MAPI_E_SUCCESS != OpenPublicFolder(m_session, m_nspiStore)) {
         error() << "cannot open public folder" << mapiError();
-        // TODO: This does not work, and returning false at this point just breaks
-        // everything...
-        //return false;
+        return false;
     }
+#endif
+#if (DEBUG_MAPI)
+    if (MAPI_E_SUCCESS != SetMAPIDebugLevel(m_context, 9)) {
+        error() << "cannot set debug level" << mapiError();
+        return false;
+    }
+    if (MAPI_E_SUCCESS != SetMAPIDumpData(m_context, true)) {
+        error() << "cannot set dump data" << mapiError();
+        return false;
+    }
+#endif
 
     // Get rid of any existing notifier and create a new one.
     // TODO Wait for a version of libmapi that has asingle parameter here.
-#if 0
+#if (DEBUG_NOTIFICATIONS)
 #if 0
     if (MAPI_E_SUCCESS != RegisterNotification(m_session)) {
 #else
