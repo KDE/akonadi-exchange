@@ -273,7 +273,7 @@ MapiConnector2::~MapiConnector2()
         Logoff(m_store);
     }
     //mapi_object_release(m_nspiStore);
-    mapi_object_release(m_store);
+    //mapi_object_release(m_store);
 }
 
 QDebug MapiConnector2::debug() const
