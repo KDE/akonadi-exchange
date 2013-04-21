@@ -74,6 +74,7 @@ include_directories(
 # define global path to the connector sources for every resource to use
 set( RESOURCE_EXCHANGE_CONNECTOR_SOURCES
      ${CMAKE_CURRENT_SOURCE_DIR}/connector/mapiconnector2.cpp
+     ${CMAKE_CURRENT_SOURCE_DIR}/connector/mapiobjects.cpp
 )
 # define global path to the UI sources for every resource to use
 set( RESOURCE_EXCHANGE_UI_SOURCES

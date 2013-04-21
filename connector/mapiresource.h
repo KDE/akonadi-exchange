@@ -1,6 +1,6 @@
 /*
  * This file is part of the Akonadi Exchange Resource.
- * Copyright 2011 Shaheed Haque <srhaque@theiet.org>.
+ * Copyright 2011-13 Shaheed Haque <srhaque@theiet.org>.
  * 
  * Akonadi Exchange Resource is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -21,9 +21,9 @@
 #define MAPIRESOURCE_H
 
 #include <KLocalizedString>
-
 #include <akonadi/resourcebase.h>
-#include "mapiconnector2.h"
+
+#include "mapiobjects.h"
 
 class MapiConnector2;
 class MapiFolder;

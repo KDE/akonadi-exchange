@@ -29,7 +29,7 @@
 #include <QInputDialog>
 #include <QTimer>
 
-#include "mapiconnector2.h"
+#include "mapiobjects.h"
 #include "profiledialog.h"
 
 mapibrowser::mapibrowser()
