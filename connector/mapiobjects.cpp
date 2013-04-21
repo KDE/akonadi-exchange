@@ -1,6 +1,6 @@
 /*
  * This file is part of the Akonadi Exchange Resource.
- * Copyright 2011 Robert Gruber <rgruber@users.sourceforge.net>, Shaheed Haque
+ * Copyright 2011-13 Robert Gruber <rgruber@users.sourceforge.net>, Shaheed Haque
  * <srhaque@theiet.org>.
  *
  * Akonadi Exchange Resource is free software: you can redistribute it and/or modify

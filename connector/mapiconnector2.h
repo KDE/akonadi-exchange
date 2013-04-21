@@ -1,6 +1,6 @@
 /*
  * This file is part of the Akonadi Exchange Resource.
- * Copyright 2011 Robert Gruber <rgruber@users.sourceforge.net>, Shaheed Haque
+ * Copyright 2011-13 Robert Gruber <rgruber@users.sourceforge.net>, Shaheed Haque
  * <srhaque@theiet.org>.
  *
  * Akonadi Exchange Resource is free software: you can redistribute it and/or modify
@@ -178,10 +178,6 @@ T *TallocContext::array(unsigned size)
     return talloc_array(m_ctx, T, size);
 }
 
-//template FILETIME *TallocContext::allocate<FILETIME>();
-//template SPropValue *TallocContext::array<SPropValue>(unsigned);
-//template int *TallocContext::array<int>(unsigned);
-
 /**
  * A class for managing access to MAPI profiles. This is the root for all other
  * MAPI interactions.
@@ -320,7 +316,6 @@ private:
 
 private Q_SLOTS:
     void notified(int fd);
-    
 };
 
 #endif // MAPICONNECTOR2_H
