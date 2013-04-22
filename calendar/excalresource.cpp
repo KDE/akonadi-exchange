@@ -661,6 +661,7 @@ bool MapiAppointment::preparePayload()
     struct TimeZoneStruct *timezone = 0;
     AppointmentRecurrencePattern *pattern = 0;
     enum RecurFrequency recurrenceType = (enum RecurFrequency)0;
+    QString messageClass;
     bool reminderSet = false;
     QDateTime reminderTime;
     uint32_t reminderDelta = 0;
@@ -718,9 +719,10 @@ bool MapiAppointment::preparePayload()
             break;
         case PidTagMessageClass:
             // Sanity check the message class.
-            if (!property.value().toString().startsWith(QLatin1String("IPM.Appointment"))) {
-                if (QLatin1String("IPM.Note") != property.value().toString()) {
-                    error() << "retrieved item is not an appointment:" << property.value().toString();
+            messageClass = property.value().toString();
+            if (!messageClass.startsWith(QLatin1String("IPM.Appointment"))) {
+                if (!messageClass.startsWith(QLatin1String("IPM.Note"))) {
+                    error() << "retrieved item is not an appointment:" << messageClass;
                     return false;
                 } else {
                     embeddedInBody = true;

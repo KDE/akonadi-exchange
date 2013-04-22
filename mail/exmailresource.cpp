@@ -458,6 +458,7 @@ QDebug MapiNote::error() const
 bool MapiNote::preparePayload()
 {
     unsigned index;
+    QString messageClass;
     unsigned codepage = 0;
     QString textBody;
     QString htmlBody;
@@ -558,9 +559,11 @@ DONE:
         switch (property.tag()) {
         case PidTagMessageClass:
             // Sanity check the message class.
-            if ((QLatin1String("IPM.Note") != property.value().toString()) &&
-                (QLatin1String("Remote.IPM.Note") != property.value().toString())){
-                error() << "retrieved item is not an email or a header:" << property.value().toString();
+            messageClass = property.value().toString();
+            if (!messageClass.startsWith(QLatin1String("IPM.Note")) &&
+                !messageClass.startsWith(QLatin1String("Remote.IPM.Note")) &&
+                !messageClass.startsWith(QLatin1String("IPM.Schedule.Meeting"))) {
+                error() << "retrieved item is not an email or a header:" << messageClass;
                 return false;
             }
             break;

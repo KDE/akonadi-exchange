@@ -243,6 +243,7 @@ static bool preparePayload(SPropValue *properties, unsigned propertyCount, KABC:
     static QString separator = QString::fromAscii(", ");
     unsigned displayType = DT_MAILUSER;
     unsigned objectType = MAPI_MAILUSER;
+    QString messageClass;
     QString email;
     QString addressType;
     QString officeLocation;
@@ -272,8 +273,9 @@ static bool preparePayload(SPropValue *properties, unsigned propertyCount, KABC:
         switch (property.tag()) {
         case PidTagMessageClass:
             // Sanity check the message class.
-            if (QLatin1String("IPM.Contact") != property.value().toString()) {
-                kError() << "retrieved item is not a contact:" << property.value().toString();
+            messageClass = property.value().toString();
+            if (!messageClass.startsWith(QLatin1String("IPM.Contact"))) {
+                kError() << "retrieved item is not a contact:" << messageClass;
                 return false;
             }
             break;
