@@ -165,11 +165,11 @@ void ExMailResource::retrieveItems(const Akonadi::Collection &collection)
 
     fetchItems(collection, items, deletedItems);
     kError() << "new/changed items:" << items.size() << "deleted items:" << deletedItems.size();
-//#if (DEBUG_NOTE_PROPERTIES)
+#if (DEBUG_NOTE_PROPERTIES)
     while (items.size() > 3) {
         items.removeLast();
     }
-//#endif
+#endif
     itemsRetrievedIncremental(items, deletedItems);
 }
 
@@ -606,9 +606,9 @@ DONE:
                 // Carry on with next property...
                 break;
             }
-//#if (DEBUG_NOTE_PROPERTIES)
+#if (DEBUG_NOTE_PROPERTIES)
             debug() << "ignoring note property:" << tagName(property.tag()) << property.toString();
-//#endif
+#endif
             break;
         }
     }
