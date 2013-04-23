@@ -407,10 +407,10 @@ void ExCalResource::itemChanged(const Akonadi::Item &item, const QSet<QByteArray
     Q_UNUSED(parts);
     return;
 
-        // Get the payload for the item.
+    // Get the payload for the item.
     kWarning() << "fetch cached item: {" <<
-    currentCollection().name() << "," << item.id() << "} = {" <<
-    currentCollection().remoteId() << "," << item.remoteId() << "}";
+        item.parentCollection().name() << "," << item.id() << "} = {" <<
+        item.parentCollection().remoteId() << "," << item.remoteId() << "}";
     Akonadi::ItemFetchJob *job = new Akonadi::ItemFetchJob(item);
     connect(job, SIGNAL(result(KJob*)), SLOT(itemChangedContinue(KJob*)));
     job->fetchScope().fetchFullPayload();

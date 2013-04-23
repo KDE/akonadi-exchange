@@ -138,7 +138,7 @@ Message *MapiResource::fetchItem(const Akonadi::Item &itemOrig)
     }
 
     MapiId remoteId(itemOrig.remoteId());
-    Message *message = new Message(m_connection, "MapiResource::retrieveItem", remoteId);
+    Message *message = new Message(m_connection, "MapiResource::fetchItem", remoteId);
     if (!message->open()) {
         kError() << "open failed!";
         emit status(Broken, i18n("Unable to open item: %1/%2", currentCollection().name(), itemOrig.id()));
