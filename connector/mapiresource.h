@@ -130,7 +130,7 @@ protected:
 template <class Message>
 Message *MapiResource::fetchItem(const Akonadi::Item &itemOrig)
 {
-    kError() << "fetch item:" << currentCollection().name() << itemOrig.id() <<
+    kDebug() << "fetch item:" << currentCollection().name() << itemOrig.id() <<
             ", " << itemOrig.remoteId();
 
     if (!logon()) {
@@ -138,16 +138,18 @@ Message *MapiResource::fetchItem(const Akonadi::Item &itemOrig)
     }
 
     MapiId remoteId(itemOrig.remoteId());
-    Message *message = new Message(m_connection, "MapiResource::fetchItem", remoteId);
+    Message *message = new Message(m_connection, __FUNCTION__, remoteId);
     if (!message->open()) {
-        kError() << "open failed!";
-        emit status(Broken, i18n("Unable to open item: %1/%2", currentCollection().name(), itemOrig.id()));
+        emit status(Broken, i18n("Unable to open item: %1/%2, %3", currentCollection().name(),
+                                 itemOrig.id(), mapiError()));
         return 0;
     }
 
     // find the remoteId of the item and the collection and try to fetch the needed data from the server
     emit status(Running, i18n("Fetching item: %1/%2", currentCollection().name(), itemOrig.id()));
     if (!message->propertiesPull()) {
+        emit status(Broken, i18n("Unable to fetch item: %1/%2, %3", currentCollection().name(),
+                                 itemOrig.id(), mapiError()));
         delete message;
         return 0;
     }

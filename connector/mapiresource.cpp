@@ -111,10 +111,9 @@ void MapiResource::fetchCollections(MapiDefaultFolder rootFolder, Akonadi::Colle
 
     // Create the new root collection.
     MapiId rootId(m_connection, rootFolder);
-    kError() << "default folder:" << rootId.toString();
     if (!rootId.isValid())
     {
-        error(i18n("cannot find Exchange folder root"));
+        error(i18n("Cannot find folder root: %1, %2", rootId.toString(), mapiError()));
         return;
     }
     Collection root;
@@ -126,23 +125,23 @@ void MapiResource::fetchCollections(MapiDefaultFolder rootFolder, Akonadi::Colle
     root.setContentMimeTypes(contentTypes);
     collections.append(root);
     fetchCollections(root.name(), rootId, root, collections);
-    emit status(Running, i18n("fetched collections: %1").arg(collections.size()));
+    emit status(Running, i18n("Fetched collections: %1", collections.size()));
 }
 
 void MapiResource::fetchCollections(const QString &path, const MapiId &parentId, const Collection &parent, Akonadi::Collection::List &collections)
 {
     kDebug() << "fetch collections in:" << path << "under parent folder:" << parentId.toString();
 
-    MapiFolder parentFolder(m_connection, "MapiResource::retrieveCollection", parentId);
+    MapiFolder parentFolder(m_connection, __FUNCTION__, parentId);
     if (!parentFolder.open()) {
-        error(parentFolder, i18n("cannot open Exchange folder list"));
+        error(parentFolder, i18n("Cannot open folder list: %1", mapiError()));
         return;
     }
 
     QList<MapiFolder *> list;
-    emit status(Running, i18n("fetching folder list from Exchange: %1").arg(path));
+    emit status(Running, i18n("Fetching folder list: %1", path));
     if (!parentFolder.childrenPull(list, m_mapiFolderFilter)) {
-        error(parentFolder, i18n("cannot fetch folder list from Exchange"));
+        error(parentFolder, i18n("Cannot fetch folder list: %1", mapiError()));
         return;
     }
 
@@ -183,7 +182,7 @@ void MapiResource::fetchItems(const Akonadi::Collection &collection, Item::List 
     QSet<MapiId> knownRemoteIds;
     QMap<MapiId, Item> knownItems;
     {
-        emit status(Running, i18n("Fetching items from Akonadi cache"));
+        emit status(Running, i18n("Fetching %1 from cache", collection.name()));
         ItemFetchJob *fetch = new ItemFetchJob( collection );
 
         Akonadi::ItemFetchScope scope;
@@ -192,8 +191,8 @@ void MapiResource::fetchItems(const Akonadi::Collection &collection, Item::List 
         // we don't need the payload (we are mainly interested in the remoteID and the modification time)
         scope.fetchFullPayload(false);
         fetch->setFetchScope(scope);
-        if ( !fetch->exec() ) {
-            error(collection, i18n("unable to fetch listing of collection: %1", fetch->errorString()));
+        if (!fetch->exec()) {
+            error(collection, i18n("Unable to list collection: %1, %2", fetch->errorString(), mapiError()));
             return;
         }
         Item::List existingItems = fetch->items();
@@ -207,9 +206,9 @@ void MapiResource::fetchItems(const Akonadi::Collection &collection, Item::List 
     kError() << "knownRemoteIds:" << knownRemoteIds.size();
 
     MapiId parentId(collection.remoteId());
-    MapiFolder parentFolder(m_connection, "MapiResource::retrieveItems", parentId);
+    MapiFolder parentFolder(m_connection, __FUNCTION__, parentId);
     if (!parentFolder.open()) {
-        error(collection, i18n("unable to open collection"));
+        error(collection, i18n("Unable to open collection: %1", mapiError()));
         return;
     }
 
@@ -217,7 +216,7 @@ void MapiResource::fetchItems(const Akonadi::Collection &collection, Item::List 
     QList<MapiItem *> list;
     emit status(Running, i18n("Fetching collection: %1", collection.name()));
     if (!parentFolder.childrenPull(list)) {
-        error(collection, i18n("unable to fetch collection"));
+        error(collection, i18n("Unable to fetch collection: %1", mapiError()));
         return;
     }
     kError() << "fetched:" << list.size() << "items from collection:" << collection.name();
@@ -280,11 +279,11 @@ bool MapiResource::logon(void)
 
     if (!m_connected) {
         // logon to exchange (if needed)
-        emit status(Running, i18n("Logging in to Exchange as %1").arg(profileName));
+        emit status(Running, i18n("Logging in as %1").arg(profileName));
         m_connected = m_connection->login(profileName);
     }
     if (!m_connected) {
-        emit status(Broken, i18n("Unable to login as %1").arg(profileName));
+        emit status(Broken, i18n("Unable to login as %1, %2", profileName, mapiError()));
     }
     return m_connected;
 }
