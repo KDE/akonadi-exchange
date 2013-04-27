@@ -807,19 +807,19 @@ void ExGalResource::retrieveItems(const Akonadi::Collection &collection)
         // it isValid(). Make m_gal valid too...
         const FetchStatusAttribute *fetchStatus = m_gal->open(collection);
 
-        // We are just starting to fetch stuff, see if there is a saved 
+        // We are just starting to fetch stuff, see if there is a saved
         // displayName to start from.
         QString savedDisplayName = fetchStatus->displayName();
-        if (!savedDisplayName.isEmpty()) { 
+        if (savedDisplayName.isEmpty()) {
+            kDebug() << "Start fetching GAL";
+            emit status(Running, i18n("Start fetching GAL"));
+        } else {
+            kDebug() << "Fetching GAL from item" << savedDisplayName;
+            emit status(Running, i18n("Fetching GAL from item: %1", savedDisplayName));
+
             // Seek to the row at or after the point we remembered.
             if (!m_gal->seek(savedDisplayName)) {
                 error(i18n("Cannot seek to GAL at: %1, %2", savedDisplayName, mapiError()));
-                cancelTask();
-                return;
-            }
-        } else {
-            if (!m_gal->rewind()) {
-                error(i18n("Cannot rewind GAL: %1", mapiError()));
                 cancelTask();
                 return;
             }
@@ -864,20 +864,22 @@ void ExGalResource::fetchExchangeBatch()
     const FetchStatusAttribute *fetchStatus = m_gal->offset();
     KDateTime savedDateTime = fetchStatus->dateTime();
     if (savedDateTime.isValid()) {
-        // TODO If the fetch time is over a day ago, refetch it.
-        kDebug() << "Finished fetching GAL" << savedDateTime;
-        emit status(Running, i18n("Finished fetching GAL: %1", savedDateTime.toString()));
-        emit percent(100);
-        return;
+        // If the saved fetch time is over a day ago, refetch it.
+        if (savedDateTime.daysTo(KDateTime::currentUtcDateTime())) {
+            // Rewinding makes the fetchStatus timestamp invalid.
+            if (!m_gal->rewind()) {
+                error(i18n("Cannot rewind GAL: %1", mapiError()));
+                return;
+            }
+            fetchStatus = m_gal->offset();
+        } else {
+            kDebug() << "Finished fetching GAL" << savedDateTime;
+            emit status(Running, i18n("Finished fetching GAL: %1", savedDateTime.toString()));
+            emit percent(100);
+            return;
+        }
     }
-    QString savedDisplayName = fetchStatus->displayName();
-    if (savedDisplayName.isEmpty()) {
-        kDebug() << "Start fetching GAL";
-        emit status(Running, i18n("Start fetching GAL"));
-    } else {
-        kDebug() << "Fetching GAL from item" << savedDisplayName;
-        emit status(Running, i18n("Fetching GAL from item: %1", savedDisplayName));
-    }
+
 #if MEASURE_PERFORMANCE
     m_msExchangeFetch = 0;
     m_msAkonadiWrite = 0;
