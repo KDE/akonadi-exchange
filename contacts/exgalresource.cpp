@@ -47,7 +47,11 @@
  * available.
  */
 #ifndef DEBUG_CONTACT_PROPERTIES
-#define DEBUG_CONTACT_PROPERTIES 0
+#define DEBUG_CONTACT_PROPERTIES 1
+#endif
+
+#ifndef DEBUG_GAL_ENABLE
+#define DEBUG_GAL_ENABLE 1
 #endif
 
 #define MEASURE_PERFORMANCE 1
@@ -795,7 +799,7 @@ void ExGalResource::retrieveItems(const Akonadi::Collection &collection)
         return;
     }
     if (id == m_gal->id()) {
-#if 1
+#if (DEBUG_GAL_ENABLE)
         // Assume the GAL is going to take a while to fetch.
         setAutomaticProgressReporting(false);
 
@@ -809,12 +813,14 @@ void ExGalResource::retrieveItems(const Akonadi::Collection &collection)
         if (!savedDisplayName.isEmpty()) { 
             // Seek to the row at or after the point we remembered.
             if (!m_gal->seek(savedDisplayName)) {
-                error(i18n("cannot seek to GAL at: %1", savedDisplayName));
+                error(i18n("Cannot seek to GAL at: %1, %2", savedDisplayName, mapiError()));
+                cancelTask();
                 return;
             }
         } else {
             if (!m_gal->rewind()) {
-                error(i18n("cannot rewind GAL"));
+                error(i18n("Cannot rewind GAL: %1", mapiError()));
+                cancelTask();
                 return;
             }
         }
@@ -849,17 +855,27 @@ void ExGalResource::fetchExchangeBatch()
     unsigned percentagePosition;
 
     if (!logon()) {
-        error(i18n("Exchange login failed"));
+        error(i18n("Login failed: %1", mapiError()));
         return;
     }
 
     // Actually do the fetching.
     m_galItems.clear();
     const FetchStatusAttribute *fetchStatus = m_gal->offset();
+    KDateTime savedDateTime = fetchStatus->dateTime();
+    if (savedDateTime.isValid()) {
+        // TODO If the fetch time is over a day ago, refetch it.
+        kDebug() << "Finished fetching GAL" << savedDateTime;
+        emit status(Running, i18n("Finished fetching GAL: %1", savedDateTime.toString()));
+        emit percent(100);
+        return;
+    }
     QString savedDisplayName = fetchStatus->displayName();
     if (savedDisplayName.isEmpty()) {
+        kDebug() << "Start fetching GAL";
         emit status(Running, i18n("Start fetching GAL"));
     } else {
+        kDebug() << "Fetching GAL from item" << savedDisplayName;
         emit status(Running, i18n("Fetching GAL from item: %1", savedDisplayName));
     }
 #if MEASURE_PERFORMANCE
@@ -869,7 +885,7 @@ void ExGalResource::fetchExchangeBatch()
     m_msExchangeFetch -= QDateTime::currentMSecsSinceEpoch();
 #endif
     if (!m_gal->read(requestedCount, m_galItems, &percentagePosition)) {
-        error(i18n("cannot fetch GAL from Exchange"));
+        error(i18n("Cannot fetch GAL: %1", mapiError()));
         return;
     }
     emit percent(percentagePosition);
