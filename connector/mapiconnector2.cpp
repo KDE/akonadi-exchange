@@ -21,7 +21,6 @@
 #include "mapiconnector2.h"
 
 #include <QAbstractSocket>
-#include <QDebug>
 #include <QStringList>
 #include <QDir>
 #include <QMessageBox>
@@ -29,19 +28,20 @@
 #include <QVariant>
 #include <QSocketNotifier>
 #include <QTextCodec>
+#include <KDebug>
 #include <KLocale>
 #include <kpimutils/email.h>
 
-#ifndef DEBUG_MAPI
-#define DEBUG_MAPI 1
+#ifndef ENABLE_MAPI_DEBUG
+#define ENABLE_MAPI_DEBUG 1
 #endif
 
-#ifndef DEBUG_NOTIFICATIONS
-#define DEBUG_NOTIFICATIONS 0
+#ifndef ENABLE_NOTIFICATIONS
+#define ENABLE_NOTIFICATIONS 0
 #endif
 
-#ifndef DEBUG_PUBLIC_FOLDERS
-#define DEBUG_PUBLIC_FOLDERS 0
+#ifndef ENABLE_PUBLIC_FOLDERS
+#define ENABLE_PUBLIC_FOLDERS 0
 #endif
 
 #define STR(def) \
@@ -141,6 +141,44 @@ static int profileSelectCallback(struct SRowSet *rowset, const void* /*private_v
     return rowset->cRows;
 }
 
+/**
+ * An object which exists to enable MAPI debugging. This is intended to be
+ * instantiated on the stack, as its destruction automatically resets the
+ * debug settings.
+ */
+class MapiDebug
+{
+public:
+    MapiDebug(MapiProfiles *context, bool enable) :
+        m_context(context->m_context),
+        m_enabled(enable)
+    {
+        if (m_enabled) {
+            if (MAPI_E_SUCCESS != SetMAPIDebugLevel(m_context, 9)) {
+                kError() << "cannot set debug level" << mapiError();
+            }
+            if (MAPI_E_SUCCESS != SetMAPIDumpData(m_context, true)) {
+                kError() << "cannot set dump data" << mapiError();
+            }
+        }
+    }
+
+    ~MapiDebug()
+    {
+        if (m_enabled) {
+            if (MAPI_E_SUCCESS != SetMAPIDebugLevel(m_context, 0)) {
+                kError() << "cannot reset debug level" << mapiError();
+            }
+            if (MAPI_E_SUCCESS != SetMAPIDumpData(m_context, false)) {
+                kError() << "cannot reset dump data" << mapiError();
+            }
+        }
+    }
+private:
+    mapi_context *m_context;
+    bool m_enabled;
+};
+
 MapiConnector2::MapiConnector2() :
     MapiProfiles(),
     m_session(0),
@@ -175,6 +213,10 @@ bool MapiConnector2::defaultFolder(MapiDefaultFolder folderType, MapiId *id)
     // In case we fail...
     id->m_provider = MapiId::INVALID;
 
+#if (!ENABLE_PUBLIC_FOLDERS)
+    error() << "public folders disabled";
+    return false;
+#endif
     // NSPI-based assets.
     if ((PublicRoot <= folderType) && (folderType <= PublicNNTPArticle)) {
         if (MAPI_E_SUCCESS != GetDefaultPublicFolder(m_nspiStore, &id->second, folderType)) {
@@ -288,26 +330,17 @@ bool MapiConnector2::login(QString profile)
         error() << "cannot open message store" << mapiError();
         return false;
     }
-#if (DEBUG_PUBLIC_FOLDERS)
+#if (ENABLE_PUBLIC_FOLDERS)
     if (MAPI_E_SUCCESS != OpenPublicFolder(m_session, m_nspiStore)) {
         error() << "cannot open public folder" << mapiError();
         return false;
     }
 #endif
-#if (DEBUG_MAPI)
-    if (MAPI_E_SUCCESS != SetMAPIDebugLevel(m_context, 9)) {
-        error() << "cannot set debug level" << mapiError();
-        return false;
-    }
-    if (MAPI_E_SUCCESS != SetMAPIDumpData(m_context, true)) {
-        error() << "cannot set dump data" << mapiError();
-        return false;
-    }
-#endif
+    MapiDebug debug(this, (0 != ENABLE_MAPI_DEBUG));
 
     // Get rid of any existing notifier and create a new one.
     // TODO Wait for a version of libmapi that has asingle parameter here.
-#if (DEBUG_NOTIFICATIONS)
+#if (ENABLE_NOTIFICATIONS)
 #if 0
     if (MAPI_E_SUCCESS != RegisterNotification(m_session)) {
 #else

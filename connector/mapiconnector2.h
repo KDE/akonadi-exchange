@@ -224,6 +224,7 @@ public:
 
 protected:
     mapi_context *m_context;
+    friend class MapiDebug;
 
     /**
      * Must be called first!

@@ -50,8 +50,12 @@
 #define DEBUG_CONTACT_PROPERTIES 1
 #endif
 
-#ifndef DEBUG_GAL_ENABLE
-#define DEBUG_GAL_ENABLE 1
+#ifndef ENABLE_GAL
+#define ENABLE_GAL 1
+#endif
+
+#ifndef ENABLE_OFFLINE_ADDRESS_BOOK
+#define ENABLE_OFFLINE_ADDRESS_BOOK 0
 #endif
 
 #define MEASURE_PERFORMANCE 1
@@ -576,7 +580,7 @@ public:
         cachePolicy().setSyncOnDemand(true);
         // By default, Outlook clients fetch the GAL once per day. So
         // will we...
-        cachePolicy().setCacheTimeout(60 * 24 /* MINUTES_IN_ONE_DAY */);
+        cachePolicy().setCacheTimeout(60 * 24 /* MINUTES_IN_ONE_DAY */ + 1);
     }
 
     ~MapiGAL()
@@ -761,7 +765,7 @@ void ExGalResource::retrieveCollections()
     // First, the GAL, then the user's contacts...
     m_gal->setParentCollection(root);
     collections.append(*m_gal);
-#if 0
+#if (ENABLE_OFFLINE_ADDRESS_BOOK)
     fetchCollections(PublicOfflineAB, collections);
     fetchCollections(PublicLocalOfflineAB, collections);
 #endif
@@ -799,7 +803,7 @@ void ExGalResource::retrieveItems(const Akonadi::Collection &collection)
         return;
     }
     if (id == m_gal->id()) {
-#if (DEBUG_GAL_ENABLE)
+#if (ENABLE_GAL)
         // Assume the GAL is going to take a while to fetch.
         setAutomaticProgressReporting(false);
 
