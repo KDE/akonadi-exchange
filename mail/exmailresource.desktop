@@ -1,6 +1,17 @@
 [Desktop Entry]
 Name=Exchange Mail
+Name[cs]=E-mail Exchange
+Name[nl]=E-mail van Exchange
+Name[pt]=Correio do Exchange
+Name[pt_BR]=E-mail do Exchange
+Name[uk]=Пошта Exchange
+Name[x-test]=xxExchange Mailxx
 Comment=Access to Mail on an Exchange server
+Comment[nl]=Toegang tot e-mail op een Exchange-server
+Comment[pt]=Acesso ao correio num servidor de Exchange
+Comment[pt_BR]=Acesso ao e-mail em um servidor Exchange
+Comment[uk]=Доступ до пошти на сервері Exchange
+Comment[x-test]=xxAccess to Mail on an Exchange serverxx
 Type=AkonadiResource
 Exec=akonadi_exmail_resource
 Icon=message-rfc822
