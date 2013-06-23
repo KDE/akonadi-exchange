@@ -2,6 +2,7 @@
 Name=Exchange Mail
 Name[cs]=E-mail Exchange
 Name[de]=Exchange-E-Mail
+Name[fr]=Courrier Exchange
 Name[it]=Posta di Exchange
 Name[nl]=E-mail van Exchange
 Name[pt]=Correio do Exchange
@@ -12,6 +13,7 @@ Name[uk]=Пошта Exchange
 Name[x-test]=xxExchange Mailxx
 Comment=Access to Mail on an Exchange server
 Comment[de]=Zugriff auf E-Mails auf einem Exchange-Server
+Comment[fr]=Accès au courrier sur un serveur Exchange
 Comment[it]=Accedi alla posta su un server Exchange
 Comment[nl]=Toegang tot e-mail op een Exchange-server
 Comment[pt]=Acesso ao correio num servidor de Exchange

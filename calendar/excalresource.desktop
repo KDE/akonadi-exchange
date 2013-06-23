@@ -2,6 +2,7 @@
 Name=Exchange Calendar
 Name[cs]=Kalendář Exchange
 Name[de]=Exchange-Kalender
+Name[fr]=Calendrier Exchange
 Name[it]=Calendario di Exchange
 Name[nl]=Agenda van Exchange
 Name[pt]=Calendário do Exchange
@@ -12,6 +13,7 @@ Name[uk]=Календар Exchange
 Name[x-test]=xxExchange Calendarxx
 Comment=Access to the Calendar on an Exchange server
 Comment[de]=Zugriff auf den Kalender auf einem Exchange-Server
+Comment[fr]=Accès au calendrier sur un serveur Exchange
 Comment[it]=Accedi al calendario su un server Exchange
 Comment[nl]=Toegang tot de agenda op een Exchange-server
 Comment[pt]=Acesso ao Calendário num servidor Exchange
