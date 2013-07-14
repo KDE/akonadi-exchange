@@ -2,6 +2,7 @@
 Name=Exchange Address Lists
 Name[de]=Exchange-Adressenliste
 Name[fr]=Listes d'adresses Exchange
+Name[hu]=Exchange címlisták
 Name[it]=Elenco di indirizzi Exchange
 Name[nl]=Adreslijsten van Exchange
 Name[pt]=Listas de Endereços do Exchange
@@ -13,6 +14,7 @@ Name[x-test]=xxExchange Address Listsxx
 Comment=Access to personal Contacts and the Global Address List on an Exchange server
 Comment[de]=Zugriff auf persönliche Kontakte und globale Adressen auf einem Exchange-Server
 Comment[fr]=Accès aux contacts personnels et à la liste d'adresses globales sur un serveur Exchange
+Comment[hu]=Hozzáférés a személyes partnerekhez és a globális címlistához egy Exchange kiszolgálón
 Comment[it]=Accedi ai contatti personali e all'elenco indirizzi globale su un server Exchange
 Comment[nl]=Toegang tot de persoonlijke contactpersonen en de globale adreslijst op een Exchange-server
 Comment[pt]=Acesso aos contactos pessoais e à lista de endereços global de um servidor de Exchange
