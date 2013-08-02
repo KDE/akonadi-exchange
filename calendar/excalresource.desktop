@@ -1,5 +1,6 @@
 [Desktop Entry]
 Name=Exchange Calendar
+Name[bs]=Exchange kalendar
 Name[cs]=Kalendář Exchange
 Name[de]=Exchange-Kalender
 Name[fr]=Calendrier Exchange
@@ -13,6 +14,7 @@ Name[sv]=Exchange-kalender
 Name[uk]=Календар Exchange
 Name[x-test]=xxExchange Calendarxx
 Comment=Access to the Calendar on an Exchange server
+Comment[bs]=Pristup kalendaru na Exchange serveru
 Comment[de]=Zugriff auf den Kalender auf einem Exchange-Server
 Comment[fr]=Accès au calendrier sur un serveur Exchange
 Comment[hu]=Hozzáférés a naptárhoz egy Exchange kiszolgálón

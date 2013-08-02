@@ -1,5 +1,6 @@
 [Desktop Entry]
 Name=Exchange Address Lists
+Name[bs]=Exchange adresar
 Name[de]=Exchange-Adressenliste
 Name[fr]=Listes d'adresses Exchange
 Name[hu]=Exchange címlisták
@@ -12,6 +13,7 @@ Name[sv]=Exchange-adresslistor
 Name[uk]=Списки адрес Exchange
 Name[x-test]=xxExchange Address Listsxx
 Comment=Access to personal Contacts and the Global Address List on an Exchange server
+Comment[bs]=Pristup ličnim kontaktima i globalnom adresaru na Exchange serveru
 Comment[de]=Zugriff auf persönliche Kontakte und globale Adressen auf einem Exchange-Server
 Comment[fr]=Accès aux contacts personnels et à la liste d'adresses globales sur un serveur Exchange
 Comment[hu]=Hozzáférés a személyes partnerekhez és a globális címlistához egy Exchange kiszolgálón
