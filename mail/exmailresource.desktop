@@ -1,6 +1,7 @@
 [Desktop Entry]
 Name=Exchange Mail
 Name[bs]=Exchange Mail
+Name[ca]=Correu de l'Exchange
 Name[cs]=E-mail Exchange
 Name[de]=Exchange-E-Mail
 Name[es]=Correo de Exchange
@@ -18,6 +19,7 @@ Name[uk]=Пошта Exchange
 Name[x-test]=xxExchange Mailxx
 Comment=Access to Mail on an Exchange server
 Comment[bs]=Pristup pošti na Exchange serveru
+Comment[ca]=Accedeix al correu en un servidor Exchange
 Comment[de]=Zugriff auf E-Mails auf einem Exchange-Server
 Comment[es]=Acceder al correo de un servidor Exchange
 Comment[fr]=Accès au courrier sur un serveur Exchange
