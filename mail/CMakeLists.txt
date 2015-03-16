@@ -19,15 +19,15 @@ qt4_add_dbus_adaptor(exmailresource_SRCS
 kde4_add_executable(akonadi_exmail_resource RUN_UNINSTALLED ${exmailresource_SRCS})
 
 target_link_libraries(akonadi_exmail_resource 
-    ${KDE4_AKONADI_LIBS} 
+    ${KDEPIMLIBS_AKONADI_LIBS}
     ${KDEPIMLIBS_KMIME_LIBS}
     ${KDEPIMLIBS_KPIMUTILS_LIBS}
-    ${LIBMAPI_LIBRARY}
-    ${libmapi_LIBRARIES}
-    ${LIBDCERPC_LIBRARY}
-    ${QT_QTCORE_LIBRARY} 
-    ${QT_QTDBUS_LIBRARY} 
-    ${QT_QTNETWORK_LIBRARY} 
-    ${KDE4_KDECORE_LIBS})
+    ${LibMapi_LIBRARIES}
+    ${LibDcerpc_LIBRARIES}
+    ${QT_QTCORE_LIBRARY}
+    ${QT_QTDBUS_LIBRARY}
+    ${QT_QTNETWORK_LIBRARY}
+    ${KDE4_KDECORE_LIBS}
+)
 
 install(TARGETS akonadi_exmail_resource ${INSTALL_TARGETS_DEFAULT_ARGS})

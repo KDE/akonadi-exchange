@@ -18,13 +18,13 @@ kde4_add_ui_files( mapibrowser_SRCS ${mapibrowser_UI_SRCS} )
 #add_executable(mapibrowser ${mapibrowser_SRCS})
 kde4_add_executable(mapibrowser RUN_UNINSTALLED ${mapibrowser_SRCS})
 
-target_link_libraries(mapibrowser 
-    ${LIBMAPI_LIBRARY}
-    ${libmapi_LIBRARIES}
+target_link_libraries(mapibrowser
+    ${LibMapi_LIBRARIES}
     ${KDEPIMLIBS_KPIMUTILS_LIBS}
-    ${LIBDCERPC_LIBRARY}
-    ${QT_QTCORE_LIBRARY} 
-    ${QT_QTNETWORK_LIBRARY} 
+    ${LibDcerpc_LIBRARIES}
+    ${QT_QTCORE_LIBRARY}
+    ${QT_QTNETWORK_LIBRARY}
     ${KDE4_KDEUI_LIBS}
-    ${KDE4_KDECORE_LIBS})
+    ${KDE4_KDECORE_LIBS}
+)
 
