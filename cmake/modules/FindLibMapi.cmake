@@ -6,6 +6,7 @@
 #  LibMapi_LIBRARIES - Required libmapi link libraries
 #  LibMapipp_LIBRARIES - Required libmapi++ link libraries
 #  LibMapi_DEFINITIONS - Compiler switches for libmapi
+#  LibDcerpc_LIBRARIES - Required libdcerp libraries
 #
 # Copyright (C) 2007 Brad Hards (bradh@frogmouth.net)
 # Copyright © 2015 Christophe Giboudeaux (cgiboudeaux@gmx.com)
