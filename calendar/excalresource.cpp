@@ -1222,31 +1222,31 @@ bool MapiAppointmentException::preparePayload()
 #else
     // Non-unicode support only, from the ExceptionInfo.
     if (overrideFlags & ARO_SUBJECT) {
-        title = QString::fromLatin1((const char *)e->Subject.Msg.msg, e->Subject.Msg.msgLength2);
+        title = QString::fromLatin1((const char *)e->Subject.subjectMsg.msg, e->Subject.subjectMsg.msgLength2);
         description += i18n("\n    Subject %1", title);
     }
     if (overrideFlags & ARO_LOCATION) {
-        location = QString::fromLatin1((const char *)e->Location.Msg.msg, e->Location.Msg.msgLength2);
+        location = QString::fromLatin1((const char *)e->Location.locationMsg.msg, e->Location.locationMsg.msgLength2);
         description += i18n("\n    Location %1", location);
     }
 #endif
     if (overrideFlags & ARO_MEETINGTYPE) {
-        state = AppointmentStates(e->MeetingType.Value);
+        state = AppointmentStates(e->MeetingType.mType);
     }
     if (overrideFlags & ARO_REMINDERDELTA) {
-        reminderDelta = e->ReminderDelta.Value;
+        reminderDelta = e->ReminderDelta.rDelta;
     }
     if (overrideFlags & ARO_REMINDER) {
-        reminderSet = e->ReminderSet.Value != 0;
+        reminderSet = e->ReminderSet.rSet != 0;
     }
     if (overrideFlags & ARO_BUSYSTATUS) {
-        busyStatus = (enum FreeBusyStatus)e->BusyStatus.Value;
+        busyStatus = (enum FreeBusyStatus)e->BusyStatus.bStatus;
     }
     if (overrideFlags & ARO_ATTACHMENT) {
-        attachment = e->Attachment.Value != 0;
+        attachment = e->Attachment.attachment != 0;
     }
     if (overrideFlags & ARO_SUBTYPE) {
-        allDay = e->SubType.Value != 0;
+        allDay = e->SubType.sType != 0;
     }
     description += i18n("\n    ChangeHighlight %1, state %2, reminderDelta %3, reminderSet %4, busyStatus %5, attachment %6, allDay %7",
                 changeHighlight, state, reminderDelta, reminderSet, busyStatus, attachment, allDay);

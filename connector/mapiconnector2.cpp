@@ -56,7 +56,6 @@ QString mapiError()
     switch (code)
     {
     STR(MAPI_E_SUCCESS);
-    STR(MAPI_E_INTERFACE_NO_SUPPORT);
     STR(MAPI_E_CALL_FAILED);
     STR(MAPI_E_NO_SUPPORT);
     STR(MAPI_E_BAD_CHARWIDTH);
@@ -75,7 +74,7 @@ QString mapiError()
     STR(MAPI_E_SESSION_LIMIT);
     STR(MAPI_E_USER_CANCEL);
     STR(MAPI_E_UNABLE_TO_ABORT);
-    STR(MAPI_E_NETWORK_ERROR);
+    STR(ecRpcFailed);
     STR(MAPI_E_DISK_ERROR);
     STR(MAPI_E_TOO_COMPLEX);
     STR(MAPI_E_BAD_COLUMN);
@@ -120,12 +119,8 @@ QString mapiError()
     STR(MAPI_E_HAS_FOLDERS);
     STR(MAPI_E_HAS_MESAGES);
     STR(MAPI_E_FOLDER_CYCLE);
-    STR(MAPI_E_LOCKID_LIMIT);
     STR(MAPI_E_AMBIGUOUS_RECIP);
-    STR(MAPI_E_NAMED_PROP_QUOTA_EXCEEDED);
-    STR(MAPI_E_NOT_IMPLEMENTED);
     STR(MAPI_E_NO_ACCESS);
-    STR(MAPI_E_NOT_ENOUGH_MEMORY);
     STR(MAPI_E_INVALID_PARAMETER);
     STR(MAPI_E_RESERVED);
     default:
@@ -133,7 +128,7 @@ QString mapiError()
     }
 }
 
-static int profileSelectCallback(struct SRowSet *rowset, const void* /*private_var*/)
+static int profileSelectCallback(PropertyRowSet_r *rowset, const void* /*private_var*/)
 {
     qCritical() << "Found more than 1 matching users -> cancel";
 
@@ -255,7 +250,7 @@ bool MapiConnector2::GALCount(unsigned *totalCount)
 
 bool MapiConnector2::GALRead(unsigned requestedCount, SPropTagArray *tags, SRowSet **results, unsigned *percentagePosition)
 {
-    if (MAPI_E_SUCCESS != GetGALTable(m_session, tags, results, requestedCount, TABLE_CUR)) {
+    if (MAPI_E_SUCCESS != GetGALTable(m_session, tags, (PropertyRowSet_r **)results, requestedCount, TABLE_CUR)) {
         error() << "cannot read GAL entries" << mapiError();
         return false;
     }
@@ -289,7 +284,7 @@ bool MapiConnector2::GALSeek(const QString &displayName, unsigned *percentagePos
     key.ulPropTag = (MAPITAGS)PR_DISPLAY_NAME_UNICODE;
     key.dwAlignPad = 0;
     key.value.lpszW = string(displayName);
-    if (MAPI_E_SUCCESS != nspi_SeekEntries(nspi, ctx(), SortTypeDisplayName, &key, tags, NULL, results ? results : &dummy)) {
+    if (MAPI_E_SUCCESS != nspi_SeekEntries(nspi, ctx(), SortTypeDisplayName, (PropertyValue_r *)&key, tags, NULL, (PropertyRowSet_r **)(results ? results : &dummy))) {
         error() << "cannot seek to GAL entry" << displayName << mapiError();
         return false;
     }
@@ -387,7 +382,7 @@ void MapiConnector2::notified(int fd)
 bool MapiConnector2::resolveNames(const char *names[], SPropTagArray *tags,
                   SRowSet **results, PropertyTagArray_r **statuses)
 {
-    if (MAPI_E_SUCCESS != ResolveNames(m_session, names, tags, results, statuses, MAPI_UNICODE)) {
+    if (MAPI_E_SUCCESS != ResolveNames(m_session, names, tags, (PropertyRowSet_r **)results, statuses, MAPI_UNICODE)) {
         error() << "cannot resolve names" << mapiError();
         return false;
     }

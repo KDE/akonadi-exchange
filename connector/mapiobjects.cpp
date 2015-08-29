@@ -450,12 +450,10 @@ bool MapiMessage::propertiesPull(QVector<int> &tags, const bool tagsAppended, bo
         PidTagSenderEmailAddress,
         PidTagSenderSmtpAddress,
         PidTagSenderName,
-        PidTagSenderSimpleDisplayName,
         PidTagOriginalSenderEmailAddress,
         PidTagOriginalSenderName,
         PidTagSentRepresentingEmailAddress,
         PidTagSentRepresentingName,
-        PidTagSentRepresentingSimpleDisplayName,
         PidTagOriginalSentRepresentingEmailAddress,
         PidTagOriginalSentRepresentingName,
         0 };
@@ -503,7 +501,7 @@ void MapiMessage::recipientPopulate(const char *phase, SRow &recipient, MapiReci
         // Note that the set of properties fetched here must be aligned
         // with those fetched in MapiConnector::resolveNames().
         switch (property.tag()) {
-        case PidTag7BitDisplayName_string8:
+        case PidTagDisplayName_string8:
         case PidTagDisplayName:
         case PidTagRecipientDisplayName:
             result.name = property.value().toString();
@@ -512,7 +510,7 @@ void MapiMessage::recipientPopulate(const char *phase, SRow &recipient, MapiReci
                 result.email = tmp;
             }
             break;
-        case PidTagPrimarySmtpAddress:
+        case PidTagSmtpAddress:
             result.email = mapiExtractEmail(property, "SMTP");
             break;
         case UNDOCUMENTED_PR_EMAIL_UNICODE:
@@ -711,7 +709,8 @@ bool MapiMessage::recipientsPull()
         case PidTagSenderSmtpAddress:
             sender.email = mapiExtractEmail(property, "SMTP");
             break;
-        CASE_PREFER_A_OVER_B(PidTagSenderName, PidTagSenderSimpleDisplayName, sender.name, property.value().toString());
+        case PidTagSenderName:
+            sender.name = property.value().toString();
             break;
         case PidTagOriginalSenderEmailAddress:
             originalSender.email = mapiExtractEmail(property, "SMTP");
@@ -722,7 +721,8 @@ bool MapiMessage::recipientsPull()
         case PidTagSentRepresentingEmailAddress:
             sentRepresenting.email = mapiExtractEmail(property, "SMTP");
             break;
-        CASE_PREFER_A_OVER_B(PidTagSentRepresentingName, PidTagSentRepresentingSimpleDisplayName, sentRepresenting.name, property.value().toString());
+        case PidTagSentRepresentingName:
+            sentRepresenting.name = property.value().toString();
             break;
         case PidTagOriginalSentRepresentingEmailAddress:
             originalSentRepresenting.email = mapiExtractEmail(property, "SMTP");
@@ -780,7 +780,7 @@ bool MapiMessage::recipientsPull()
 
     // Primary resolution is to ask Exchange to resolve the names.
     struct PropertyTagArray_r *statuses = NULL;
-    struct SRowSet *results = NULL;
+    SRowSet *results = NULL;
 
     // Fill an array with the names we need to resolve. We will do a Unicode
     // lookup, so use UTF8.
@@ -796,10 +796,10 @@ bool MapiMessage::recipientsPull()
 
     // Server round trip here!
     static int recipientTagList[] = {
-        PidTag7BitDisplayName_string8,
+        PidTagDisplayName_string8,
         PidTagDisplayName,
         PidTagRecipientDisplayName, 
-        PidTagPrimarySmtpAddress,
+        PidTagSmtpAddress,
         UNDOCUMENTED_PR_EMAIL_UNICODE,
         0x60010018,
         PidTagRecipientTrackStatus,

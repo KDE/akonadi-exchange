@@ -174,7 +174,7 @@ static int contactTagList[] = {
     PidTagDisplayName,
     PidTagEmailAddress,
     PidTagAddressType,
-    PidTagPrimarySmtpAddress,
+    PidTagSmtpAddress,
     PidTagAccount,
 
     PidTagObjectType,
@@ -298,7 +298,7 @@ static bool preparePayload(SPropValue *properties, unsigned propertyCount, KABC:
         case PidTagAddressType:
             addressType = property.value().toString();
             break;
-        case PidTagPrimarySmtpAddress:
+        case PidTagSmtpAddress:
             addressee.setEmails(QStringList(mapiExtractEmail(property, "SMTP")));
             break;
         case PidTagAccount:
