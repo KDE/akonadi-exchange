@@ -1204,7 +1204,7 @@ bool MapiAppointmentException::preparePayload()
 
     QString description;
     description += i18n("\nException%1 for %2 to be from %3 to %4", m_id.second, stringify(originalBegin), stringify(begin), stringify(end));
-#if 1
+#if 0
     // ExtendedException has Unicode strings, but needs Openchange
     // bug #391 to be fixed.
     if (ee->WriterVersion2 >= 0x00003009) {
