@@ -36,6 +36,13 @@ set_package_properties(Xsltproc PROPERTIES
     PURPOSE "Required to generate D-Bus interfaces."
 )
 
+find_package(Boost)
+set_package_properties(Boost PROPERTIES
+    DESCRIPTION "Boost library"
+    TYPE REQUIRED
+    PURPOSE "Required by akonadi."
+)
+
 if(WIN32)
     set(LIB_INSTALL_DIR ${LIB_INSTALL_DIR}
                         RUNTIME DESTINATION ${BIN_INSTALL_DIR}

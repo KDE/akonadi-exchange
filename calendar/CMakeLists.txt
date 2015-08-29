@@ -26,6 +26,7 @@ target_link_libraries(akonadi_excal_resource
     ${KDEPIMLIBS_KPIMUTILS_LIBS}
     ${LibMapi_LIBRARIES}
     ${LibDcerpc_LIBRARIES}
+    libsamba-util.so libtalloc.so
     ${QT_QTCORE_LIBRARY}
     ${QT_QTDBUS_LIBRARY}
     ${QT_QTNETWORK_LIBRARY}

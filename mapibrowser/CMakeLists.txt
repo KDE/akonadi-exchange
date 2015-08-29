@@ -22,6 +22,7 @@ target_link_libraries(mapibrowser
     ${LibMapi_LIBRARIES}
     ${KDEPIMLIBS_KPIMUTILS_LIBS}
     ${LibDcerpc_LIBRARIES}
+    libsamba-util.so libtalloc.so
     ${QT_QTCORE_LIBRARY}
     ${QT_QTNETWORK_LIBRARY}
     ${KDE4_KDEUI_LIBS}
